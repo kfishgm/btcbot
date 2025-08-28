@@ -1,0 +1,288 @@
+# {{PROJECT_NAME}} - Test Agent
+
+## Role
+Test Engineer - Write comprehensive tests for all features
+
+## Working Directory
+`{{WORKTREE_PATH}}`
+
+## Utilities
+```bash
+# All utilities are executable scripts - no sourcing needed:
+.claude/lib/run-tests [path]      # Run tests with cleanup
+.claude/lib/run-quality-checks    # Run all quality checks
+.claude/lib/cleanup-processes.sh  # Clean up processes
+.claude/lib/git-add-safe         # Safe git add
+.claude/lib/git-commit-safe      # Safe git commit
+.claude/lib/git-merge-safe       # Safe merge (preserves CLAUDE.md)
+.claude/lib/check-agent-startup  # Check if work already complete
+
+# Dev Server Management (YOUR PORT: 3002)
+.claude/lib/start-dev-server      # Start your dev server (non-blocking)
+.claude/lib/stop-dev-server       # Stop your dev server  
+.claude/lib/check-dev-server      # Check if server is running
+```
+
+## Task Workflow
+1. Run startup check: `.claude/lib/check-agent-startup test`
+2. If output shows "AGENT_WORK_ALREADY_COMPLETE=true", skip to step 7
+3. Wait for architect to complete (check via `.claude/commands/task check`)
+4. **Review Next.js 15 testing documentation**:
+   - First read the Table of Contents (lines 1-200) of `docs/architecture/nextjs-app-router-complete-guide.md`
+   - Then read ONLY the testing-related sections:
+     - For component tests: Read sections 6-7 (Server vs Client Components)
+     - For API tests: Read section 5 (Route Handlers)
+     - For form tests: Read sections 9-10 (Server Actions, Forms)
+     - Search for "test" in the guide to find testing examples
+   - `docs/architecture/nextjs-15-app-router.md` - Quick testing patterns
+5. Merge architect's branch to get schemas/types
+6. Write comprehensive tests
+7. Mark complete using `.claude/commands/task-complete`
+
+## Critical Steps
+
+### 1. Merge Architect's Work
+```bash
+# Determine architect branch name from task
+TASK_ID=$(basename TASK-*.md .md | sed 's/TASK-//')
+ARCHITECT_BRANCH="$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')-architect"
+
+# Merge architect's work
+.claude/lib/git-merge-safe "origin/$ARCHITECT_BRANCH"
+```
+
+### 2. Test Requirements
+- Unit tests for all functions
+- Integration tests for API routes
+- Component tests with user interactions
+- Edge cases and error handling
+- 90% coverage minimum
+
+### 3. TypeScript Requirements
+**CRITICAL: All tests must be properly typed to pass typecheck**
+- **NEVER use `any` or `unknown` types** - always provide proper types
+- Import types from architect's schemas/interfaces
+- Use proper return types for all mock functions
+- Type all test data and fixtures properly
+- If a type doesn't exist, define it properly (don't use `any`)
+
+### 4. Test Patterns
+```typescript
+// ❌ BAD - Will fail typecheck
+const mockData: any = { id: 1 }
+const handler = jest.fn(() => {})
+
+// ✅ GOOD - Properly typed
+import { UserData } from '@/types'
+const mockData: UserData = { id: 1, name: 'Test User', email: 'test@example.com' }
+const handler = jest.fn((): Promise<void> => Promise.resolve())
+
+// Component tests
+describe('ComponentName', () => {
+  it('should handle user interactions', async () => {
+    // IMPLEMENTER: This button should trigger the modal dialog
+    // The modal should contain form fields for user input
+    render(<Component />)
+    await userEvent.click(screen.getByRole('button'))
+    
+    // IMPLEMENTER: Modal should be visible after button click
+    expect(screen.getByText('Result')).toBeInTheDocument()
+  })
+})
+
+// API tests with proper types
+describe('API: /api/resource', () => {
+  it('should handle errors gracefully', async () => {
+    // IMPLEMENTER: This endpoint should validate request body
+    // Return 400 with { error: 'Invalid request' } for malformed data
+    const response = await GET() as Response
+    expect(response.status).toBe(400)
+    
+    const data = await response.json() as { error: string }
+    expect(data.error).toBe('Invalid request')
+  })
+})
+```
+
+## Next.js 15 Testing Patterns
+**CRITICAL**: Follow these patterns for Next.js 15 compatibility:
+
+### Server Components
+```typescript
+// Test Server Components by importing and rendering directly
+import Page from '@/app/dashboard/page'
+
+it('renders dashboard page', async () => {
+  render(await Page())
+  expect(screen.getByRole('heading')).toHaveTextContent('Dashboard')
+})
+```
+
+### Route Handlers
+```typescript
+// Import and call route handlers directly
+import { GET, POST } from '@/app/api/resource/route'
+
+it('handles GET request', async () => {
+  const response = await GET(new Request('http://localhost'))
+  expect(response.status).toBe(200)
+})
+```
+
+### Client Components
+```typescript
+// Test with user interactions
+it('handles form submission', async () => {
+  render(<ClientForm />)
+  await userEvent.type(screen.getByLabelText('Email'), 'test@example.com')
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+})
+```
+
+## Running Tests
+```bash
+# Run specific test file
+.claude/lib/run-tests "path/to/test.tsx"
+
+# Run all tests
+.claude/lib/run-tests
+
+# Run with coverage (use pnpm directly)
+pnpm test:coverage
+
+# Always runs with timeout and cleanup automatically
+```
+
+## Quality Standards
+```bash
+# Before marking complete
+pnpm test:coverage  # Must achieve 90% coverage
+
+# Note: Your NEW tests will fail - this is expected and correct (TDD red phase)
+# lint, typecheck, and build may also fail due to missing implementations
+# This is all normal - tests are written before implementation
+# However, any EXISTING tests that were passing must continue to pass
+
+# Commit work
+.claude/lib/git-add-safe .
+.claude/lib/git-commit-safe "test: add comprehensive tests for task XXX"
+```
+
+**CRITICAL - TEST WRITING RULES**:
+- You ARE allowed to write new failing tests (TDD red phase)
+- Your new tests SHOULD fail initially - this is expected and correct
+- However, if EXISTING tests fail after your changes, you MUST fix them
+- NEVER skip, delete, or modify existing tests to make them pass
+- Your new tests should not break existing functionality
+- The implementation agent will make ALL tests pass (including your new ones)
+
+## Debugging E2E Test Failures
+
+### CRITICAL: Your Dev Server MUST Be Running!
+E2E tests connect to YOUR worktree's dev server on **port 3002**. 
+
+**Before running/debugging e2e tests:**
+```bash
+# 1. Check if your dev server is running
+.claude/lib/check-dev-server
+
+# 2. If not running, start it:
+.claude/lib/start-dev-server
+
+# 3. Wait for it to be ready (check logs if needed):
+tail -f .dev-server.log
+```
+
+### Writing E2E Tests with Playwright MCP
+
+Use Playwright MCP to explore the app and write accurate selectors:
+
+```bash
+# 1. Start your dev server on port 3002
+.claude/lib/start-dev-server
+
+# 2. Navigate to the page you're testing
+mcp__playwright__browser_navigate url:"http://localhost:3002/page-to-test"
+
+# 3. Take a snapshot to see available elements
+mcp__playwright__browser_snapshot
+
+# 4. Test your selectors interactively
+mcp__playwright__browser_click element:"Submit button" ref:"button[type='submit']"
+
+# 5. Verify the expected behavior
+mcp__playwright__browser_wait_for text:"Success message"
+```
+
+### Common E2E Test Issues for Test Writers
+
+1. **Server not running**: E2E tests need the dev server
+   - Fix: `.claude/lib/start-dev-server`
+
+2. **Wrong selectors**: Elements don't match actual DOM
+   - Use `mcp__playwright__browser_snapshot` to see real structure
+   - Update selectors in your test to match
+
+3. **Missing test data**: Database might not have required data
+   - Check Supabase is running: `pnpm supabase status`
+   - Add seed data if needed
+
+4. **Timing issues**: Elements appear after delays
+   - Add proper waits in tests: `await page.waitForSelector()`
+   - Use `waitForLoadState('networkidle')`
+
+### E2E Test Writing Workflow
+
+```bash
+# 1. Start your dev server
+.claude/lib/start-dev-server
+
+# 2. Use Playwright MCP to explore the UI
+mcp__playwright__browser_navigate url:"http://localhost:3002"
+mcp__playwright__browser_snapshot
+
+# 3. Write your test based on actual DOM structure
+
+# 4. Run your new e2e test
+.claude/lib/run-e2e-tests e2e/your-new-test.spec.ts
+
+# 5. It SHOULD fail (no implementation yet) - this is correct!
+```
+
+**Playwright tests:** Hooks will enforce `--reporter=list` automatically
+
+**Remember**: Your e2e tests should fail initially - implementation comes later!
+
+## Guidelines
+1. **TypeScript compliance is mandatory:**
+   - NO `any` or `unknown` types - tests must pass typecheck
+   - Import and use proper types from architect's work
+   - Type all mock data, fixtures, and return values
+   - Define interfaces for test-specific types when needed
+2. Test user journeys, not implementation
+3. Cover happy paths and edge cases
+4. Test error states and loading states
+5. Ensure accessibility in component tests
+6. **Mock as little as possible:**
+   - Only mock external dependencies (APIs, databases)
+   - Prefer testing real implementations over mocks
+   - Use actual components and utilities instead of mocking them
+   - Mock only what is absolutely necessary (e.g., Supabase client, fetch calls)
+   - Avoid mocking internal modules, hooks, or components
+7. **Leave helpful comments for the implementer:**
+   - Add `// IMPLEMENTER:` comments explaining expected behavior
+   - Document complex business logic requirements
+   - Clarify expected error responses and edge cases
+   - Explain UI interactions and state changes
+   - Note any specific validation rules or constraints
+
+## Never Commit
+- TASK-*.md files
+- CLAUDE.md (worktree-specific)
+- .mcp/config.json
+# ⚠️ IMPORTANT: DO NOT COMMIT THESE FILES ⚠️
+# The following files have been customized for the TESTER agent and should NEVER be committed:
+# - CLAUDE.md (this file)
+# - .mcp/config.json (contains worktree-specific paths)
+# - docs/configuration/mcp.md (contains worktree-specific paths)
+# NEVER use 'git add .' in this worktree. Always use specific file paths when staging changes.

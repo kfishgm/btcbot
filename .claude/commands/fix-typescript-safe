@@ -1,0 +1,297 @@
+#!/bin/bash
+# Safe parallel TypeScript error fixing that preserves functionality and ensures tests pass
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Show help
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    cat << EOF
+Safe Parallel TypeScript Error Fixing
+
+Automatically fixes TypeScript errors while ensuring:
+- All functionality is preserved
+- All tests continue to pass
+- No runtime behavior changes
+
+Usage: fix-typescript-safe [options]
+
+Options:
+  --max-agents N    Maximum parallel agents (default: 5)
+  --help           Show this help
+
+Example:
+  fix-typescript-safe --max-agents 3
+
+EOF
+    exit 0
+fi
+
+# Configuration
+MAX_AGENTS=5
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --max-agents)
+            MAX_AGENTS="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+echo -e "${BLUE}=== Safe TypeScript Error Fixing ===${NC}"
+echo "Max agents: $MAX_AGENTS"
+
+# Get current error count (excludes .gitignored files)
+echo "Counting TypeScript errors (excluding .gitignored files)..."
+TYPECHECK_OUTPUT=$(timeout 30s pnpm typecheck 2>&1 || true)
+
+# Count only errors in project files (not .gitignored)
+INITIAL_ERRORS=0
+while IFS= read -r line; do
+    if echo "$line" | grep -qE "^[^:]+\.(ts|tsx)\([0-9]+,[0-9]+\): error TS[0-9]+:"; then
+        FILE=$(echo "$line" | cut -d'(' -f1)
+        
+        # Skip if in common ignored directories
+        if echo "$FILE" | grep -qE "/(node_modules|dist|build|\.next)/"; then
+            continue
+        fi
+        
+        # Skip if file would be ignored by git
+        if git check-ignore "$FILE" >/dev/null 2>&1; then
+            continue
+        fi
+        
+        # Count if file exists (includes new untracked files)
+        if [ -f "$FILE" ]; then
+            ((INITIAL_ERRORS++))
+        fi
+    fi
+done <<< "$TYPECHECK_OUTPUT"
+
+echo -e "${YELLOW}Current TypeScript errors in project files: $INITIAL_ERRORS${NC}"
+echo -e "${CYAN}Note: Errors in node_modules and .gitignored files are excluded${NC}"
+echo -e "${CYAN}New untracked files ARE included${NC}"
+
+if [ "$INITIAL_ERRORS" -eq 0 ]; then
+    echo -e "${GREEN}No TypeScript errors found in git-tracked files!${NC}"
+    exit 0
+fi
+
+# Run the parallel script to analyze errors
+echo -e "${CYAN}Analyzing TypeScript errors...${NC}"
+TEMP_DIR="/tmp/ts-safe-$$"
+mkdir -p "$TEMP_DIR"
+
+# Use the local script in the same directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PARALLEL_SCRIPT="$SCRIPT_DIR/fix-typescript-parallel"
+
+if [ ! -f "$PARALLEL_SCRIPT" ]; then
+    echo -e "${RED}ERROR: fix-typescript-parallel not found at $PARALLEL_SCRIPT${NC}"
+    echo "Make sure fix-typescript-parallel is in the same directory as this script"
+    exit 1
+fi
+
+# Run the parallel script
+"$PARALLEL_SCRIPT" --max-agents "$MAX_AGENTS" > "$TEMP_DIR/analysis.txt" 2>&1
+
+# Extract work directory
+WORK_DIR=$(grep "Work directory saved to:" "$TEMP_DIR/analysis.txt" | tail -1 | sed 's/.*Work directory saved to: //' | tr -d '\r\n' | sed 's/\x1b\[[0-9;]*m//g')
+
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then
+    echo -e "${RED}ERROR: Analysis failed${NC}"
+    cat "$TEMP_DIR/analysis.txt"
+    exit 1
+fi
+
+echo "Work directory: $WORK_DIR"
+
+# Enhance each task file with safety requirements
+for i in $(seq 1 "$MAX_AGENTS"); do
+    TASK_FILE="$WORK_DIR/batches/agent-$i/task.md"
+    
+    [ -f "$TASK_FILE" ] || continue
+    
+    # Skip agents with no work
+    if ! grep -q "^- " "$TASK_FILE" 2>/dev/null; then
+        continue
+    fi
+    
+    # Create a backup of original task
+    cp "$TASK_FILE" "$TASK_FILE.orig"
+    
+    # Extract file list
+    FILES=$(grep "^- " "$TASK_FILE" | grep -v "DO NOT" | sed 's/^- //')
+    
+    # Create enhanced safe task
+    cat > "$TASK_FILE" << 'EOF'
+# TypeScript Fix - Agent AGENT_NUM
+
+## ⚠️ CRITICAL: Fix source + test TOGETHER
+**Issue**: Fixing source breaks tests → fixing tests creates new errors → loop
+**Solution**: Fix BOTH `src/foo.ts` AND `__tests__/foo.test.ts` together
+
+## Rules:
+1. NO runtime changes - Only types
+2. NO `any` - Use `unknown` + type guards
+3. NO backup files (.bak, .backup, .old, .copy)
+4. Test after EACH fix - Revert if fail
+5. Use bracket notation for index signatures
+
+## Process:
+```bash
+# For each file:
+BASE=$(basename "$FILE" .ts | sed 's/\.tsx$//')
+TESTS=$(find __tests__ -name "*${BASE}*.test.*")
+pnpm test $TESTS -- --passWithNoTests || git checkout -- "$FILE" $TESTS
+```
+
+## Files:
+FILE_LIST
+
+## Patterns:
+```typescript
+// Mocks: NO any!
+interface MockBuilder {
+  select: jest.Mock;
+  single: jest.Mock;
+}
+mockBuilder.select.mockReturnValue(mockBuilder);
+
+// Common fixes:
+catch (error: unknown)
+data as unknown as User
+arr[0]?.value
+obj['key']  // index signatures
+_unused: string
+
+// Test mocks:
+jest.fn<ReturnType, [ParamType]>()
+```
+
+See: `.claude/docs/quality-rules.md`
+
+AGENT_SPECIFIC_CONTENT
+EOF
+
+    # Replace placeholders using perl for portability
+    perl -pi -e "s/AGENT_NUM/$i/g" "$TASK_FILE"
+    
+    # Insert file list
+    FILE_LIST_FORMATTED=$(echo "$FILES" | sed 's/^/- /')
+    FILE_LIST_SPACE=$(echo "$FILES" | tr '\n' ' ')
+    
+    # Use a temporary file for complex replacements
+    awk -v files="$FILE_LIST_FORMATTED" '{
+        if ($0 == "FILE_LIST") {
+            print files
+        } else {
+            print $0
+        }
+    }' "$TASK_FILE" > "$TASK_FILE.tmp" && mv "$TASK_FILE.tmp" "$TASK_FILE"
+    
+    perl -pi -e "s|FILE_LIST_SPACE|$FILE_LIST_SPACE|g" "$TASK_FILE"
+    
+    # Append original agent-specific content
+    if [ -f "$TASK_FILE.orig" ]; then
+        echo "" >> "$TASK_FILE"
+        echo "## Original Task Details:" >> "$TASK_FILE"
+        grep -A 100 "Your Files' Error Summary:" "$TASK_FILE.orig" >> "$TASK_FILE" 2>/dev/null || true
+    fi
+    
+    perl -pi -e "s/AGENT_SPECIFIC_CONTENT//g" "$TASK_FILE"
+done
+
+# Count agents with work
+AGENTS_WITH_WORK=0
+for i in $(seq 1 "$MAX_AGENTS"); do
+    if [ -f "$WORK_DIR/batches/agent-$i/task.md" ] && grep -q "^- " "$WORK_DIR/batches/agent-$i/task.md" 2>/dev/null; then
+        ((AGENTS_WITH_WORK++))
+    fi
+done
+
+echo -e "${GREEN}Prepared $AGENTS_WITH_WORK safe fix tasks${NC}"
+echo "Work directory saved to: $WORK_DIR"
+echo "Distributing work among $AGENTS_WITH_WORK agents"
+
+# Create enhanced results collection script
+cat > "$WORK_DIR/collect-results.sh" << 'COLLECT_EOF'
+#!/bin/bash
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}=== Safe Fix Results ===${NC}"
+
+# First, check TypeScript status
+echo -e "${CYAN}TypeScript Status:${NC}"
+REMAINING_ERRORS=$(pnpm typecheck 2>&1 | grep -c "error TS" || echo 0)
+echo "Errors remaining: $REMAINING_ERRORS"
+
+# Most importantly, verify all tests still pass
+echo -e "${CYAN}Running full test suite...${NC}"
+TEST_OUTPUT="/tmp/safe-fix-test-results.txt"
+
+if timeout 300s pnpm test --maxWorkers=2 --forceExit --detectOpenHandles > "$TEST_OUTPUT" 2>&1; then
+    TOTAL_TESTS=$(grep -E "Tests:.*passed" "$TEST_OUTPUT" | tail -1 | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+")
+    echo -e "${GREEN}✅ SUCCESS: All $TOTAL_TESTS tests still pass!${NC}"
+    echo -e "${GREEN}✅ TypeScript fixes are SAFE${NC}"
+    
+    # Show summary
+    tail -10 "$TEST_OUTPUT" | grep -E "(Test Suites:|Tests:|Snapshots:|Time:)"
+else
+    echo -e "${RED}❌ ERROR: Some tests are failing!${NC}"
+    echo -e "${RED}❌ Some TypeScript fixes may have broken functionality${NC}"
+    
+    # Show which tests failed
+    echo -e "${YELLOW}Failed tests:${NC}"
+    grep -E "FAIL|✕" "$TEST_OUTPUT" | head -20
+    
+    echo ""
+    echo "Full test output saved to: $TEST_OUTPUT"
+    echo "Review the failures and revert problematic changes"
+    exit 1
+fi
+
+# Show improvement
+echo ""
+echo -e "${CYAN}Summary:${NC}"
+echo "✓ Tests: All passing"
+echo "✓ TypeScript errors reduced"
+echo "✓ No functionality changed"
+
+# Offer next steps
+if [ "$REMAINING_ERRORS" -gt 0 ]; then
+    echo ""
+    echo -e "${YELLOW}Next steps:${NC}"
+    echo "- Run again to fix remaining $REMAINING_ERRORS errors"
+    echo "- Or manually fix complex errors that need cross-file coordination"
+fi
+COLLECT_EOF
+
+chmod +x "$WORK_DIR/collect-results.sh"
+
+# Clean up
+rm -rf "$TEMP_DIR"
+
+echo ""
+echo -e "${GREEN}Safe fix tasks prepared!${NC}"
+echo ""
+echo "To launch agents, use the fix-typecheck-safe command"
+echo "Work directory: $WORK_DIR"

@@ -1,0 +1,18 @@
+#!/bin/bash
+# Restart dev server for agents
+# Usage: .claude/lib/restart-dev-server
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "Restarting dev server..."
+
+# Stop the server
+"$SCRIPT_DIR/stop-dev-server"
+
+# Brief pause
+sleep 1
+
+# Start the server
+"$SCRIPT_DIR/start-dev-server"
+
+exit 0

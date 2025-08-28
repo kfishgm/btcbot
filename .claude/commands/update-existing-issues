@@ -1,0 +1,166 @@
+#!/bin/bash
+# Update existing open task issues with sequential workflow information
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}=== Updating Existing Issues for Sequential Workflow ===${NC}"
+echo ""
+
+# Get all open task issues
+echo "Fetching open task issues..."
+open_issues=$(gh issue list --state open --label "task" --limit 100 --json number,title,body 2>/dev/null)
+
+if [ -z "$open_issues" ] || [ "$open_issues" = "[]" ]; then
+    echo "No open task issues found."
+    exit 0
+fi
+
+# Count issues
+issue_count=$(echo "$open_issues" | jq '. | length')
+echo "Found $issue_count open task issues to update"
+echo ""
+
+# Use temp files for counters to avoid subshell issues
+updated_file="/tmp/update-issues-updated-$$"
+skipped_file="/tmp/update-issues-skipped-$$"
+failed_file="/tmp/update-issues-failed-$$"
+echo "0" > "$updated_file"
+echo "0" > "$skipped_file"
+echo "0" > "$failed_file"
+
+# Process each issue
+echo "$open_issues" | jq -c '.[]' | while read -r issue; do
+    number=$(echo "$issue" | jq -r '.number')
+    title=$(echo "$issue" | jq -r '.title')
+    body=$(echo "$issue" | jq -r '.body')
+    
+    echo -n "Issue #$number: $title ... "
+    
+    # Check if already has workflow info
+    if echo "$body" | grep -q "primary developer workflow"; then
+        echo -e "${YELLOW}already updated${NC}"
+        current=$(cat "$skipped_file")
+        echo $((current + 1)) > "$skipped_file"
+        continue
+    fi
+    
+    # Extract task ID from title
+    task_id=""
+    if [[ "$title" =~ ^([A-Z]+-[0-9]+): ]]; then
+        task_id="${BASH_REMATCH[1]}"
+    fi
+    
+    # Parse existing body sections
+    category=""
+    dependencies=""
+    acceptance=""
+    position=""
+    
+    # Extract sections from current body
+    if echo "$body" | grep -q "Category:"; then
+        category=$(echo "$body" | sed -n '/Category:/s/.*Category: *//p' | head -1)
+    fi
+    
+    # Extract dependencies section
+    if echo "$body" | grep -q "## Dependencies"; then
+        # Get everything between Dependencies and next section
+        dependencies=$(echo "$body" | sed -n '/## Dependencies/,/^##[^#]/p' | sed '1d;$d')
+        if [ -z "$dependencies" ]; then
+            # Handle case where Dependencies is the last section
+            dependencies=$(echo "$body" | sed -n '/## Dependencies/,$p' | sed '1d' | grep -v "^## ")
+        fi
+    fi
+    
+    # Extract acceptance criteria
+    if echo "$body" | grep -q "## Acceptance Criteria"; then
+        acceptance=$(echo "$body" | sed -n '/## Acceptance Criteria/,/^##[^#]/p' | sed '1d;$d')
+        if [ -z "$acceptance" ]; then
+            acceptance=$(echo "$body" | sed -n '/## Acceptance Criteria/,$p' | sed '1d' | grep -v "^## " | grep -v "Backlog Position:")
+        fi
+    fi
+    
+    # Extract backlog position
+    if echo "$body" | grep -q "Backlog Position:"; then
+        position=$(echo "$body" | grep "Backlog Position:" | sed 's/.*Backlog Position: *//' | head -1)
+    fi
+    
+    # Set defaults if empty
+    [ -z "$category" ] && category="General"
+    [ -z "$dependencies" ] && dependencies="_No dependencies_"
+    [ -z "$acceptance" ] && acceptance="_To be defined_"
+    [ -z "$position" ] && position="TBD"
+    
+    # Extract title without task ID
+    task_title="${title#*: }"
+    
+    # Convert task_id to lowercase for branch pattern
+    task_id_lower=$(echo "$task_id" | tr '[:upper:]' '[:lower:]')
+    
+    # Create updated body
+    new_body="## Task: $task_title
+
+Category: $category
+
+## Workflow
+This task will be handled by the primary developer workflow.
+Branch pattern: \`${task_id_lower}-sequential\`
+
+## Dependencies
+$dependencies
+
+## Acceptance Criteria
+$acceptance
+
+## Implementation Notes
+- The primary developer writes all code
+- Consultants provide expertise only
+- All validations must pass before completion
+- Using shadcn/ui components and semantic colors
+
+## Metadata
+Backlog Position: $position"
+    
+    # Update the issue
+    if gh issue edit "$number" --body "$new_body" 2>/dev/null; then
+        echo -e "${GREEN}✓ updated${NC}"
+        current=$(cat "$updated_file")
+        echo $((current + 1)) > "$updated_file"
+    else
+        echo -e "${RED}✗ failed${NC}"
+        current=$(cat "$failed_file")
+        echo $((current + 1)) > "$failed_file"
+    fi
+    
+    # Small delay to avoid rate limiting
+    sleep 0.5
+done
+
+# Read final counts
+updated=$(cat "$updated_file")
+skipped=$(cat "$skipped_file")
+failed=$(cat "$failed_file")
+
+# Clean up temp files
+rm -f "$updated_file" "$skipped_file" "$failed_file"
+
+echo ""
+echo -e "${BLUE}=== Summary ===${NC}"
+echo "Updated: $updated issues"
+echo "Skipped: $skipped issues (already had sequential info)"
+echo "Failed: $failed issues"
+echo ""
+
+if [ "$updated" -gt 0 ]; then
+    echo -e "${GREEN}✅ Successfully updated $updated issues with primary developer workflow information${NC}"
+fi
+
+echo ""
+echo "Next steps:"
+echo "1. Run 'backlog-status' to view updated issues"
+echo "2. The primary developer will now handle these tasks with the new workflow"

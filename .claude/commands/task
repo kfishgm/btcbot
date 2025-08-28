@@ -1,0 +1,264 @@
+#!/bin/bash
+# Unified task management command
+set -e
+
+# Source utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$PROJECT_ROOT/.claude/lib/issue-utils.sh"
+source "$PROJECT_ROOT/.claude/lib/git-utils.sh"
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Show help
+show_help() {
+    cat << EOF
+Task Management Commands
+
+Usage: task <command> [options]
+
+Commands:
+  check       Check current task assignment
+  status      Show detailed task status
+  list        List available tasks
+  next        Get next available task
+  complete    Mark current task complete
+  resume      Resume work on a task
+
+Examples:
+  task check
+  task complete
+  task list --agent architect
+
+Environment:
+  Uses GitHub Issues for task tracking
+  Integrates with multi-agent workflow
+EOF
+}
+
+# Get agent role from worktree
+get_agent_role() {
+    local dir_name=$(basename "$(pwd)")
+    case "$dir_name" in
+        *-arch) echo "architect" ;;
+        *-test) echo "test" ;;
+        *-impl) echo "implementation" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+# Commands
+case "${1:-help}" in
+    check)
+        task=$(get_current_task)
+        if [ -n "$task" ]; then
+            echo -e "${GREEN}Current task: #$task${NC}"
+            if [ -f "TASK-$task.md" ]; then
+                echo
+                cat "TASK-$task.md"
+            fi
+        else
+            echo -e "${YELLOW}No task currently assigned${NC}"
+            echo "The monitor will assign tasks based on dependencies"
+        fi
+        ;;
+        
+    status)
+        task=$(get_current_task)
+        if [ -z "$task" ]; then
+            echo -e "${YELLOW}No task assigned${NC}"
+            exit 0
+        fi
+        
+        echo -e "${BLUE}Task #$task Status${NC}"
+        echo "=================="
+        
+        # Get issue details
+        title=$(get_task_title "$task")
+        state=$(gh issue view "$task" --json state -q .state)
+        
+        echo "Title: $title"
+        echo "State: $state"
+        echo
+        
+        # Check checkboxes
+        if check_three_boxes "$task" >/dev/null 2>&1; then
+            echo -e "${GREEN}✓ All checkboxes complete${NC}"
+        else
+            echo -e "${YELLOW}⚠ Checkboxes incomplete${NC}"
+            check_three_boxes "$task" 2>&1 | grep "Checkbox status"
+        fi
+        ;;
+        
+    list)
+        agent="${2:-$(get_agent_role)}"
+        echo -e "${BLUE}Available tasks for $agent:${NC}"
+        
+        "$PROJECT_ROOT/.claude/pipeline/lib/github-task-scheduler.mjs" list "$agent"
+        ;;
+        
+    next)
+        agent="${2:-$(get_agent_role)}"
+        next=$("$PROJECT_ROOT/.claude/pipeline/lib/github-task-scheduler.mjs" next-task "$agent")
+        
+        if [ "$next" != "No eligible tasks" ]; then
+            echo -e "${GREEN}Next task: #$next${NC}"
+        else
+            echo -e "${YELLOW}No eligible tasks available${NC}"
+        fi
+        ;;
+        
+    complete)
+        task=$(get_current_task)
+        if [ -z "$task" ]; then
+            echo -e "${RED}Error: No task to complete${NC}"
+            exit 1
+        fi
+        
+        agent=$(get_agent_role)
+        branch=$(current_branch)
+        
+        echo -e "${YELLOW}Completing task #$task as $agent...${NC}"
+        
+        # Complete via pipeline (this now handles label updates)
+        "$PROJECT_ROOT/.claude/pipeline/lib/github-agent-interface.sh" complete "$agent" "$task" "$branch"
+        
+        # Remove task file
+        rm -f "TASK-$task.md"
+        
+        echo -e "${GREEN}✅ Task #$task marked complete${NC}"
+        ;;
+        
+    resume)
+        if [ -z "$2" ]; then
+            echo -e "${RED}Error: Task number required${NC}"
+            echo "Usage: task resume <number>"
+            exit 1
+        fi
+        
+        # Create task file to resume
+        agent=$(get_agent_role)
+        create_task_file "$2" "$agent" "."
+        
+        echo -e "${GREEN}✅ Resumed task #$2${NC}"
+        ;;
+        
+    help|--help|-h|*)
+        show_help
+        ;;
+esac
+# Simple task management command for agents
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Detect if we're in a worktree and find the main project
+CURRENT_DIR="$(pwd)"
+CURRENT_NAME="$(basename "$CURRENT_DIR")"
+
+# Check if we're in a worktree by looking for -arch, -test, -impl, or -supervisor suffix
+if [[ "$CURRENT_NAME" =~ -(arch|test|impl|supervisor)$ ]]; then
+    # We're in a worktree, find the main project
+    BASE_NAME="${CURRENT_NAME%-*}"
+    PARENT_DIR="$(dirname "$CURRENT_DIR")"
+    
+    # Look for the main project directory
+    for variant in "$BASE_NAME" "$(echo "$BASE_NAME" | tr '[:upper:]' '[:lower:]')" "TriBot" "tribot"; do
+        if [ -d "$PARENT_DIR/$variant" ]; then
+            PROJECT_ROOT="$PARENT_DIR/$variant"
+            break
+        fi
+    done
+    
+    if [ -z "$PROJECT_ROOT" ]; then
+        echo "Error: Could not find main project directory"
+        exit 1
+    fi
+else
+    # We're in the main project
+    PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+fi
+
+PIPELINE_LIB="$PROJECT_ROOT/.claude/pipeline/lib"
+
+# Detect agent from worktree name
+WORKTREE=$(basename "$(pwd)")
+AGENT=""
+
+case "$WORKTREE" in
+    *-arch) AGENT="architect" ;;
+    *-test) AGENT="test" ;;
+    *-impl) AGENT="implementation" ;;
+    *-supervisor) AGENT="supervisor" ;;
+    *) 
+        echo "Error: Could not detect agent role from directory name"
+        echo "Make sure you're in an agent worktree (ending in -arch, -test, -impl, or -supervisor)"
+        exit 1
+        ;;
+esac
+
+case "${1:-help}" in
+    check)
+        # Check for current task
+        task_file=$(find . -name "TASK-*.md" 2>/dev/null | head -1)
+        if [ -n "$task_file" ]; then
+            echo "Current task: $task_file"
+            cat "$task_file"
+        else
+            echo "No active task"
+        fi
+        ;;
+        
+    next)
+        # Get next available task
+        "$PIPELINE_LIB/github-agent-interface.sh" next "$AGENT"
+        ;;
+        
+    start)
+        # Start next available task
+        "$PIPELINE_LIB/github-agent-interface.sh" start "$AGENT"
+        ;;
+        
+    complete)
+        # Complete current task
+        task_file=$(find . -name "TASK-*.md" 2>/dev/null | head -1)
+        if [ -z "$task_file" ]; then
+            echo "Error: No active task found"
+            exit 1
+        fi
+        
+        # Extract issue number
+        issue=$(basename "$task_file" | sed 's/TASK-\(.*\)\.md/\1/')
+        
+        # Get current branch
+        branch=$(git branch --show-current)
+        if [ -z "$branch" ] || [ "$branch" = "main" ]; then
+            echo "Error: Not on a feature branch"
+            exit 1
+        fi
+        
+        "$PIPELINE_LIB/github-agent-interface.sh" complete "$AGENT" "$issue" "$branch"
+        ;;
+        
+    list)
+        # List all tasks
+        "$PIPELINE_LIB/github-agent-interface.sh" list
+        ;;
+        
+    *)
+        echo "Task Management for $AGENT agent"
+        echo ""
+        echo "Commands:"
+        echo "  task check    - Check current task"
+        echo "  task next     - See next available task"
+        echo "  task start    - Start working on next task"
+        echo "  task complete - Mark current task complete"
+        echo "  task list     - List all tasks"
+        ;;
+esac

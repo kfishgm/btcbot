@@ -1,0 +1,71 @@
+#!/bin/bash
+# List all tasks with their current status
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_NAME="$(basename $PROJECT_ROOT)"
+TASKS_FILE="$PROJECT_ROOT/docs/tasks.md"
+
+# Use example file if tasks.md doesn't exist yet
+if [ ! -f "$TASKS_FILE" ] && [ -f "$PROJECT_ROOT/docs/templates/tasks.md" ]; then
+  TASKS_FILE="$PROJECT_ROOT/docs/templates/tasks.md"
+fi
+
+if [ ! -f "$TASKS_FILE" ]; then
+  echo "Error: Tasks file not found at $TASKS_FILE"
+  exit 1
+fi
+
+echo "📋 $PROJECT_NAME Task Status"
+echo "============================"
+echo ""
+
+# Count tasks
+TOTAL=$(grep -E "^- \[[ x]\]" "$TASKS_FILE" | wc -l | tr -d ' ')
+COMPLETED=$(grep -E "^- \[x\]" "$TASKS_FILE" | wc -l | tr -d ' ')
+PENDING=$(grep -E "^- \[ \]" "$TASKS_FILE" | wc -l | tr -d ' ')
+PERCENTAGE=$(( COMPLETED * 100 / TOTAL ))
+
+echo "Progress: $COMPLETED/$TOTAL ($PERCENTAGE%)"
+echo ""
+
+# Progress bar
+echo -n "["
+for i in {1..20}; do
+  if [ $i -le $(( PERCENTAGE / 5 )) ]; then
+    echo -n "="
+  else
+    echo -n " "
+  fi
+done
+echo "] $PERCENTAGE%"
+echo ""
+
+echo "Task Categories:"
+echo "---------------"
+
+# Extract unique categories from tasks
+CATEGORIES=$(grep -E "^- \[[ x]\] [A-Z]+-[0-9]+" "$TASKS_FILE" | sed -E 's/^- \[[ x]\] ([A-Z]+)-[0-9]+.*/\1/' | sort -u)
+
+# If specific categories provided as arguments, use those
+if [ $# -gt 0 ]; then
+  CATEGORIES="$@"
+fi
+
+# Show tasks by category
+for category in $CATEGORIES; do
+  CATEGORY_TASKS=$(grep -E "^- \[[ x]\] $category-" "$TASKS_FILE")
+  if [ -n "$CATEGORY_TASKS" ]; then
+    echo ""
+    echo "$category Tasks:"
+    echo "$CATEGORY_TASKS" | while read -r line; do
+      if [[ $line == *"[x]"* ]]; then
+        echo "  ✓ $line" | sed 's/- \[x\] //'
+      else
+        echo "  ○ $line" | sed 's/- \[ \] //'
+      fi
+    done
+  fi
+done
+
+echo ""
+echo "Next task: Use './claude/commands/next-task' to see the next task to work on"

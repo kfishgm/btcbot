@@ -1,0 +1,328 @@
+#!/bin/bash
+# Primary Developer Monitor - Works with GitHub Issues
+# Monitors the primary developer workflow for TriBot
+
+set +e  # Don't exit on errors
+trap '' PIPE  # Ignore SIGPIPE
+
+# Get directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SEQUENTIAL_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SEQUENTIAL_ROOT")")"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+WORKTREE_PATH="$PARENT_DIR/${PROJECT_NAME_LOWER}-seq"
+SESSION="${PROJECT_NAME_LOWER}-seq"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Configuration
+MONITOR_INTERVAL=${MONITOR_INTERVAL:-30}
+LOG_FILE="$SEQUENTIAL_ROOT/logs/primary-developer-monitor.log"
+
+# Create log directory
+mkdir -p "$(dirname "$LOG_FILE")"
+
+# Logging
+log() {
+    local level=$1
+    shift
+    local message="[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*"
+    echo -e "$message"
+    echo "$message" >> "$LOG_FILE"
+}
+
+# Get task info using GitHub CLI with body for backlog position
+get_tasks() {
+    gh issue list --state open --label "task" --limit 50 --json number,title,body,labels,assignees 2>/dev/null
+}
+
+# Parse backlog position from issue body (handles both **Backlog Position**: and plain format)
+parse_backlog_position() {
+    local body="$1"
+    # Try markdown format first
+    local position=$(echo "$body" | grep -i "\*\*Backlog Position\*\*:" | sed 's/.*\*\*Backlog Position\*\*:[[:space:]]*\([0-9]*\).*/\1/' | head -1)
+    # Fall back to plain format
+    if [ -z "$position" ]; then
+        position=$(echo "$body" | grep -i "Backlog Position:" | sed 's/.*Backlog Position:[[:space:]]*\([0-9]*\).*/\1/' | head -1)
+    fi
+    echo "$position"
+}
+
+# Check for available tasks (not already in progress), sorted by backlog position
+get_next_task() {
+    local tasks=$(get_tasks)
+    if [ -z "$tasks" ]; then
+        return
+    fi
+    
+    # Find tasks without sequential-wip label and extract with backlog position
+    # Use a temp file to avoid subshell issues
+    local temp_file="/tmp/primary-developer-tasks-$$"
+    > "$temp_file"
+    
+    echo "$tasks" | jq -r '.[] | select(.labels | map(.name) | contains(["sequential-wip"]) | not) | @base64' | while read -r task_b64; do
+        # Decode the task
+        local task=$(echo "$task_b64" | base64 -d)
+        local number=$(echo "$task" | jq -r '.number')
+        local body=$(echo "$task" | jq -r '.body')
+        local position=$(parse_backlog_position "$body")
+        if [ -z "$position" ]; then
+            position=9999
+        fi
+        echo "$position $number" >> "$temp_file"
+    done
+    
+    # Check if we found any tasks
+    if [ ! -s "$temp_file" ]; then
+        rm -f "$temp_file"
+        return
+    fi
+    
+    # Sort by position and return the first task number
+    local next_task=$(sort -n "$temp_file" | head -1 | cut -d' ' -f2)
+    rm -f "$temp_file"
+    echo "$next_task"
+}
+
+# Get task details including backlog position
+get_task_details() {
+    local task_num="$1"
+    local task_data=$(gh issue view "$task_num" --json number,title,body,labels 2>/dev/null)
+    if [ -n "$task_data" ]; then
+        local title=$(echo "$task_data" | jq -r '.title')
+        local body=$(echo "$task_data" | jq -r '.body')
+        local position=$(parse_backlog_position "$body")
+        echo "Task #$task_num: $title (Backlog Position: ${position:-TBD})"
+    fi
+}
+
+# Check if primary developer is running
+is_primary_developer_running() {
+    # Check if pane exists
+    if ! tmux list-panes -t $SESSION:0.0 &>/dev/null; then
+        return 1
+    fi
+    
+    # Get the pane's PID
+    local pane_pid=$(tmux display-message -t $SESSION:0.0 -p '#{pane_pid}' 2>/dev/null)
+    if [ -z "$pane_pid" ]; then
+        return 1
+    fi
+    
+    # Check if claude is running as a descendant of this pane
+    # Look for claude CLI processes (not the Electron app)
+    local claude_pids=$(pgrep -x claude 2>/dev/null)
+    if [ -z "$claude_pids" ]; then
+        return 1
+    fi
+    
+    for claude_pid in $claude_pids; do
+        # Check if this claude process is a direct child of our pane
+        local parent_pid=$(ps -o ppid= -p "$claude_pid" 2>/dev/null | tr -d ' ')
+        if [ "$parent_pid" = "$pane_pid" ]; then
+            return 0
+        fi
+        
+        # Check if it's a grandchild (claude might be spawned by shell in the pane)
+        if [ -n "$parent_pid" ]; then
+            local grandparent_pid=$(ps -o ppid= -p "$parent_pid" 2>/dev/null | tr -d ' ')
+            if [ "$grandparent_pid" = "$pane_pid" ]; then
+                return 0
+            fi
+        fi
+    done
+    
+    # Claude is not running in this pane
+    return 1
+}
+
+# Start primary developer with task
+start_primary_developer() {
+    local task_id=$1
+    local message=""
+    
+    # Clear pane and navigate to worktree
+    tmux send-keys -t $SESSION:0.0 C-c
+    sleep 0.5
+    tmux send-keys -t $SESSION:0.0 C-l
+    sleep 0.5
+    tmux send-keys -t $SESSION:0.0 "cd $WORKTREE_PATH"
+    sleep 0.5
+    tmux send-keys -t $SESSION:0.0 C-m
+    sleep 1
+    
+    if [ -n "$task_id" ]; then
+        # Check if task already has sequential-wip label
+        if gh issue view "$task_id" --json labels -q '.labels[].name' 2>/dev/null | grep -q "sequential-wip"; then
+            log INFO "Task #$task_id already in progress, starting recovery mode"
+            # Send message directly to claude like github-monitor does
+            tmux send-keys -t $SESSION:0.0 "claude --model opus --dangerously-skip-permissions -c \"You are the primary developer working on this project. Task #$task_id is already in progress. IMPORTANT: Read CLAUDE.md for all development instructions. Check the current branch with 'git branch --show-current'. The branch should be ${task_id}-sequential. If on the task branch, use .claude/sequential/commands/check-progress to see status. Otherwise checkout the branch or use .claude/sequential/commands/complete-task if done. If any quality checks are failing you are responsible of fixing them regardless of task. You make full implementations and favor them over mocks. The entire codebase is your responsibility. Read your CLAUDE.md as a reminder.\""
+            sleep 0.5
+            tmux send-keys -t $SESSION:0.0 C-m
+        else
+            log INFO "Starting primary developer with new task #$task_id"
+            tmux send-keys -t $SESSION:0.0 "claude --model opus --dangerously-skip-permissions \"You are the primary developer working on this project. Task #$task_id is available. IMPORTANT: Read CLAUDE.md for all development instructions. Run: .claude/sequential/commands/start-task $task_id to begin. This will create branch ${task_id}-sequential. You write the implementation yourself and use consultants for expertise only. If any quality checks are failing you are responsible of fixing them regardless of task. You make full implementations and favor them over mocks. The entire codebase is your responsibility. Read your CLAUDE.md as a reminder.\""
+            sleep 0.5
+            tmux send-keys -t $SESSION:0.0 C-m
+        fi
+    fi
+}
+
+# Main monitoring loop (exactly like github-monitor but for sequential)
+monitor_loop() {
+    log INFO "Primary Developer Monitor started"
+    log INFO "Project: $PROJECT_NAME"
+    log INFO "Worktree: $WORKTREE_PATH"
+    log INFO "Session: $SESSION"
+    
+    while true; do
+        # Wrap main loop body in error handling to prevent crashes
+        (
+            echo -e "\n${CYAN}=== Sequential Pipeline Status $(date '+%H:%M:%S') ===${NC}"
+            
+            # Show current task
+            local current_task=$(gh issue list --state open --label "sequential-wip" --json number -q '.[0].number' 2>/dev/null)
+            local next_task=$(get_next_task)
+            
+            echo -e "\n${BLUE}Primary Developer Status:${NC}"
+            
+            # Check if primary developer is running
+            if is_primary_developer_running; then
+                # Check if actually idle using sequential-specific command
+                if "$SEQUENTIAL_ROOT/commands/check-primary-developer-idle"; then
+                    # Claude is idle
+                    if [ -n "$current_task" ]; then
+                        echo -e "  ${YELLOW}⚠ Idle with task #$current_task${NC}"
+                        
+                        # Check idle reminder marker
+                        local idle_reminder_marker="$WORKTREE_PATH/.claude-idle-reminder"
+                        local should_remind=true
+                        if [ -f "$idle_reminder_marker" ]; then
+                            local last_reminder=$(stat -f %m "$idle_reminder_marker" 2>/dev/null || stat -c %Y "$idle_reminder_marker" 2>/dev/null || echo 0)
+                            local current_time=$(date +%s)
+                            local time_since_reminder=$((current_time - last_reminder))
+                            
+                            if [ $time_since_reminder -lt 60 ]; then
+                                should_remind=false
+                            fi
+                        fi
+                        
+                        if [ "$should_remind" = true ]; then
+                            log INFO "Sending idle reminder for task #$current_task"
+                            touch "$idle_reminder_marker"
+                            # Send reminder message with proper pattern
+                            local reminder_msg="You are the primary developer working on this project. Task #$current_task is available, use .claude/sequential/commands/check-progress to see status, or .claude/sequential/commands/complete-task when done. If any quality checks are failing you are responsible of fixing them regardless of task. You make full implementations and favor them over mocks. The entire codebase is your responsibility. Read your CLAUDE.md as a reminder."
+                            # Clear any partial input first
+                            tmux send-keys -t $SESSION:0.0 C-c
+                            sleep 0.5
+                            # Send the reminder message
+                            tmux send-keys -t $SESSION:0.0 "$reminder_msg"
+                            sleep 0.5
+                            # Send enter to submit
+                            tmux send-keys -t $SESSION:0.0 C-m
+                        fi
+                    elif [ -n "$next_task" ]; then
+                        echo -e "  ${YELLOW}Idle - assigning task #$next_task${NC}"
+                        log INFO "Killing idle primary developer to start fresh with new task..."
+                        
+                        # Kill the idle Claude instance
+                        "$SEQUENTIAL_ROOT/commands/kill-primary-developer" "$WORKTREE_PATH"
+                        sleep 2
+                        
+                        # Run setup-sequential to ensure clean state for new task
+                        log INFO "Running setup-sequential before assigning new task..."
+                        "$SEQUENTIAL_ROOT/commands/setup-sequential" > /dev/null 2>&1 || {
+                            log WARN "setup-sequential had issues, continuing anyway"
+                        }
+                        
+                        # Start fresh primary developer with new task
+                        log INFO "Starting fresh primary developer with task #$next_task"
+                        start_primary_developer "$next_task"
+                    else
+                        echo -e "  ${GREEN}✓ Idle (no tasks available)${NC}"
+                    fi
+                else
+                    # Claude is actively working
+                    if [ -n "$current_task" ]; then
+                        echo -e "  ${GREEN}✓ Working on task #$current_task${NC}"
+                    else
+                        echo -e "  ${GREEN}✓ Active${NC}"
+                    fi
+                fi
+            else
+                # Primary developer not running - need recovery
+                echo -e "  ${RED}✗ Not running${NC}"
+                
+                # Check recovery marker
+                local recovery_marker="$WORKTREE_PATH/.claude-recovery-sent"
+                local should_recover=true
+                if [ -f "$recovery_marker" ]; then
+                    local last_recovery=$(stat -f %m "$recovery_marker" 2>/dev/null || stat -c %Y "$recovery_marker" 2>/dev/null || echo 0)
+                    local current_time=$(date +%s)
+                    local time_since_recovery=$((current_time - last_recovery))
+                    
+                    if [ $time_since_recovery -lt 120 ]; then
+                        echo -e "  ${YELLOW}Recovery attempted ${time_since_recovery}s ago, waiting...${NC}"
+                        should_recover=false
+                    fi
+                fi
+                
+                if [ "$should_recover" = true ]; then
+                    touch "$recovery_marker"
+                    if [ -n "$current_task" ]; then
+                        log INFO "Recovering primary developer with task #$current_task"
+                        start_primary_developer "$current_task"
+                    elif [ -n "$next_task" ]; then
+                        log INFO "Starting primary developer with new task #$next_task"
+                        # Run setup-sequential to ensure clean state for new task
+                        log INFO "Running setup-sequential to clean worktree..."
+                        "$SEQUENTIAL_ROOT/commands/setup-sequential" > /dev/null 2>&1 || {
+                            log WARN "setup-sequential had issues, continuing anyway"
+                        }
+                        start_primary_developer "$next_task"
+                    else
+                        log INFO "No tasks available, waiting for tasks..."
+                        echo -e "  ${YELLOW}No tasks available, monitor will check again${NC}"
+                    fi
+                    
+                    # Wait longer after restart
+                    sleep 60
+                    continue
+                fi
+            fi
+            
+            # Show available tasks
+            echo -e "\n${BLUE}Available Tasks:${NC}"
+            if [ -n "$next_task" ]; then
+                local details=$(get_task_details "$next_task")
+                echo "  $details"
+            else
+                echo "  None"
+            fi
+            
+            # Show recent activity
+            echo -e "\n${BLUE}Recent Activity:${NC}"
+            gh issue list --state closed --label task --limit 3 --json number,title,closedAt 2>/dev/null | \
+                jq -r '.[] | "  #\(.number): \(.title) (closed \(.closedAt))"' 2>/dev/null || echo "  No recent completions"
+                
+        ) || {
+            # If the subshell fails, log the error but continue
+            log ERROR "Monitor iteration failed, continuing..."
+            echo -e "${YELLOW}Monitor iteration failed, continuing in ${MONITOR_INTERVAL} seconds...${NC}"
+        }
+        
+        sleep $MONITOR_INTERVAL
+    done
+}
+
+# Main
+log INFO "Starting primary developer monitor..."
+monitor_loop

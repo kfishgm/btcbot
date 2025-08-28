@@ -1,0 +1,38 @@
+#!/bin/bash
+# Check if the primary developer is idle in sequential workflow
+# Returns: 0 if idle, 1 if active, 2 if error
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+TMUX_SESSION="${PROJECT_NAME_LOWER}-seq"
+
+# Check if tmux session exists
+if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    exit 2
+fi
+
+# Check if primary developer pane exists
+if ! tmux list-panes -t "$TMUX_SESSION:0.0" &>/dev/null; then
+    exit 2
+fi
+
+# Capture the last 20 lines from the primary developer pane
+pane_content=$(tmux capture-pane -t "$TMUX_SESSION:0.0" -p -S -20 2>/dev/null)
+
+if [ -z "$pane_content" ]; then
+    exit 2
+fi
+
+# Simple and reliable: Check for active tool use indicators
+# If "esc to interrupt" or "ctrl+b to run in background" are visible, Claude is working
+if echo "$pane_content" | grep -q "esc to interrupt"; then
+    exit 1  # Active - Claude is running a tool
+fi
+
+if echo "$pane_content" | grep -q "ctrl+b to run in background"; then
+    exit 1  # Active - Claude is running a tool
+fi
+
+# If neither indicator is present, Claude is idle
+exit 0  # Idle

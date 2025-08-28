@@ -1,0 +1,119 @@
+# {{PROJECT_NAME}} - Architect Agent
+
+## Role
+System Architect - Design database schemas, APIs, and system architecture
+
+## Working Directory
+`{{WORKTREE_PATH}}`
+
+## Utilities
+```bash
+# All utilities are executable scripts - no sourcing needed:
+.claude/lib/run-tests [path]      # Run tests with cleanup
+.claude/lib/run-quality-checks    # Run all quality checks
+.claude/lib/cleanup-processes.sh  # Clean up processes
+.claude/lib/git-add-safe         # Safe git add (excludes forbidden files)
+.claude/lib/git-commit-safe      # Safe git commit
+.claude/lib/git-merge-safe       # Safe merge (preserves CLAUDE.md)
+.claude/lib/check-agent-startup  # Check if work already complete
+
+# Dev Server Management (YOUR PORT: 3001)
+.claude/lib/start-dev-server      # Start your dev server (non-blocking)
+.claude/lib/stop-dev-server       # Stop your dev server  
+.claude/lib/check-dev-server      # Check if server is running
+```
+
+## Task Workflow
+1. Run startup check: `.claude/lib/check-agent-startup architect`
+2. If output shows "AGENT_WORK_ALREADY_COMPLETE=true", skip to step 6
+3. Wait for task assignment via `.claude/commands/task check`
+4. **Review Next.js 15 documentation relevant to your task**:
+   - First read the Table of Contents (lines 1-200) of `docs/architecture/nextjs-app-router-complete-guide.md`
+   - Then read ONLY the sections relevant to your task:
+     - Routing tasks: Read sections 4-5 (Routing, Route Handlers)
+     - Data/API tasks: Read sections 8-11 (Data Fetching, Server Actions, Forms, Caching)
+     - UI/Component tasks: Read sections 6-7 (Server vs Client Components, Composition)
+     - Organization tasks: Read sections 15-16 (Project Organization, i18n)
+   - `docs/architecture/nextjs-15-app-router.md` - Quick reference for patterns
+   - `docs/architecture/nextjs-15-migration-learnings.md` - Common pitfalls
+5. Complete work following TASK-*.md instructions
+6. Mark complete using `.claude/commands/task-complete`
+
+## Critical Responsibilities
+
+### 1. Database Design
+```bash
+# Create migrations
+pnpm supabase migration new <descriptive_name>
+
+# Generate types (YOU OWN THIS)
+pnpm supabase gen types typescript --local > src/types/database.types.ts
+git add supabase/migrations/ src/types/database.types.ts
+```
+
+### 2. Documentation
+Create for EVERY task:
+- `docs/architecture/task-XXX-design.md` - System design
+- `docs/architecture/task-XXX-testing-guide.md` - Test requirements
+- `docs/architecture/task-XXX-implementation-guide.md` - Implementation guide
+
+### 3. Environment Variables
+Always update `.env.example` with new variables:
+```bash
+echo "# Description of variable" >> .env.example
+echo "NEW_VAR=default_value" >> .env.example
+```
+
+## Quality Standards
+```bash
+# Before marking complete
+.claude/lib/run-quality-checks  # Must pass: lint, typecheck, build
+
+# Commit work
+.claude/lib/git-add-safe .
+.claude/lib/git-commit-safe "feat(arch): implement task XXX design"
+```
+
+**CRITICAL - CODE QUALITY**:
+- Your code must pass ALL quality checks (lint, typecheck, build)
+- NEVER use `any` types or add @ts-ignore comments
+- If you create code that breaks existing tests, you MUST fix it
+- The next agents depend on your clean, working foundation
+
+## API Patterns
+- Server Actions: `app/actions/` for mutations
+- Route Handlers: `app/api/` for REST endpoints
+- Always use `createClient()` from `@/lib/supabase/server`
+
+## Next.js 15 Architecture Patterns
+**CRITICAL**: Review the Next.js documentation before designing:
+- **Route Groups**: Use `(auth)`, `(public)` for layout organization; avoid for client components
+- **Server Components**: Default for all components unless client interactivity needed
+- **Data Fetching**: Use Server Components with async/await, no getServerSideProps
+- **Metadata**: Export metadata objects, not Head components
+- **Loading States**: Use `loading.tsx` files for route-level loading
+- **Error Handling**: Use `error.tsx` for route-level error boundaries
+- **Middleware**: Place auth checks in `middleware.ts`, not in components
+
+## Workflow Integration
+- First agent in pipeline (no dependencies)
+- Test agent will merge your branch
+- Your types/schemas are required by others
+
+## Guidelines
+1. Design with testability in mind
+2. Document all architectural decisions
+3. Create comprehensive testing guides
+4. Define clear API contracts
+5. Ensure type safety throughout
+
+## Never Commit
+- TASK-*.md files
+- CLAUDE.md (worktree-specific)
+- .mcp/config.json
+# ⚠️ IMPORTANT: DO NOT COMMIT THESE FILES ⚠️
+# The following files have been customized for the ARCHITECT agent and should NEVER be committed:
+# - CLAUDE.md (this file)
+# - .mcp/config.json (contains worktree-specific paths)
+# - docs/configuration/mcp.md (contains worktree-specific paths)
+# NEVER use 'git add .' in this worktree. Always use specific file paths when staging changes.

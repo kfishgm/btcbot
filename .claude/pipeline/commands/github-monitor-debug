@@ -1,0 +1,239 @@
+#!/bin/bash
+# GitHub Issues-based Pipeline Monitor - Debug Version
+# Enhanced with comprehensive error handling and debug logging
+
+# Trap ALL signals and errors
+trap 'echo "[DEBUG] Caught signal/error at line $LINENO, exit code $?" >> "$DEBUG_LOG"; cleanup' EXIT INT TERM ERR
+
+# Don't exit on errors - we want to handle them
+set +e
+
+# Get directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIPELINE_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$PIPELINE_ROOT")")"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Configuration
+MONITOR_INTERVAL=${MONITOR_INTERVAL:-30}
+LOG_FILE="$PIPELINE_ROOT/logs/github-pipeline.log"
+DEBUG_LOG="$PIPELINE_ROOT/logs/github-monitor-debug.log"
+PID_FILE="$PIPELINE_ROOT/state/github-monitor.pid"
+
+# Create directories
+mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$(dirname "$DEBUG_LOG")"
+mkdir -p "$(dirname "$PID_FILE")"
+
+# Debug logging
+debug() {
+    echo "[DEBUG $(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$DEBUG_LOG"
+}
+
+# Logging
+log() {
+    local level=$1
+    shift
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*" | tee -a "$LOG_FILE"
+    debug "LOG: $level - $*"
+}
+
+# Check if monitor is already running
+check_running() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo -e "${RED}Monitor already running with PID $pid${NC}"
+            exit 1
+        fi
+    fi
+}
+
+# Cleanup on exit
+cleanup() {
+    log INFO "Monitor shutting down"
+    debug "Cleanup called from: ${BASH_SOURCE[1]:-unknown}:${BASH_LINENO[0]:-unknown}"
+    rm -f "$PID_FILE"
+}
+
+# Safe command execution with timeout
+safe_exec() {
+    local cmd="$1"
+    local timeout="${2:-10}"
+    local description="${3:-command}"
+    
+    debug "Executing: $cmd (timeout: ${timeout}s)"
+    
+    # Use timeout to prevent hanging
+    local output
+    if output=$(timeout "$timeout" bash -c "$cmd" 2>&1); then
+        echo "$output"
+        return 0
+    else
+        local exit_code=$?
+        debug "Command failed: $description (exit code: $exit_code)"
+        debug "Output: $output"
+        return $exit_code
+    fi
+}
+
+# Monitor loop with enhanced error handling
+monitor_loop() {
+    log INFO "GitHub Issues Pipeline Monitor started (debug mode)"
+    echo $$ > "$PID_FILE"
+    
+    local iteration=0
+    while true; do
+        iteration=$((iteration + 1))
+        debug "=== Iteration $iteration starting ==="
+        
+        echo -e "\n${CYAN}=== Pipeline Status $(date '+%H:%M:%S') ===${NC}"
+        
+        # Show all tasks with error handling
+        echo -e "\n${BLUE}Tasks:${NC}"
+        if ! safe_exec "$PIPELINE_ROOT/lib/github-task-scheduler.mjs list" 5 "task list"; then
+            echo -e "${RED}Error: Failed to list tasks${NC}"
+            debug "Task list failed"
+        fi
+        
+        # Check each agent with individual error handling
+        echo -e "\n${BLUE}Agents:${NC}"
+        for agent in architect test implementation supervisor; do
+            debug "Checking agent: $agent"
+            
+            # Get status with timeout and error handling
+            local status=""
+            local status_output
+            if status_output=$(safe_exec "$PIPELINE_ROOT/lib/github-agent-interface.sh status" 5 "agent status"); then
+                status=$(echo "$status_output" | grep "$agent" | awk '{for(i=3;i<=NF;i++) printf "%s ", $i; print ""}' | sed 's/ *$//')
+                debug "Agent $agent raw status: '$status'"
+            fi
+            
+            if [ -z "$status" ]; then
+                status="${RED}Error getting status${NC}"
+                debug "Empty status for $agent"
+            fi
+            
+            printf "  %-15s: %s\n" "$agent" "$status"
+            
+            # Skip tmux checks for now to isolate issues
+            continue
+            
+            # Get agent's tmux pane for checking
+            case "$agent" in
+                architect) pane_num=0 ;;
+                test) pane_num=1 ;;
+                implementation) pane_num=2 ;;
+                supervisor) pane_num=3 ;;
+            esac
+            
+            local session_name="$(echo "${PROJECT_NAME}" | tr '[:upper:]' '[:lower:]')-dev"
+            
+            # Check if tmux session exists first
+            if ! tmux has-session -t "$session_name" 2>/dev/null; then
+                debug "Tmux session $session_name does not exist"
+                continue
+            fi
+            
+            # Safely get pane command
+            local pane_cmd=""
+            if pane_cmd=$(tmux display-message -t "$session_name:1.$pane_num" -p '#{pane_current_command}' 2>/dev/null); then
+                debug "Agent $agent pane command: $pane_cmd"
+            else
+                debug "Could not get pane command for $agent"
+            fi
+            
+            # Rest of agent handling...
+        done
+        
+        # Show recently completed with error handling
+        echo -e "\n${BLUE}Recent Activity:${NC}"
+        local recent_output
+        if recent_output=$(safe_exec "gh issue list --state closed --label task --limit 5 --json number,title,closedAt" 10 "recent activity"); then
+            if echo "$recent_output" | jq -r '.[] | "  #\(.number): \(.title) (closed \(.closedAt))"' 2>/dev/null; then
+                debug "Recent activity displayed successfully"
+            else
+                echo -e "  ${YELLOW}No recent activity or JSON parse error${NC}"
+                debug "JQ parse failed for recent activity"
+            fi
+        else
+            echo -e "  ${RED}Error getting recent activity${NC}"
+        fi
+        
+        debug "=== Iteration $iteration complete, sleeping ${MONITOR_INTERVAL}s ==="
+        sleep "$MONITOR_INTERVAL"
+    done
+}
+
+# Main
+case "${1:-start}" in
+    start)
+        check_running
+        echo -e "${YELLOW}Starting monitor in debug mode${NC}"
+        echo "Debug log: $DEBUG_LOG"
+        echo "Main log: $LOG_FILE"
+        
+        if [ "${2:-}" = "--auto" ]; then
+            export AUTO_ASSIGN=true
+            echo -e "${YELLOW}Auto-assignment enabled${NC}"
+        fi
+        
+        # Clear debug log for fresh start
+        echo "=== Monitor started at $(date) ===" > "$DEBUG_LOG"
+        
+        monitor_loop
+        ;;
+        
+    stop)
+        if [ -f "$PID_FILE" ]; then
+            pid=$(cat "$PID_FILE")
+            if kill "$pid" 2>/dev/null; then
+                echo -e "${GREEN}Monitor stopped${NC}"
+            else
+                echo -e "${RED}Failed to stop monitor${NC}"
+            fi
+        else
+            echo -e "${YELLOW}Monitor not running${NC}"
+        fi
+        ;;
+        
+    status)
+        if [ -f "$PID_FILE" ]; then
+            pid=$(cat "$PID_FILE")
+            if kill -0 "$pid" 2>/dev/null; then
+                echo -e "${GREEN}Monitor running (PID: $pid)${NC}"
+                exit 0
+            fi
+        fi
+        echo -e "${RED}Monitor not running${NC}"
+        exit 1
+        ;;
+        
+    logs)
+        tail -f "$LOG_FILE"
+        ;;
+        
+    debug)
+        tail -f "$DEBUG_LOG"
+        ;;
+        
+    *)
+        echo "GitHub Issues Pipeline Monitor (Debug Version)"
+        echo "Usage: github-monitor-debug [command] [options]"
+        echo ""
+        echo "Commands:"
+        echo "  start [--auto]  - Start monitor (--auto enables auto-assignment)"
+        echo "  stop           - Stop monitor"
+        echo "  status         - Check if monitor is running"
+        echo "  logs           - Tail monitor logs"
+        echo "  debug          - Tail debug logs"
+        ;;
+esac

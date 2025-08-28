@@ -1,0 +1,86 @@
+#!/bin/bash
+# Validate that code review has been performed and approved
+# Checks for REVIEW-RESULT-{task-id}.md file with approval
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}=== Code Review Validation ===${NC}"
+echo ""
+
+# Get task ID from parameter or try to extract from current branch
+TASK_ID="$1"
+if [ -z "$TASK_ID" ]; then
+    # Try to extract from branch name (format: {task-id}-sequential)
+    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+    if [[ "$CURRENT_BRANCH" =~ ^([0-9]+)-sequential$ ]]; then
+        TASK_ID="${BASH_REMATCH[1]}"
+    fi
+fi
+
+if [ -z "$TASK_ID" ]; then
+    echo -e "${RED}❌ Cannot determine task ID${NC}"
+    echo "Please provide task ID as parameter or ensure branch follows {task-id}-sequential format"
+    exit 1
+fi
+
+# Check for review result file
+REVIEW_FILE="REVIEW-RESULT-${TASK_ID}.md"
+
+if [ ! -f "$REVIEW_FILE" ]; then
+    echo -e "${RED}❌ No review result file found${NC}"
+    echo ""
+    echo "Expected file: $REVIEW_FILE"
+    echo ""
+    echo "To get a code review:"
+    echo "1. Create REVIEW-REQUEST-${TASK_ID}.md with your implementation summary"
+    echo "2. Invoke the code-reviewer consultant:"
+    echo "   'Please review task #${TASK_ID} for production readiness.'"
+    echo "3. The consultant will create $REVIEW_FILE"
+    echo ""
+    echo "Note: You must NEVER create REVIEW-RESULT files yourself!"
+    exit 1
+fi
+
+echo "Found review file: $REVIEW_FILE"
+echo ""
+
+# Check for approval in the file
+if grep -q "READY FOR PRODUCTION? YES" "$REVIEW_FILE"; then
+    echo -e "${GREEN}✅ Code review completed and approved${NC}"
+    echo ""
+    # Show summary of what was reviewed
+    if grep -q "Production Readiness Review" "$REVIEW_FILE"; then
+        echo "Review summary:"
+        head -5 "$REVIEW_FILE" | grep -v "^#" | grep -v "^$" | head -3
+    fi
+    exit 0
+elif grep -q "READY FOR PRODUCTION? NO" "$REVIEW_FILE"; then
+    echo -e "${RED}❌ Code review found blockers${NC}"
+    echo ""
+    echo "The reviewer found issues that must be fixed:"
+    echo ""
+    # Try to extract and show blockers
+    sed -n '/BLOCKERS:/,/IMPORTANT:/p' "$REVIEW_FILE" | head -15
+    echo ""
+    echo "To proceed:"
+    echo "1. Fix ALL blockers mentioned in $REVIEW_FILE"
+    echo "2. Update REVIEW-REQUEST-${TASK_ID}.md with what you fixed"
+    echo "3. Get another review (will overwrite the result file)"
+    exit 1
+else
+    echo -e "${YELLOW}⚠️ Code review verdict unclear${NC}"
+    echo ""
+    echo "The review file exists but doesn't have a clear verdict."
+    echo "The file must contain either:"
+    echo "  'READY FOR PRODUCTION? YES' (approved)"
+    echo "  'READY FOR PRODUCTION? NO' (has blockers)"
+    echo ""
+    echo "Check $REVIEW_FILE and ensure the reviewer provided a clear verdict."
+    exit 1
+fi

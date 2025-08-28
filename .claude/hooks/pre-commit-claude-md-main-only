@@ -1,0 +1,29 @@
+#!/bin/bash
+# Pre-commit hook to only allow CLAUDE.md changes from main branch
+
+# Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+
+# Check if CLAUDE.md is being modified
+if git diff --cached --name-only | grep -q "^CLAUDE\.md$"; then
+    if [ "$CURRENT_BRANCH" != "main" ]; then
+        echo "❌ ERROR: CLAUDE.md can only be modified from the main branch!"
+        echo ""
+        echo "You are on branch: $CURRENT_BRANCH"
+        echo ""
+        echo "CLAUDE.md is the root project configuration file and should only"
+        echo "be updated from the main branch to maintain consistency."
+        echo ""
+        echo "To fix this:"
+        echo "  1. Reset the CLAUDE.md changes: git reset HEAD CLAUDE.md"
+        echo "  2. Switch to main branch: git checkout main"
+        echo "  3. Make your CLAUDE.md changes there"
+        echo ""
+        echo "Note: Agent-specific instructions should go in the agent's worktree"
+        echo "CLAUDE.md file, not the root CLAUDE.md."
+        echo ""
+        exit 1
+    fi
+fi
+
+exit 0

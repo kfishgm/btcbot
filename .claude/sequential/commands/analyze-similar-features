@@ -1,0 +1,259 @@
+#!/bin/bash
+# Analyze similar features to understand patterns and implementation approaches
+set -e
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Check for feature name argument
+if [ -z "$1" ]; then
+    echo -e "${YELLOW}Usage: analyze-similar-features <feature-name>${NC}"
+    echo ""
+    echo "Examples:"
+    echo "  analyze-similar-features dashboard"
+    echo "  analyze-similar-features form"
+    echo "  analyze-similar-features table"
+    echo "  analyze-similar-features auth"
+    echo "  analyze-similar-features trading"
+    exit 1
+fi
+
+FEATURE="$1"
+echo -e "${BLUE}=== Analyzing Similar Features: ${FEATURE} ===${NC}"
+echo ""
+
+# Function to analyze component patterns
+analyze_components() {
+    local search_term="$1"
+    echo -e "${CYAN}🧩 Component Patterns:${NC}"
+    
+    # Search for similar components
+    echo "Searching for components related to '$search_term'..."
+    
+    # Find React components
+    if find components app -name "*.tsx" -type f 2>/dev/null | xargs grep -l -i "$search_term" 2>/dev/null | head -5; then
+        echo ""
+        echo "Key patterns found:"
+        
+        # Look for common patterns in found files
+        for file in $(find components app -name "*.tsx" -type f 2>/dev/null | xargs grep -l -i "$search_term" 2>/dev/null | head -3); do
+            echo ""
+            echo "📄 $(basename $file):"
+            
+            # Check for shadcn imports
+            if grep -q "@/components/ui/" "$file"; then
+                echo "  • Uses shadcn/ui components:"
+                grep "from ['\"]@/components/ui/" "$file" | sed 's/.*from/    -/' | head -3
+            fi
+            
+            # Check for loading states
+            if grep -q "loading\|Loading\|Skeleton" "$file"; then
+                echo "  • Has loading state handling"
+            fi
+            
+            # Check for error handling
+            if grep -q "error\|Error\|catch" "$file"; then
+                echo "  • Has error handling"
+            fi
+            
+            # Check for semantic colors
+            if grep -q "bg-primary\|text-secondary\|bg-destructive" "$file"; then
+                echo "  • Uses semantic color tokens ✓"
+            fi
+            
+            # Check for form handling
+            if grep -q "useForm\|handleSubmit\|onSubmit" "$file"; then
+                echo "  • Has form handling pattern"
+            fi
+        done
+    else
+        echo "No components found related to '$search_term'"
+    fi
+    echo ""
+}
+
+# Function to analyze API patterns
+analyze_api_patterns() {
+    local search_term="$1"
+    echo -e "${CYAN}🔌 API Route Patterns:${NC}"
+    
+    # Search for API routes
+    echo "Searching for API routes related to '$search_term'..."
+    
+    if find app/api -name "route.ts" -type f 2>/dev/null | xargs grep -l -i "$search_term" 2>/dev/null | head -3; then
+        echo ""
+        echo "API patterns found:"
+        
+        for file in $(find app/api -name "route.ts" -type f 2>/dev/null | xargs grep -l -i "$search_term" 2>/dev/null | head -2); do
+            echo ""
+            echo "📄 $(echo $file | sed 's|app/api/||' | sed 's|/route.ts||'):"
+            
+            # Check for auth
+            if grep -q "getSession\|auth\|currentUser" "$file"; then
+                echo "  • Has authentication check"
+            fi
+            
+            # Check for validation
+            if grep -q "parse\|validate\|schema" "$file"; then
+                echo "  • Has input validation"
+            fi
+            
+            # Check for error handling
+            if grep -q "try.*catch\|NextResponse.json.*status" "$file"; then
+                echo "  • Has proper error handling"
+            fi
+            
+            # Check for Supabase usage
+            if grep -q "supabase\|createClient" "$file"; then
+                echo "  • Uses Supabase client"
+            fi
+        done
+    else
+        echo "No API routes found related to '$search_term'"
+    fi
+    echo ""
+}
+
+# Function to analyze database patterns
+analyze_database_patterns() {
+    local search_term="$1"
+    echo -e "${CYAN}💾 Database Patterns:${NC}"
+    
+    # Search for database queries
+    echo "Searching for database operations related to '$search_term'..."
+    
+    if grep -r "supabase.*from\|\.select\|\.insert\|\.update\|\.delete" --include="*.ts" --include="*.tsx" lib app 2>/dev/null | grep -i "$search_term" | head -5 > /dev/null; then
+        echo ""
+        echo "Database patterns found:"
+        echo "  • Check error handling after queries"
+        echo "  • Use RLS policies for security"
+        echo "  • Implement proper typing for results"
+        echo "  • Consider caching for frequently accessed data"
+    else
+        echo "No specific database patterns found for '$search_term'"
+    fi
+    echo ""
+}
+
+# Function to find test patterns
+analyze_test_patterns() {
+    local search_term="$1"
+    echo -e "${CYAN}🧪 Test Patterns:${NC}"
+    
+    echo "Searching for test patterns related to '$search_term'..."
+    
+    # Look for test files
+    if find __tests__ -name "*.test.ts*" -type f 2>/dev/null | xargs grep -l -i "$search_term" 2>/dev/null | head -3; then
+        echo ""
+        echo "Test patterns found:"
+        
+        for file in $(find __tests__ -name "*.test.ts*" -type f 2>/dev/null | xargs grep -l -i "$search_term" 2>/dev/null | head -2); do
+            echo ""
+            echo "📄 $(basename $file):"
+            
+            # Check test structure
+            if grep -q "describe\|it\|test" "$file"; then
+                echo "  • Uses standard Jest structure"
+            fi
+            
+            # Check for mocking
+            if grep -q "mock\|jest.fn\|spyOn" "$file"; then
+                echo "  • Has mocking patterns"
+            fi
+            
+            # Check for async testing
+            if grep -q "async\|await\|waitFor" "$file"; then
+                echo "  • Tests async operations"
+            fi
+            
+            # Check for user events
+            if grep -q "userEvent\|fireEvent\|click\|type" "$file"; then
+                echo "  • Tests user interactions"
+            fi
+        done
+    else
+        echo "No test files found for '$search_term'"
+        echo "Remember to write tests after implementation!"
+    fi
+    echo ""
+}
+
+# Function to suggest shadcn components
+suggest_shadcn_components() {
+    local feature="$1"
+    echo -e "${CYAN}💡 Suggested shadcn/ui Components:${NC}"
+    
+    case "$feature" in
+        *form*|*input*|*edit*)
+            echo "  • form - Form handling with react-hook-form"
+            echo "  • input - Text input fields"
+            echo "  • button - Submit buttons"
+            echo "  • label - Field labels"
+            echo "  • select - Dropdown selections"
+            echo "  • textarea - Multi-line input"
+            echo "  • checkbox/radio-group - Options"
+            ;;
+        *table*|*list*|*data*)
+            echo "  • table - Data tables"
+            echo "  • card - List items"
+            echo "  • skeleton - Loading states"
+            echo "  • pagination - Page navigation"
+            echo "  • badge - Status indicators"
+            ;;
+        *dashboard*|*chart*|*metric*)
+            echo "  • card - Metric cards"
+            echo "  • tabs - Section navigation"
+            echo "  • skeleton - Loading placeholders"
+            echo "  • badge - Status badges"
+            echo "  • progress - Progress indicators"
+            ;;
+        *modal*|*dialog*|*popup*)
+            echo "  • dialog - Modal dialogs"
+            echo "  • alert-dialog - Confirmation dialogs"
+            echo "  • sheet - Side panels"
+            echo "  • popover - Small overlays"
+            ;;
+        *auth*|*login*|*register*)
+            echo "  • card - Auth form container"
+            echo "  • form - Form handling"
+            echo "  • input - Email/password fields"
+            echo "  • button - Submit/social buttons"
+            echo "  • alert - Error messages"
+            ;;
+        *)
+            echo "  • card - General containers"
+            echo "  • button - Actions"
+            echo "  • alert - Notifications"
+            echo "  • skeleton - Loading states"
+            ;;
+    esac
+    
+    echo ""
+    echo "Install missing components with:"
+    echo "  npx shadcn@latest add <component-name>"
+    echo ""
+}
+
+# Run all analyses
+analyze_components "$FEATURE"
+analyze_api_patterns "$FEATURE"
+analyze_database_patterns "$FEATURE"
+analyze_test_patterns "$FEATURE"
+suggest_shadcn_components "$FEATURE"
+
+# Summary
+echo -e "${GREEN}=== Implementation Checklist ===${NC}"
+echo "□ Use shadcn/ui components (install if needed)"
+echo "□ Follow found patterns from similar features"
+echo "□ Use semantic color tokens only"
+echo "□ Add loading and error states"
+echo "□ Implement proper validation"
+echo "□ Include authentication checks (if needed)"
+echo "□ Write comprehensive tests"
+echo "□ No stubs or TODOs in final code"
+echo ""
+echo "Run 'validate-implementation' when done!"

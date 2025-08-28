@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Setup PRD Command Script
+# Usage: /setup-prd [path-to-existing-prd]
+# Arguments are passed via $ARGUMENTS from Claude
+
+PRD_PATH="$ARGUMENTS"
+
+if [ -n "$PRD_PATH" ]; then
+    echo "Using existing PRD as reference: $PRD_PATH"
+    echo "Claude will extract information from this file and only ask for missing details."
+else
+    echo "Starting interactive PRD creation from scratch..."
+fi
+
+# The actual command execution is handled by Claude
+# This script just provides the argument handling wrapper

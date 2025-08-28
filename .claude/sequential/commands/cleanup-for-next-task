@@ -1,0 +1,49 @@
+#!/bin/bash
+# Cleanup sequential worktree for next task
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo "Cleaning up for next task..."
+
+# Get to the worktree
+WORKTREE_PATH="$(pwd)"
+
+# 1. Clean up any old workflow files
+echo "  - Removing old workflow files..."
+rm -f "$WORKTREE_PATH"/TASK-*.md 2>/dev/null || true
+rm -f "$WORKTREE_PATH"/REVIEW-REQUEST-*.md 2>/dev/null || true
+rm -f "$WORKTREE_PATH"/REVIEW-RESULT-*.md 2>/dev/null || true
+
+# 2. Clean up any temporary markers
+echo "  - Removing recovery markers..."
+rm -f "$WORKTREE_PATH"/.claude-recovery-sent 2>/dev/null || true
+rm -f "$WORKTREE_PATH"/.claude-idle-reminder 2>/dev/null || true
+
+# 3. Return to main branch and update
+echo "  - Returning to main branch..."
+git checkout main > /dev/null 2>&1
+
+echo "  - Pulling latest from origin/main..."
+git fetch origin main > /dev/null 2>&1
+git merge origin/main --no-edit > /dev/null 2>&1 || {
+    echo -e "${YELLOW}Merge conflict, resetting to origin/main...${NC}"
+    git reset --hard origin/main
+}
+
+# 4. Clean up any task branches that were merged
+echo "  - Cleaning up merged branches..."
+git branch --merged main | grep -E "sequential$" | while read branch; do
+    if [ "$branch" != "* main" ]; then
+        git branch -d "$branch" 2>/dev/null && echo "    Deleted: $branch"
+    fi
+done
+
+# 5. Remove any stale untracked files
+echo "  - Cleaning untracked files..."
+git clean -fd > /dev/null 2>&1
+
+echo -e "${GREEN}✓ Cleanup complete - ready for next task${NC}"

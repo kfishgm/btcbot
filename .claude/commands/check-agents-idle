@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# Configuration
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+TMUX_SESSION="${PROJECT_NAME}-dev"
+
+# Check if tmux session exists
+if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    exit 1
+fi
+
+# Function to check if a pane shows Claude is idle
+check_pane_idle() {
+    local window=$1
+    local pane=$2
+    
+    # Capture the last 50 lines from the pane
+    local pane_content=$(tmux capture-pane -t "$TMUX_SESSION:$window.$pane" -p -S -50 2>/dev/null)
+    
+    if [ -z "$pane_content" ]; then
+        return 2
+    fi
+    
+    # Look for "esc to interrupt" OR "ctrl+b to run in background" which indicates active processing
+    if echo "$pane_content" | grep -qE "(esc to interrupt|ctrl\+b to run in background)"; then
+        return 1
+    fi
+    
+    return 0
+}
+
+# Find the Agents window
+agents_window=$(tmux list-windows -t "$TMUX_SESSION" -F "#{window_index}:#{window_name}" | grep "Agents" | cut -d: -f1)
+
+if [ -z "$agents_window" ]; then
+    exit 1
+fi
+
+# Check each agent pane
+all_idle=true
+
+check_pane_idle "$agents_window" 0 || all_idle=false
+check_pane_idle "$agents_window" 1 || all_idle=false
+check_pane_idle "$agents_window" 2 || all_idle=false
+
+if [ "$all_idle" = true ]; then
+    exit 0
+else
+    exit 1
+fi

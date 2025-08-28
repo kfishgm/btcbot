@@ -1,0 +1,81 @@
+#!/bin/bash
+# Cleanup script for transitioning from 4-agent to 3-agent system
+# This handles tasks that were in supervisor phase
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}=== Supervisor Transition Cleanup ===${NC}"
+echo "This script prepares tasks for the new 3-agent system"
+echo ""
+
+# Find tasks with supervisor-wip
+echo -e "${YELLOW}Finding tasks currently assigned to supervisor...${NC}"
+SUPERVISOR_WIP=$(gh issue list --state open --label "supervisor-wip" --json number --jq '.[].number')
+
+if [ -n "$SUPERVISOR_WIP" ]; then
+    echo "Found tasks with supervisor-wip:"
+    for task in $SUPERVISOR_WIP; do
+        echo "  - Task #$task"
+        # Remove supervisor-wip and implementation-done
+        gh issue edit $task --remove-label "supervisor-wip" --remove-label "implementation-done"
+        echo -e "    ${GREEN}✓ Removed supervisor-wip and implementation-done${NC}"
+    done
+else
+    echo "No tasks found with supervisor-wip"
+fi
+
+echo ""
+
+# Find tasks ready for supervisor (all 3 done, no supervisor-done)
+echo -e "${YELLOW}Finding tasks ready for supervisor (need implementer to complete)...${NC}"
+READY_FOR_SUPERVISOR=$(gh issue list --state open --label "architect-done" --label "test-done" --label "implementation-done" --json number,labels | \
+    jq -r '.[] | select(.labels | map(.name) | contains(["supervisor-done"]) | not) | .number')
+
+if [ -n "$READY_FOR_SUPERVISOR" ]; then
+    echo "Found tasks that need implementer to complete:"
+    for task in $READY_FOR_SUPERVISOR; do
+        # Check if it has supervisor-wip (already handled above)
+        if gh issue view $task --json labels -q '.labels[].name' | grep -q "supervisor-wip"; then
+            echo "  - Task #$task (already handled)"
+        else
+            echo "  - Task #$task"
+            # Remove implementation-done to allow reassignment
+            gh issue edit $task --remove-label "implementation-done"
+            echo -e "    ${GREEN}✓ Removed implementation-done for reassignment${NC}"
+        fi
+    done
+else
+    echo "No tasks found ready for supervisor"
+fi
+
+echo ""
+
+# Clean up any supervisor-done labels
+echo -e "${YELLOW}Cleaning up supervisor-done labels...${NC}"
+SUPERVISOR_DONE=$(gh issue list --state all --label "supervisor-done" --json number --jq '.[].number')
+
+if [ -n "$SUPERVISOR_DONE" ]; then
+    echo "Found tasks with supervisor-done:"
+    for task in $SUPERVISOR_DONE; do
+        echo "  - Task #$task"
+        gh issue edit $task --remove-label "supervisor-done" || true
+        echo -e "    ${GREEN}✓ Removed supervisor-done${NC}"
+    done
+else
+    echo "No tasks found with supervisor-done"
+fi
+
+echo ""
+echo -e "${GREEN}=== Cleanup Complete ===${NC}"
+echo ""
+echo "Next steps:"
+echo "1. Start the monitor with: .claude/pipeline/commands/github-monitor start --auto"
+echo "2. Implementation agent will be assigned the pending tasks"
+echo "3. Implementer will complete tasks by running quality checks and creating PRs"

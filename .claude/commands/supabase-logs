@@ -1,0 +1,18 @@
+#!/bin/bash
+# View logs from local Supabase instance
+
+echo "📋 Viewing Supabase logs..."
+
+# Check if Supabase is running
+if ! pnpm supabase status 2>/dev/null | grep -q "RUNNING"; then
+    echo "❌ Supabase is not running. Start it first with: ./claude/commands/supabase-start"
+    exit 1
+fi
+
+# Show logs
+pnpm supabase db logs
+
+echo ""
+echo "💡 Tips:"
+echo "  - Press Ctrl+C to stop viewing logs"
+echo "  - Logs are stored in: supabase/.temp/logs/"

@@ -1,0 +1,190 @@
+#!/bin/bash
+# Edit an existing task in tasks.md, backlog.md, and GitHub
+set -e
+
+# Check arguments
+if [ $# -lt 2 ]; then
+  echo "Usage: backlog-edit ISSUE_NUMBER \"action\" [arguments]"
+  echo ""
+  echo "Actions:"
+  echo "  title \"New Title\"                    - Update the title"
+  echo "  description \"New Description\"        - Update the description"
+  echo "  priority HIGH|MEDIUM|LOW             - Update priority"
+  echo "  dependencies \"Task IDs or None\"      - Update dependencies"
+  echo ""
+  echo "Examples:"
+  echo "  backlog-edit 200 title \"Improved Navigation System\""
+  echo "  backlog-edit 200 description \"Updated requirements...\""
+  echo "  backlog-edit 200 priority HIGH"
+  exit 1
+fi
+
+ISSUE_NUMBER="$1"
+ACTION="$2"
+shift 2
+NEW_VALUE="$@"
+
+# File paths
+TASKS_FILE="docs/tasks.md"
+BACKLOG_FILE="docs/product/backlog.md"
+
+# Verify issue exists
+if ! gh issue view "$ISSUE_NUMBER" &>/dev/null; then
+  echo "❌ Issue #$ISSUE_NUMBER not found"
+  exit 1
+fi
+
+echo "📝 Editing issue #$ISSUE_NUMBER"
+
+# Get current issue data
+CURRENT_TITLE=$(gh issue view "$ISSUE_NUMBER" --json title -q .title)
+CURRENT_BODY=$(gh issue view "$ISSUE_NUMBER" --json body -q .body)
+
+# Extract task ID from title (format: "TASK-ID: Title")
+if [[ "$CURRENT_TITLE" =~ ^([A-Z]+-[0-9]+):[[:space:]]*(.+)$ ]]; then
+  TASK_ID="${BASH_REMATCH[1]}"
+  TITLE_TEXT="${BASH_REMATCH[2]}"
+else
+  echo "❌ Issue title doesn't follow TASK-ID: Title format"
+  exit 1
+fi
+
+# Process the edit action
+case "$ACTION" in
+  title)
+    if [ -z "$NEW_VALUE" ]; then
+      echo "❌ New title cannot be empty"
+      exit 1
+    fi
+    
+    echo "Updating title to: $NEW_VALUE"
+    
+    # Update GitHub issue title (keep task ID)
+    gh issue edit "$ISSUE_NUMBER" --title "$TASK_ID: $NEW_VALUE"
+    
+    # Update in backlog.md (macOS compatible)
+    if [ -f "$BACKLOG_FILE" ]; then
+      temp_file=$(mktemp)
+      sed "s/\($TASK_ID:\)[^(]*/\1 $NEW_VALUE /" "$BACKLOG_FILE" > "$temp_file"
+      mv "$temp_file" "$BACKLOG_FILE"
+    fi
+    
+    # Update in tasks.md (macOS compatible)
+    if [ -f "$TASKS_FILE" ]; then
+      temp_file=$(mktemp)
+      sed "s/\*\*$TASK_ID\*\*:[^(]*/\*\*$TASK_ID\*\*: $NEW_VALUE /" "$TASKS_FILE" > "$temp_file"
+      mv "$temp_file" "$TASKS_FILE"
+    fi
+    
+    echo "✅ Title updated"
+    ;;
+    
+  description)
+    if [ -z "$NEW_VALUE" ]; then
+      echo "❌ New description cannot be empty"
+      exit 1
+    fi
+    
+    echo "Updating description..."
+    
+    # Update the Task Description section in GitHub issue
+    NEW_BODY=$(echo "$CURRENT_BODY" | awk -v desc="$NEW_VALUE" '
+      /^## Task Description/ { print; getline; print ""; print desc; in_desc=1; next }
+      /^## / && in_desc { in_desc=0 }
+      !in_desc { print }
+    ')
+    
+    gh issue edit "$ISSUE_NUMBER" --body "$NEW_BODY"
+    
+    # Update description in tasks.md if it has inline description
+    if [ -f "$TASKS_FILE" ]; then
+      # This is complex for multi-line, so we just update the reference
+      temp_file=$(mktemp)
+      sed "s/Description:.*/Description: See issue #$ISSUE_NUMBER (updated)/" "$TASKS_FILE" > "$temp_file"
+      mv "$temp_file" "$TASKS_FILE"
+    fi
+    
+    echo "✅ Description updated"
+    ;;
+    
+  priority)
+    # Validate priority value
+    if [[ ! "$NEW_VALUE" =~ ^(HIGH|MEDIUM|LOW)$ ]]; then
+      echo "❌ Priority must be HIGH, MEDIUM, or LOW"
+      exit 1
+    fi
+    
+    echo "Updating priority to: $NEW_VALUE"
+    
+    # Update in tasks.md
+    if [ -f "$TASKS_FILE" ]; then
+      # Find the task and update its priority line
+      awk -v task="$TASK_ID" -v pri="$NEW_VALUE" '
+        $0 ~ "\\*\\*"task"\\*\\*:" { found=1 }
+        found && /Priority:/ { sub(/Priority:.*/, "Priority: " pri); found=0 }
+        { print }
+      ' "$TASKS_FILE" > "$TASKS_FILE.tmp" && mv "$TASKS_FILE.tmp" "$TASKS_FILE"
+    fi
+    
+    # Add/update priority in GitHub issue metadata
+    if echo "$CURRENT_BODY" | grep -q "## Metadata"; then
+      # Update existing metadata
+      NEW_BODY=$(echo "$CURRENT_BODY" | awk -v pri="$NEW_VALUE" '
+        /\*\*Priority\*\*:/ { print "**Priority**: " pri; next }
+        { print }
+      ')
+      
+      # If Priority line doesn't exist in metadata, add it
+      if ! echo "$NEW_BODY" | grep -q "\*\*Priority\*\*:"; then
+        # Add priority after Metadata header (macOS compatible)
+        NEW_BODY=$(echo "$NEW_BODY" | awk -v pri="$NEW_VALUE" '/## Metadata/ { print; print "**Priority**: " pri; next } { print }')
+      fi
+    else
+      # Add metadata section with priority
+      NEW_BODY="$CURRENT_BODY
+
+## Metadata
+**Priority**: $NEW_VALUE"
+    fi
+    
+    gh issue edit "$ISSUE_NUMBER" --body "$NEW_BODY"
+    
+    echo "✅ Priority updated"
+    ;;
+    
+  dependencies)
+    echo "Updating dependencies to: $NEW_VALUE"
+    
+    # Update in tasks.md
+    if [ -f "$TASKS_FILE" ]; then
+      awk -v task="$TASK_ID" -v deps="$NEW_VALUE" '
+        $0 ~ "\\*\\*"task"\\*\\*:" { found=1 }
+        found && /Dependencies:/ { sub(/Dependencies:.*/, "Dependencies: " deps); found=0 }
+        { print }
+      ' "$TASKS_FILE" > "$TASKS_FILE.tmp" && mv "$TASKS_FILE.tmp" "$TASKS_FILE"
+    fi
+    
+    # Update Dependencies section in GitHub issue
+    NEW_BODY=$(echo "$CURRENT_BODY" | awk -v deps="$NEW_VALUE" '
+      /^## Dependencies/ { print; getline; print ""; print "- " deps; in_deps=1; next }
+      /^## / && in_deps { in_deps=0 }
+      !in_deps { print }
+    ')
+    
+    gh issue edit "$ISSUE_NUMBER" --body "$NEW_BODY"
+    
+    echo "✅ Dependencies updated"
+    ;;
+    
+  *)
+    echo "❌ Unknown action: $ACTION"
+    echo "Valid actions: title, description, priority, dependencies"
+    exit 1
+    ;;
+esac
+
+echo ""
+echo "✅ Issue #$ISSUE_NUMBER updated successfully"
+echo "   - Updated in GitHub"
+echo "   - Updated in tasks.md"
+echo "   - Updated in backlog.md (if applicable)"

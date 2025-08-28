@@ -1,0 +1,121 @@
+#!/bin/bash
+# Clean up ALL worktrees and branches for fresh start
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}=== Complete Worktree and Branch Cleanup ===${NC}"
+echo ""
+echo -e "${YELLOW}⚠️  WARNING: This will remove ALL worktrees and agent branches!${NC}"
+echo "This action will:"
+echo "  • Remove all agent worktrees (arch, test, impl, seq)"
+echo "  • Delete all local agent branches"
+echo "  • Delete all remote agent branches"
+echo ""
+read -p "Are you SURE you want to proceed? (yes/no): " CONFIRM
+
+if [ "$CONFIRM" != "yes" ]; then
+    echo "Cleanup cancelled."
+    exit 0
+fi
+
+echo ""
+echo -e "${BLUE}Starting cleanup...${NC}"
+
+# Step 1: Remove worktrees
+echo ""
+echo "Removing worktrees..."
+for worktree in tribot-arch tribot-test tribot-impl tribot-seq tribot-supervisor; do
+    WORKTREE_PATH="/Users/kfish/projects/$worktree"
+    if [ -d "$WORKTREE_PATH" ]; then
+        echo "  Removing $worktree..."
+        git worktree remove "$WORKTREE_PATH" --force 2>/dev/null || true
+    fi
+done
+echo -e "${GREEN}✅ Worktrees removed${NC}"
+
+# Step 2: Prune worktree list
+echo ""
+echo "Pruning worktree list..."
+git worktree prune
+echo -e "${GREEN}✅ Worktree list pruned${NC}"
+
+# Step 3: Switch to main branch
+echo ""
+echo "Switching to main branch..."
+git checkout main 2>/dev/null || git checkout -b main origin/main
+git pull origin main
+echo -e "${GREEN}✅ On main branch${NC}"
+
+# Step 4: Delete local branches
+echo ""
+echo "Deleting local agent branches..."
+git branch -D $(git branch | grep -E "(architect|test|impl|sequential|supervisor)" | grep -v main) 2>/dev/null || echo "  No local branches to delete"
+echo -e "${GREEN}✅ Local branches cleaned${NC}"
+
+# Step 5: Delete remote branches
+echo ""
+echo "Deleting remote agent branches..."
+echo "  This may take a moment..."
+
+# Get all remote branches matching patterns
+REMOTE_BRANCHES=$(git branch -r | grep -E "origin/.*(architect|test|implementation|sequential|supervisor)" | sed 's|origin/||' | grep -v HEAD || true)
+
+if [ -n "$REMOTE_BRANCHES" ]; then
+    COUNT=$(echo "$REMOTE_BRANCHES" | wc -l | tr -d ' ')
+    echo "  Found $COUNT remote branches to delete"
+    
+    # Delete in batches to avoid command line too long
+    echo "$REMOTE_BRANCHES" | while IFS= read -r branch; do
+        echo "    Deleting origin/$branch..."
+        git push origin --delete "$branch" 2>/dev/null || echo "      (already deleted or protected)"
+    done
+else
+    echo "  No remote branches to delete"
+fi
+echo -e "${GREEN}✅ Remote branches cleaned${NC}"
+
+# Step 6: Clean up any task-specific branches
+echo ""
+echo "Cleaning up task branches..."
+TASK_BRANCHES=$(git branch -r | grep -E "origin/[0-9]+-" | sed 's|origin/||' || true)
+if [ -n "$TASK_BRANCHES" ]; then
+    COUNT=$(echo "$TASK_BRANCHES" | wc -l | tr -d ' ')
+    echo "  Found $COUNT task branches"
+    echo "$TASK_BRANCHES" | while IFS= read -r branch; do
+        echo "    Deleting origin/$branch..."
+        git push origin --delete "$branch" 2>/dev/null || echo "      (already deleted or protected)"
+    done
+else
+    echo "  No task branches to delete"
+fi
+echo -e "${GREEN}✅ Task branches cleaned${NC}"
+
+# Step 7: Final cleanup
+echo ""
+echo "Running final Git cleanup..."
+git fetch --prune
+git gc --aggressive --prune=now
+echo -e "${GREEN}✅ Git cleanup complete${NC}"
+
+# Summary
+echo ""
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}✅ CLEANUP COMPLETE!${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+echo "Summary:"
+echo "  • All agent worktrees removed"
+echo "  • All agent branches deleted (local and remote)"
+echo "  • Repository cleaned and optimized"
+echo "  • Ready for fresh sequential primary developer setup"
+echo ""
+echo "Next steps:"
+echo "1. Run setup-sequential to create fresh worktree"
+echo "2. Start primary developer-monitor to begin workflow"
+echo ""

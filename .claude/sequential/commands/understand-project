@@ -1,0 +1,134 @@
+#!/bin/bash
+# Get comprehensive project understanding for the primary developer
+set -e
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+echo -e "${BLUE}=== TriBot Project Overview ===${NC}"
+echo ""
+
+# 1. Project Type & Stack
+echo -e "${CYAN}📦 Project Information:${NC}"
+echo "• Name: TriBot - Automated Trading Bot Platform"
+echo "• Type: Next.js 15 App Router + Supabase"
+echo "• UI: shadcn/ui components (modern minimalist)"
+echo "• Testing: Jest + Playwright (90% coverage target)"
+echo ""
+
+# 2. Current Features
+echo -e "${CYAN}✨ Core Features:${NC}"
+echo "• Multi-timeframe Smart DCA trading (4H, 1D, 1W)"
+echo "• Capital management with automatic profit retention"
+echo "• Idle capital optimization via Earn integration"
+echo "• Real-time monitoring dashboard"
+echo "• User role system (Standard to Enterprise)"
+echo ""
+
+# 3. Design System
+echo -e "${CYAN}🎨 Design System:${NC}"
+echo "• Component Library: shadcn/ui (ALWAYS use these first)"
+echo "• Color System: Semantic tokens only (bg-primary, text-secondary, etc.)"
+echo "• Style: Modern minimalist - clean, functional, no clutter"
+echo "• Shadows: Use shadow-sm or shadow-md (no gradients)"
+echo ""
+
+# 4. Available shadcn Components
+echo -e "${CYAN}🧩 Available shadcn/ui Components:${NC}"
+if command -v npx &> /dev/null; then
+    echo "Checking installed components..."
+    # List components from the UI directory
+    if [ -d "components/ui" ]; then
+        ls components/ui/*.tsx 2>/dev/null | sed 's|components/ui/||g' | sed 's|\.tsx||g' | while read comp; do
+            echo "  • $comp"
+        done
+    fi
+    echo ""
+    echo "To add new components: npx shadcn@latest add <component>"
+else
+    echo "  (npx not available - check components/ui/ directory)"
+fi
+echo ""
+
+# 5. Key Patterns
+echo -e "${CYAN}📐 Key Patterns to Follow:${NC}"
+if [ -f "PROJECT_CONTEXT.md" ]; then
+    echo "• API Routes: Try-catch with validation and proper error handling"
+    echo "• Components: Always include loading and error states"
+    echo "• Forms: Client + server validation with clear feedback"
+    echo "• Database: Use Supabase RLS policies for security"
+    echo "• Testing: Unit tests for logic, E2E for user flows"
+else
+    echo "  (PROJECT_CONTEXT.md not found - create it for patterns)"
+fi
+echo ""
+
+# 6. Business Rules
+echo -e "${CYAN}💼 Core Business Rules:${NC}"
+echo "• Only USDT pairs (BTC/USDT, ETH/USDT, etc.)"
+echo "• Spot markets only (no futures/margin)"
+echo "• Every cycle must close with USDT profit"
+echo "• Complete audit trail for all operations"
+echo "• Automatic profit savings to Funding wallet"
+echo ""
+
+# 7. Current State Check
+echo -e "${CYAN}📊 Current Project State:${NC}"
+
+# Check for TypeScript errors
+echo -n "• TypeScript Status: "
+if timeout 10s pnpm typecheck > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ No errors${NC}"
+else
+    echo -e "${YELLOW}⚠ Has errors (run 'pnpm typecheck' for details)${NC}"
+fi
+
+# Check for lint errors
+echo -n "• ESLint Status: "
+if timeout 10s pnpm lint > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ No errors${NC}"
+else
+    echo -e "${YELLOW}⚠ Has errors (run 'pnpm lint' for details)${NC}"
+fi
+
+# Check test status
+echo -n "• Test Status: "
+if timeout 30s pnpm test > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ All passing${NC}"
+else
+    echo -e "${YELLOW}⚠ Some failing (run 'pnpm test' for details)${NC}"
+fi
+
+# Check for TODOs
+TODO_COUNT=$(grep -r "TODO\|FIXME" --include="*.ts" --include="*.tsx" app/ components/ lib/ 2>/dev/null | wc -l || echo "0")
+echo "• TODOs/FIXMEs: $TODO_COUNT found"
+
+echo ""
+
+# 8. Quick Reference
+echo -e "${CYAN}⚡ Quick Commands:${NC}"
+echo "• npx shadcn@latest add <component> - Add UI component"
+echo "• pnpm test - Run unit tests"
+echo "• pnpm test:e2e:chromium - Run E2E tests"
+echo "• pnpm typecheck - Check TypeScript"
+echo "• pnpm lint - Check ESLint"
+echo "• validate-implementation - Run all checks"
+echo ""
+
+# 9. Important Files
+echo -e "${CYAN}📄 Key Documentation:${NC}"
+echo "• PROJECT_CONTEXT.md - Business context and patterns"
+echo "• CLAUDE.md - Development standards"
+echo "• docs/PRD.md - Product requirements"
+echo "• docs/patterns/ - Code patterns to follow"
+echo ""
+
+echo -e "${GREEN}Ready to implement! Remember:${NC}"
+echo "1. Use shadcn/ui components first"
+echo "2. Semantic colors only (no hardcoded colors)"
+echo "3. Complete implementations (no stubs/TODOs)"
+echo "4. All tests must pass before completing"

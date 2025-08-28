@@ -1,0 +1,51 @@
+#!/bin/bash
+# Clean up worktrees to resolve checkout conflicts
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_NAME="${PROJECT_NAME:-$(basename $PROJECT_ROOT)}"
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+
+# Color codes
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo -e "${YELLOW}Cleaning up worktrees to resolve conflicts...${NC}"
+
+# Function to clean a worktree
+clean_worktree() {
+  local worktree_path=$1
+  local agent_name=$2
+  
+  if [ -d "$worktree_path" ]; then
+    echo -e "${YELLOW}Cleaning $agent_name worktree...${NC}"
+    (
+      cd "$worktree_path" || return 1
+      
+      # Remove any TASK files
+      rm -f TASK-*.md
+      
+      # Stash any local changes to CLAUDE.md and mcp.md
+      if git status --porcelain | grep -q "CLAUDE.md\|mcp.md"; then
+        echo -e "  Stashing customized files..."
+        git stash push -m "Stash agent-specific configs before branch switch" -- CLAUDE.md docs/configuration/mcp.md 2>/dev/null || true
+      fi
+      
+      # Reset to clean state
+      git checkout main 2>/dev/null || git checkout master 2>/dev/null
+      git reset --hard HEAD
+      git clean -fd
+      
+      echo -e "${GREEN}✓ Cleaned $agent_name worktree${NC}"
+    )
+  fi
+}
+
+# Clean all worktrees
+clean_worktree "$PARENT_DIR/${PROJECT_NAME}-arch" "Architecture"
+clean_worktree "$PARENT_DIR/${PROJECT_NAME}-test" "Test" 
+clean_worktree "$PARENT_DIR/${PROJECT_NAME}-impl" "Implementation"
+
+echo -e "${GREEN}✓ All worktrees cleaned${NC}"
+echo "You can now run /next-task again"

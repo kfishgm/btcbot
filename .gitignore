@@ -1,0 +1,118 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# SWC
+.swc/
+
+# Worktrees
+michi-template-*/
+{{PROJECT_NAME}}-*/
+
+# MCP configuration
+.mcp/config.json
+.mcp.json
+
+
+
+# Claude local settings
+.claude/settings.local.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# Agent-specific files that should never be committed
+# TASK assignment files (e.g., TASK-123.md) should never be committed
+# These are created by the pipeline in agent worktrees
+TASK-[0-9]*.md
+TASK-*.md
+
+# Agent-specific CLAUDE files (but not templates)
+CLAUDE-ARCHITECT.md
+CLAUDE-TESTER.md
+CLAUDE-IMPLEMENTER.md
+CLAUDE-SUPERVISOR.md
+
+# MCP config contains worktree-specific paths
+.mcp/config.json
+
+# Documentation files that should never be committed (token reduction)
+*-implementation-guide.md
+*-testing-guide.md
+*-architecture-*.md
+*-design.md
+docs/architecture/task-*
+docs/architecture/nextjs-app-router-complete-guide.md
+
+# Archived documentation (not needed for searches)
+docs/archive/
+
+# Supervisor monitor state (deprecated)
+.claude/.supervisor-monitor-state
+
+# Claude workflow tracking (local only)
+.claude/current-task.txt
+.claude-recovery-sent
+.claude-idle-reminder
+.dev-server.pid
+
+# Code review files (created during sequential workflow)
+REVIEW-REQUEST-*.md
+REVIEW-RESULT-*.md
+
+# Pipeline state files
+.claude/pipeline/state/*.pid
+
+# Playwright
+playwright/.auth
+playwright-report/
+test-results/
+e2e-results/
+playwright/screenshots/
+playwright/videos/
+playwright/traces/

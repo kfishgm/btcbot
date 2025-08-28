@@ -1,0 +1,186 @@
+#!/bin/bash
+# Run all quality checks (lint, typecheck, build, tests)
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKTREE_PATH="${WORKTREE_PATH:-$(pwd)}"
+
+echo "=== Running Quality Checks ==="
+echo "Path: $WORKTREE_PATH"
+echo ""
+
+# Clean up any existing processes before starting
+"$SCRIPT_DIR/cleanup-processes.sh"
+
+# Track which checks have passed
+passed_checks=""
+
+# FIRST: Check for stubs and suppressions (implementer only)
+# This runs before other checks to save time
+AGENT_ROLE=$(basename "$WORKTREE_PATH" | grep -o 'impl\|test\|arch' || echo "main")
+if [[ "$AGENT_ROLE" == "impl" ]]; then
+    echo "Checking for stubs, suppressions, and any types..."
+    if ! node "$SCRIPT_DIR/../hooks/check-stubs-and-suppressions.js"; then
+        echo "❌ Code quality violations detected"
+        echo ""
+        echo "=== Quality Check STOPPED ==="
+        echo "✅ Passed: none"
+        echo "❌ Failed: Stubs/Suppressions Check"
+        echo "⏩ Skipped: ESLint, TypeScript, Build, Tests, E2E Tests"
+        echo ""
+        echo "You must:"
+        echo "  • Implement real functionality (no stubs)"
+        echo "  • Fix issues instead of suppressing them"
+        echo "  • Use proper types instead of 'any'"
+        echo ""
+        echo "Fix these violations and run quality checks again."
+        "$SCRIPT_DIR/cleanup-processes.sh"
+        exit 1
+    else
+        echo "✅ No stubs, suppressions, or any types detected"
+        passed_checks="Quality Check"
+    fi
+    echo ""
+fi
+
+# ESLint
+echo "Running ESLint..."
+if ! "$SCRIPT_DIR/run-lint"; then
+    echo "❌ Linting failed"
+    echo ""
+    echo "=== Quality Check STOPPED ==="
+    echo "✅ Passed: ${passed_checks:-none}"
+    echo "❌ Failed: ESLint"
+    echo "⏩ Skipped: TypeScript, Build, Tests, E2E Tests"
+    echo ""
+    echo "Fix the ESLint errors and run quality checks again."
+    "$SCRIPT_DIR/cleanup-processes.sh"
+    exit 1
+else
+    echo "✅ Linting passed"
+    passed_checks="ESLint"
+fi
+
+# TypeScript
+echo ""
+echo "Running TypeScript check..."
+if ! "$SCRIPT_DIR/run-typecheck"; then
+    echo "❌ TypeScript check failed"
+    echo ""
+    echo "=== Quality Check STOPPED ==="
+    echo "✅ Passed: $passed_checks"
+    echo "❌ Failed: TypeScript"
+    echo "⏩ Skipped: Build, Tests, E2E Tests"
+    echo ""
+    echo "Fix the TypeScript errors and run quality checks again."
+    "$SCRIPT_DIR/cleanup-processes.sh"
+    exit 1
+else
+    echo "✅ TypeScript check passed"
+    passed_checks="$passed_checks, TypeScript"
+fi
+
+# Build
+echo ""
+echo "Running build..."
+if ! "$SCRIPT_DIR/run-build"; then
+    echo "❌ Build failed"
+    echo ""
+    echo "=== Quality Check STOPPED ==="
+    echo "✅ Passed: $passed_checks"
+    echo "❌ Failed: Build"
+    echo "⏩ Skipped: Tests, E2E Tests"
+    echo ""
+    echo "Fix the build errors and run quality checks again."
+    "$SCRIPT_DIR/cleanup-processes.sh"
+    exit 1
+else
+    echo "✅ Build passed"
+    passed_checks="$passed_checks, Build"
+fi
+
+# Tests - full suite for everyone including supervisor
+echo ""
+echo "Running tests..."
+if ! "$SCRIPT_DIR/run-tests"; then
+    echo "❌ Tests failed"
+    echo ""
+    echo "=== Quality Check STOPPED ==="
+    echo "✅ Passed: $passed_checks"
+    echo "❌ Failed: Tests"
+    echo "⏩ Skipped: E2E Tests"
+    echo ""
+    echo "Fix the failing tests and run quality checks again."
+    "$SCRIPT_DIR/cleanup-processes.sh"
+    exit 1
+else
+    echo "✅ Tests passed"
+    passed_checks="$passed_checks, Tests"
+fi
+
+# Check for skipped tests (only in git-tracked files)
+echo ""
+echo "Checking for skipped tests..."
+# Use git ls-files to only check tracked files (respects .gitignore)
+TEST_FILES=$(git ls-files '*.test.ts' '*.test.tsx' '*.test.js' '*.test.jsx' \
+             '*.spec.ts' '*.spec.tsx' '*.spec.js' '*.spec.jsx' 2>/dev/null || true)
+if [ -n "$TEST_FILES" ]; then
+    SKIP_COUNT=$(echo "$TEST_FILES" | xargs grep -E "\.(skip|only)\(|^[[:space:]]*(xdescribe|xit|fdescribe|fit)\(" 2>/dev/null | wc -l | tr -d ' ')
+else
+    SKIP_COUNT=0
+fi
+if [ "$SKIP_COUNT" -gt 0 ]; then
+    echo "❌ Found $SKIP_COUNT skipped or focused tests"
+    echo ""
+    echo "=== Quality Check STOPPED ==="
+    echo "✅ Passed: $passed_checks"
+    echo "❌ Failed: Skipped Tests Check"
+    echo "⏩ Skipped: E2E Tests"
+    echo ""
+    echo "Tests with .skip(), .only(), xdescribe, xit, fdescribe, or fit are not allowed."
+    echo "You must fix failing tests, not skip them."
+    echo "If a test is invalid, delete it with justification."
+    echo ""
+    if [ -n "$TEST_FILES" ]; then
+        echo "$TEST_FILES" | xargs grep -E "\.(skip|only)\(|^[[:space:]]*(xdescribe|xit|fdescribe|fit)\(" 2>/dev/null | head -10
+    fi
+    "$SCRIPT_DIR/cleanup-processes.sh"
+    exit 1
+else
+    echo "✅ No skipped tests found"
+    passed_checks="$passed_checks, No Skipped Tests"
+fi
+
+# E2E Tests (only if e2e directory exists and has tests)
+if [ -d "e2e" ] && find e2e -name "*.spec.ts" -type f | grep -q .; then
+    echo ""
+    echo "Running E2E tests..."
+    if ! "$SCRIPT_DIR/run-e2e-tests"; then
+        echo "❌ E2E tests failed"
+        echo ""
+        echo "=== Quality Check STOPPED ==="
+        echo "✅ Passed: $passed_checks"
+        echo "❌ Failed: E2E Tests"
+        echo ""
+        echo "Fix the failing E2E tests and run quality checks again."
+        "$SCRIPT_DIR/cleanup-processes.sh"
+        exit 1
+    else
+        echo "✅ E2E tests passed"
+        passed_checks="$passed_checks, E2E Tests"
+    fi
+fi
+
+# Clean up all processes after quality checks
+echo ""
+echo "Cleaning up after quality checks..."
+"$SCRIPT_DIR/cleanup-processes.sh"
+
+# If we got here, all checks passed!
+echo ""
+echo "=== Quality Check Summary ==="
+echo "✅ All quality checks passed!"
+echo "✅ Passed: $passed_checks"
+echo ""
+echo "The code is ready for deployment!"
+exit 0

@@ -1,0 +1,179 @@
+#!/bin/bash
+# Monitor for sequential primary developer with idle detection
+
+# Dynamic detection - PROJECT AGNOSTIC
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+PROJECT_NAME="${PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+WORKTREE_PATH="$PARENT_DIR/${PROJECT_NAME_LOWER}-seq"
+SESSION="${PROJECT_NAME_LOWER}-seq"
+
+# Colors
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+log() {
+    echo "[$(date '+%H:%M:%S')] $*"
+}
+
+monitor_loop() {
+    log "Sequential workflow monitor started"
+    log "Monitoring session: $SESSION"
+    log "Worktree: $WORKTREE_PATH"
+    
+    while true; do
+        # Check if primary developer Claude is running (claude runs as 'node' process)
+        PANE_EXISTS=$(tmux list-panes -t $SESSION:0.0 2>/dev/null | wc -l)
+        if [ "$PANE_EXISTS" -gt 0 ]; then
+            # Check if there's a node/claude process in the primary developer pane
+            CLAUDE_RUNNING=$(tmux capture-pane -t $SESSION:0.0 -p 2>/dev/null | grep -c "│\|╭\|>" || echo "0")
+            if [ "$CLAUDE_RUNNING" -gt 0 ]; then
+                # Claude IS running - check if it's actually active or idle
+                
+                # Use check-agent-idle (returns 0 if idle, 1 if active)
+                if "$PROJECT_ROOT/.claude/commands/check-agent-idle" 0 2>/dev/null; then
+                # Claude is IDLE (no "esc to interrupt" or "ctrl+b" found)
+                
+                # Check if there's an active task
+                TASK=$(gh issue list --assignee @me --label "sequential-wip" --json number -q '.[0].number' 2>/dev/null)
+                
+                if [ -n "$TASK" ]; then
+                    log "${YELLOW}Primary developer idle with active task #$TASK - sending reminder${NC}"
+                    
+                    # Check progress from labels
+                    LABELS=$(gh issue view $TASK --json labels -q '.labels[].name' 2>/dev/null | grep -E '-(wip|done)$' || echo "")
+                    
+                    # Build reminder based on state
+                    if echo "$LABELS" | grep -q "wip"; then
+                        AGENT=$(echo "$LABELS" | grep "wip" | head -1 | sed 's/-wip//')
+                        MSG="You have task #$TASK with $AGENT in progress. Check if the subagent completed and continue."
+                    elif echo "$LABELS" | grep -q "done"; then
+                        COMPLETED=$(echo "$LABELS" | grep "done" | sed 's/-done//' | paste -sd ', ')
+                        MSG="You have task #$TASK with agents completed: $COMPLETED. Continue with next agent or run .claude/sequential/commands/complete-task."
+                    else
+                        MSG="You have task #$TASK started. Check .claude/sequential/commands/check-progress to see status."
+                    fi
+                    
+                    # Send reminder with proper pattern
+                    # Clear any partial input first
+                    tmux send-keys -t $SESSION:0.0 C-c
+                    sleep 0.5
+                    # Send the message
+                    tmux send-keys -t $SESSION:0.0 "$MSG"
+                    sleep 0.5
+                    # Send enter to submit
+                    tmux send-keys -t $SESSION:0.0 C-m
+                    
+                    # Wait longer before next reminder (5 minutes)
+                    sleep 300
+                else
+                    # Idle but no active task - check for new tasks
+                    # First try with "task" label
+                    NEW_TASK=$(gh issue list --assignee @me --label task --state open \
+                        --json number,labels \
+                        --jq '.[] | select(.labels | map(.name) | contains(["sequential-wip"]) | not) | .number' \
+                        2>/dev/null | head -1)
+                    
+                    # If no task label, try ANY open issue
+                    if [ -z "$NEW_TASK" ]; then
+                        NEW_TASK=$(gh issue list --assignee @me --state open \
+                            --json number,labels \
+                            --jq '.[] | select(.labels | map(.name) | contains(["sequential-wip"]) | not) | .number' \
+                            2>/dev/null | head -1)
+                    fi
+                    
+                    if [ -n "$NEW_TASK" ]; then
+                        log "${GREEN}New task available: #$NEW_TASK - notifying primary developer${NC}"
+                        # Send notification with proper pattern
+                        local new_task_msg="New task #$NEW_TASK is available. Use .claude/sequential/commands/start-task $NEW_TASK to begin."
+                        # Clear any partial input first
+                        tmux send-keys -t $SESSION:0.0 C-c
+                        sleep 0.5
+                        # Send the message
+                        tmux send-keys -t $SESSION:0.0 "$new_task_msg"
+                        sleep 0.5
+                        # Send enter to submit
+                        tmux send-keys -t $SESSION:0.0 C-m
+                        sleep 300
+                    fi
+                fi
+                else
+                    # Claude is ACTIVE (has "esc to interrupt" or running task)
+                    # Don't log too frequently
+                    :
+                fi
+            else
+                # Claude process not detected in pane - need to restart
+                log "${YELLOW}Primary developer not running - checking for recovery${NC}"
+            
+            # Check for active task that needs recovery
+            TASK=$(gh issue list --assignee @me --label "sequential-wip" --json number -q '.[0].number' 2>/dev/null)
+            
+            if [ -n "$TASK" ]; then
+                # Get progress from labels
+                LABELS=$(gh issue view $TASK --json labels -q '.labels[].name' 2>/dev/null | grep -E '-(wip|done)$' || echo "")
+                
+                # Build recovery message
+                if echo "$LABELS" | grep -q "wip"; then
+                    AGENT=$(echo "$LABELS" | grep "wip" | head -1 | sed 's/-wip//')
+                    MSG="Recovery: Task #$TASK has $AGENT in progress. Check git log for recent work. The subagent may have completed - verify and continue."
+                elif echo "$LABELS" | grep -q "done"; then
+                    COMPLETED=$(echo "$LABELS" | grep "done" | sed 's/-done//' | paste -sd ', ')
+                    MSG="Recovery: Task #$TASK has completed: $COMPLETED. Continue with next agent or run .claude/sequential/commands/complete-task if all done."
+                else
+                    MSG="Recovery: Task #$TASK is in progress. Use .claude/sequential/commands/check-progress to see status and continue."
+                fi
+                
+                log "Starting primary developer with recovery message"
+                tmux send-keys -t $SESSION:0.0 "cd $WORKTREE_PATH" C-m
+                sleep 1
+                # Write message to temp file to avoid escaping issues
+                MSG_FILE="/tmp/claude-recovery-msg-$$"
+                echo "$MSG" > "$MSG_FILE"
+                tmux send-keys -t $SESSION:0.0 "cat '$MSG_FILE' | claude --model opus --dangerously-skip-permissions && rm -f '$MSG_FILE'" C-m
+                
+            else
+                # No active task - check for new work
+                # First try with "task" label
+                NEW_TASK=$(gh issue list --assignee @me --label task --state open \
+                    --json number,labels \
+                    --jq '.[] | select(.labels | map(.name) | contains(["sequential-wip"]) | not) | .number' \
+                    2>/dev/null | head -1)
+                
+                # If no task label, try ANY open issue
+                if [ -z "$NEW_TASK" ]; then
+                    NEW_TASK=$(gh issue list --assignee @me --state open \
+                        --json number,labels \
+                        --jq '.[] | select(.labels | map(.name) | contains(["sequential-wip"]) | not) | .number' \
+                        2>/dev/null | head -1)
+                fi
+                
+                if [ -n "$NEW_TASK" ]; then
+                    log "Starting primary developer with new task #$NEW_TASK"
+                    tmux send-keys -t $SESSION:0.0 "cd $WORKTREE_PATH" C-m
+                    sleep 1
+                    # Write message to temp file to avoid escaping issues
+                    MSG_FILE="/tmp/claude-newtask-msg-$$"
+                    echo "You are the sequential primary developer. Task #$NEW_TASK is available. Use .claude/sequential/commands/start-task $NEW_TASK to begin." > "$MSG_FILE"
+                    tmux send-keys -t $SESSION:0.0 "cat '$MSG_FILE' | claude --model opus --dangerously-skip-permissions && rm -f '$MSG_FILE'" C-m
+                else
+                    log "No tasks available - primary developer remains stopped"
+                fi
+            fi
+            
+                # Wait longer after restart to avoid rapid cycling
+                sleep 60
+            fi
+        fi
+        
+        # Standard check interval
+        sleep 30
+    done
+}
+
+# Main
+trap '' PIPE  # Ignore SIGPIPE
+monitor_loop

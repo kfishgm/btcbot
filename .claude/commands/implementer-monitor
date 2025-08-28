@@ -1,0 +1,49 @@
+#!/bin/bash
+# Monitor implementer pane and send reminders when idle
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Configuration
+CHECK_INTERVAL=30
+IMPLEMENTER_PANE="tribot-dev:1.2"  # Implementation pane (window 1, pane 2)
+
+# The reminder message
+REMINDER_MESSAGE='You will make all tests pass without mocking or hardcoding in production code, you will write type safe code to not break typecheck, you will not use `any` or any eslint-disable or similar. All failing tests must either be implemented if missing or fix mocks. tests, typecheck, lint, and build must all pass before you complete-task. NO SHORTCUTS, no adding .skip or .only, no deleting moving or renaming tests, no removing expectations. You will follow this to the letter. You are the implementer in TDD and your job is to make things GREEN. NO `if (process.env.NODE_ENV === '"'"'test'"'"' && typeof jest !== '"'"'undefined'"'"') {` IN PRODUCTION CODE'
+
+echo -e "${BLUE}=== Implementer Monitor Started ===${NC}"
+echo "Monitoring pane: $IMPLEMENTER_PANE"
+echo "Check interval: ${CHECK_INTERVAL}s"
+echo "Press Ctrl+C to stop"
+echo ""
+
+while true; do
+    # Capture the implementer pane content
+    PANE_CONTENT=$(tmux capture-pane -t "$IMPLEMENTER_PANE" -p 2>/dev/null || echo "")
+    
+    # Check if pane exists
+    if [ -z "$PANE_CONTENT" ]; then
+        echo -e "${YELLOW}Warning: Could not capture pane $IMPLEMENTER_PANE${NC}"
+        sleep $CHECK_INTERVAL
+        continue
+    fi
+    
+    # Check if "esc to interrupt" is visible (Claude is active)
+    if echo "$PANE_CONTENT" | grep -q "esc to interrupt"; then
+        echo -e "${GREEN}✓ Implementer is active ($(date +%H:%M:%S))${NC}"
+    else
+        # Check if implementer seems idle (no "esc to interrupt")
+        echo -e "${YELLOW}⚠ Implementer appears idle, sending reminder... ($(date +%H:%M:%S))${NC}"
+        
+        # Send the reminder message
+        tmux send-keys -t "$IMPLEMENTER_PANE" "$REMINDER_MESSAGE" Enter
+        
+        echo "Reminder sent!"
+    fi
+    
+    # Wait before next check
+    sleep $CHECK_INTERVAL
+done

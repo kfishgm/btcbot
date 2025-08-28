@@ -1,0 +1,34 @@
+#!/bin/bash
+# Fix broken task state (label applied but no branch)
+set -e
+
+TASK_ID=$1
+
+if [ -z "$TASK_ID" ]; then
+    echo "Usage: fix-task-state <issue-number>"
+    echo "Removes sequential-wip label so task can be restarted"
+    exit 1
+fi
+
+echo "Fixing task #$TASK_ID state..."
+
+# Remove the sequential-wip label
+gh issue edit $TASK_ID --remove-label "sequential-wip" 2>/dev/null || {
+    echo "No sequential-wip label to remove"
+}
+
+# Check for and clean up branch if it exists
+BRANCH="$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')-sequential"
+if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+    echo "Found local branch $BRANCH, cleaning up..."
+    # Switch away from branch if we're on it
+    CURRENT=$(git branch --show-current)
+    if [ "$CURRENT" = "$BRANCH" ]; then
+        git checkout feature/tribot-sequential || git checkout -b feature/tribot-sequential origin/main
+    fi
+    # Delete the branch
+    git branch -D $BRANCH
+    echo "Deleted branch $BRANCH"
+fi
+
+echo "✅ Task #$TASK_ID state fixed - you can now run start-task again"

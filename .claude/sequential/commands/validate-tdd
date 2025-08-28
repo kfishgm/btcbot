@@ -1,0 +1,171 @@
+#!/bin/bash
+# Validate that TDD practices are being followed
+# Checks that tests exist and were written before implementation
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}=== TDD Validation ===${NC}"
+echo ""
+
+VALIDATION_PASSED=true
+WARNINGS=0
+
+# Function to check if tests exist for a component/feature
+check_tests_exist() {
+    local feature_name=$1
+    local has_unit_tests=false
+    local has_e2e_tests=false
+    
+    # Check for unit tests
+    if find __tests__ -name "*.test.ts*" -o -name "*.spec.ts*" 2>/dev/null | grep -q .; then
+        has_unit_tests=true
+    fi
+    
+    # Check for E2E tests
+    if find e2e -name "*.spec.ts" 2>/dev/null | grep -q .; then
+        has_e2e_tests=true
+    fi
+    
+    if [ "$has_unit_tests" = false ]; then
+        echo -e "${RED}✗ No unit tests found${NC}"
+        VALIDATION_PASSED=false
+    else
+        echo -e "${GREEN}✓ Unit tests exist${NC}"
+    fi
+    
+    if [ "$has_e2e_tests" = false ]; then
+        echo -e "${YELLOW}⚠ No E2E tests found (warning)${NC}"
+        ((WARNINGS++))
+    else
+        echo -e "${GREEN}✓ E2E tests exist${NC}"
+    fi
+}
+
+# Check git history to verify tests were committed before implementation
+check_tdd_order() {
+    echo -e "\n${BLUE}Checking TDD commit order...${NC}"
+    
+    # Get the last 10 commits
+    local commits=$(git log --oneline -10 --name-only 2>/dev/null)
+    
+    # Look for test commits before implementation commits
+    local found_test_commit=false
+    local found_impl_after_test=false
+    
+    while IFS= read -r line; do
+        if echo "$line" | grep -qE "(test|spec)\.(ts|tsx)$"; then
+            found_test_commit=true
+        elif [ "$found_test_commit" = true ] && echo "$line" | grep -qE "\.(ts|tsx)$" | grep -vE "(test|spec)\."; then
+            found_impl_after_test=true
+            break
+        fi
+    done <<< "$commits"
+    
+    if [ "$found_impl_after_test" = true ]; then
+        echo -e "${GREEN}✓ Tests were committed before implementation (good TDD!)${NC}"
+    elif [ "$found_test_commit" = true ]; then
+        echo -e "${YELLOW}⚠ Tests found but order unclear${NC}"
+        ((WARNINGS++))
+    else
+        echo -e "${YELLOW}⚠ No test commits found in recent history${NC}"
+        ((WARNINGS++))
+    fi
+}
+
+# Check if tests are meaningful (not just placeholders)
+check_test_quality() {
+    echo -e "\n${BLUE}Checking test quality...${NC}"
+    
+    local placeholder_count=0
+    local todo_count=0
+    
+    # Check for placeholder tests (e.g., empty it blocks, it.todo, it.skip)
+    for test_file in $(find __tests__ e2e -name "*.test.ts*" -o -name "*.spec.ts*" 2>/dev/null); do
+        if grep -qE "it\.(todo|skip)" "$test_file" 2>/dev/null; then
+            ((todo_count++))
+        fi
+        if grep -qE "it\(['\"].*['\"],\s*\(\)\s*=>\s*\{\s*\}\)" "$test_file" 2>/dev/null; then
+            ((placeholder_count++))
+        fi
+    done
+    
+    if [ $placeholder_count -gt 0 ]; then
+        echo -e "${RED}✗ Found $placeholder_count empty/placeholder tests${NC}"
+        VALIDATION_PASSED=false
+    else
+        echo -e "${GREEN}✓ No placeholder tests found${NC}"
+    fi
+    
+    if [ $todo_count -gt 0 ]; then
+        echo -e "${YELLOW}⚠ Found $todo_count TODO/SKIP tests${NC}"
+        ((WARNINGS++))
+    else
+        echo -e "${GREEN}✓ No TODO/SKIP tests${NC}"
+    fi
+}
+
+# Run test coverage check
+check_test_coverage() {
+    echo -e "\n${BLUE}Checking test coverage...${NC}"
+    
+    # Run tests with coverage (if available)
+    if command -v pnpm &> /dev/null && [ -f "package.json" ]; then
+        if grep -q "\"test:coverage\"" package.json 2>/dev/null; then
+            echo "Running coverage check..."
+            if pnpm test:coverage --silent 2>/dev/null | grep -q "All files"; then
+                echo -e "${GREEN}✓ Coverage report generated${NC}"
+            else
+                echo -e "${YELLOW}⚠ Could not generate coverage report${NC}"
+                ((WARNINGS++))
+            fi
+        else
+            echo -e "${YELLOW}⚠ No test:coverage script found${NC}"
+            ((WARNINGS++))
+        fi
+    fi
+}
+
+# Main validation
+echo -e "${BLUE}1. Checking for test files...${NC}"
+check_tests_exist
+
+echo -e "\n${BLUE}2. Verifying TDD practice...${NC}"
+check_tdd_order
+
+echo -e "\n${BLUE}3. Validating test quality...${NC}"
+check_test_quality
+
+echo -e "\n${BLUE}4. Coverage analysis...${NC}"
+check_test_coverage
+
+# Summary
+echo ""
+echo -e "${BLUE}=== TDD Validation Summary ===${NC}"
+
+if [ "$VALIDATION_PASSED" = true ]; then
+    if [ $WARNINGS -eq 0 ]; then
+        echo -e "${GREEN}✅ TDD validation PASSED with no warnings!${NC}"
+        echo "Tests are properly written before implementation."
+    else
+        echo -e "${GREEN}✅ TDD validation PASSED with $WARNINGS warning(s)${NC}"
+        echo "Consider addressing the warnings for better TDD practice."
+    fi
+    exit 0
+else
+    echo -e "${RED}❌ TDD validation FAILED${NC}"
+    echo ""
+    echo "To follow TDD properly:"
+    echo "1. Write tests FIRST (both unit and E2E)"
+    echo "2. See tests fail (RED phase)"
+    echo "3. Write minimal code to pass tests (GREEN phase)"
+    echo "4. Refactor while keeping tests green (REFACTOR phase)"
+    echo ""
+    echo "Run this check again after following TDD practices."
+    exit 1
+fi

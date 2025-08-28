@@ -1,0 +1,107 @@
+#!/bin/bash
+# Regenerate CLAUDE.md files for all agents with updated content
+set -e
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo -e "${YELLOW}=== Regenerating CLAUDE.md files for all agents ===${NC}"
+
+# Agent configurations
+AGENTS="architect:arch test:test implementation:impl"
+
+# Function to regenerate CLAUDE.md for an agent
+regenerate_claude_md() {
+    local agent_role=$1
+    local agent_suffix=$2
+    local worktree_path="../${PROJECT_NAME_LOWER}-${agent_suffix}"
+    
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${YELLOW}⚠️  Worktree not found: $worktree_path${NC}"
+        return
+    fi
+    
+    echo -e "${GREEN}Regenerating CLAUDE.md for $agent_role agent...${NC}"
+    
+    # Copy base CLAUDE.md
+    if [ -f "$PROJECT_ROOT/.claude/CLAUDE.md" ]; then
+        cp "$PROJECT_ROOT/.claude/CLAUDE.md" "$worktree_path/CLAUDE.md"
+    else
+        echo -e "${RED}❌ Base CLAUDE.md not found${NC}"
+        return
+    fi
+    
+    # Determine template file name and role name
+    local template_file=""
+    local role_name=""
+    
+    case "$agent_role" in
+        architect)
+            template_file="CLAUDE-ARCHITECT.md.template"
+            role_name="ARCHITECT"
+            ;;
+        test)
+            template_file="CLAUDE-TESTER.md.template"
+            role_name="TESTER"
+            ;;
+        implementation)
+            template_file="CLAUDE-IMPLEMENTER.md.template"
+            role_name="IMPLEMENTER"
+            ;;
+        supervisor)
+            template_file="CLAUDE-SUPERVISOR.md.template"
+            role_name="SUPERVISOR"
+            ;;
+    esac
+    
+    # Append agent-specific content
+    if [ -f "$PROJECT_ROOT/.claude/templates/${template_file}" ]; then
+        echo -e "\n\n# ==================== ${role_name} AGENT INSTRUCTIONS ====================\n" >> "$worktree_path/CLAUDE.md"
+        
+        # Substitute variables and append template
+        COMPONENT_PREFIX=$(echo $PROJECT_NAME | sed 's/-\(.\)/\U\1/g' | sed 's/^\(.\)/\U\1/')
+        sed -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+            -e "s|{{PROJECT_ROOT}}|$PROJECT_ROOT|g" \
+            -e "s|{{WORKTREE_PATH}}|$worktree_path|g" \
+            -e "s|{{ComponentPrefix}}|$COMPONENT_PREFIX|g" \
+            "$PROJECT_ROOT/.claude/templates/${template_file}" >> "$worktree_path/CLAUDE.md"
+    else
+        echo -e "${RED}❌ Template not found: ${template_file}${NC}"
+        return
+    fi
+    
+    # Add warning about not committing
+    echo -e "\n\n# ⚠️ IMPORTANT: DO NOT COMMIT THESE FILES ⚠️" >> "$worktree_path/CLAUDE.md"
+    echo -e "# The following files have been customized for the ${role_name} agent and should NEVER be committed:" >> "$worktree_path/CLAUDE.md"
+    echo -e "# - CLAUDE.md (this file)" >> "$worktree_path/CLAUDE.md"
+    echo -e "# - .mcp/config.json (contains worktree-specific paths)" >> "$worktree_path/CLAUDE.md"
+    echo -e "# - docs/configuration/mcp.md (contains worktree-specific paths)" >> "$worktree_path/CLAUDE.md"
+    echo -e "# NEVER use 'git add .' in this worktree. Always use specific file paths when staging changes." >> "$worktree_path/CLAUDE.md"
+    
+    echo -e "${GREEN}✅ CLAUDE.md regenerated for $agent_role agent${NC}"
+}
+
+# Regenerate for all agents
+for agent_config in $AGENTS; do
+    agent_role="${agent_config%:*}"
+    agent_suffix="${agent_config#*:}"
+    regenerate_claude_md "$agent_role" "$agent_suffix"
+done
+
+echo -e "${GREEN}=== CLAUDE.md regeneration complete! ===${NC}"
+echo ""
+echo "All agent CLAUDE.md files have been updated with:"
+echo "  - Reference to process-utils.sh (not process-utils-lean.sh)"
+echo "  - Latest base instructions"
+echo "  - Agent-specific instructions"
+echo ""
+echo "The safe_merge function in git-utils.sh will now preserve these files during merges."

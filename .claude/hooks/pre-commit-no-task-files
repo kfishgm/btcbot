@@ -1,0 +1,25 @@
+#!/bin/bash
+# Pre-commit hook to prevent TASK-*.md files from being committed
+
+# Check if any TASK files are staged
+TASK_FILES=$(git diff --cached --name-only | grep -E "TASK-.*\.md$" || true)
+
+if [ -n "$TASK_FILES" ]; then
+    echo "❌ ERROR: TASK files are staged for commit!"
+    echo ""
+    echo "The following TASK files must not be committed:"
+    echo "$TASK_FILES"
+    echo ""
+    echo "TASK files are temporary assignment files for the multi-agent workflow."
+    echo "They should never be committed to version control."
+    echo ""
+    echo "To fix this:"
+    echo "  git reset HEAD $TASK_FILES"
+    echo ""
+    echo "To remove them completely:"
+    echo "  git rm --cached $TASK_FILES"
+    echo ""
+    exit 1
+fi
+
+exit 0

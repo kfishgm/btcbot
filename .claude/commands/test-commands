@@ -1,0 +1,74 @@
+#!/bin/bash
+# Test script to verify command functionality
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
+echo "🧪 Testing command functionality..."
+echo ""
+
+# Test 1: Check if next-task finds the correct next task
+echo "Test 1: Next task detection"
+NEXT_TASK=$(grep -E "^\- \[ \] \*\*[A-Z]+-[0-9]+\*\*:" docs/tasks.md | head -1 | grep -oE "[A-Z]+-[0-9]+" | head -1)
+echo "  Expected next task: $NEXT_TASK"
+
+# Test 2: Check if all commands are executable
+echo ""
+echo "Test 2: Command executability"
+for cmd in next-task transition-task complete-task start-next-task; do
+  if [ -x ".claude/commands/$cmd" ]; then
+    echo "  ✅ $cmd is executable"
+  else
+    echo "  ❌ $cmd is not executable"
+  fi
+done
+
+# Test 3: Check if documentation files exist
+echo ""
+echo "Test 3: Documentation files"
+for doc in tasks.md progress.md dashboard.md; do
+  if [ -f "docs/$doc" ]; then
+    echo "  ✅ docs/$doc exists"
+  else
+    echo "  ❌ docs/$doc missing"
+  fi
+done
+
+# Test 4: Check if agent startup method is consistent
+echo ""
+echo "Test 4: Agent startup consistency"
+if grep -q "start-agents" .claude/commands/transition-task; then
+  echo "  ✅ transition-task uses start-agents"
+else
+  echo "  ❌ transition-task doesn't use start-agents"
+fi
+
+if grep -q "start-agents" .claude/commands/start-next-task; then
+  echo "  ✅ start-next-task uses start-agents"
+else
+  echo "  ❌ start-next-task doesn't use start-agents"
+fi
+
+# Test 5: Check if start-agents properly uses worktrees
+echo ""
+echo "Test 5: Start-agents worktree usage"
+if grep -q "cd.*worktree" .claude/commands/start-agents; then
+  echo "  ✅ start-agents changes to worktree directories"
+else
+  echo "  ❌ start-agents doesn't change to worktree directories"
+fi
+
+if grep -q "\-\-dangerously-skip-permissions" .claude/commands/start-agents; then
+  echo "  ✅ start-agents uses proper permissions flag"
+else
+  echo "  ❌ start-agents doesn't use proper permissions flag"
+fi
+
+if grep -q "Down" .claude/commands/start-agents; then
+  echo "  ❌ start-agents still uses arrow key automation"
+else
+  echo "  ✅ start-agents doesn't use arrow key automation"
+fi
+
+echo ""
+echo "✅ Command testing complete!"

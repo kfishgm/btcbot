@@ -1,0 +1,37 @@
+#!/bin/bash
+# Run ESLint with automatic cleanup
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKTREE_PATH="${WORKTREE_PATH:-$(pwd)}"
+
+# Default values
+TIMEOUT_LINT="${TIMEOUT_LINT:-120}"
+
+# Parse fix flag
+fix=""
+if [ "${1:-}" = "--fix" ]; then
+    fix="--fix"
+    echo "Running lint with autofix..."
+else
+    echo "Running lint check..."
+fi
+
+# Capture output
+output=$(timeout "$TIMEOUT_LINT"s pnpm lint $fix 2>&1)
+result=$?
+
+# Always cleanup
+"$SCRIPT_DIR/cleanup-processes.sh" >/dev/null 2>&1
+
+if [ $result -eq 0 ]; then
+    echo "✓ Lint passed"
+else
+    echo "✗ Lint failed"
+    # Show errors but limit output
+    echo "$output" | grep -E "error|Error|warning|Warning" | head -30
+    echo ""
+    echo "Run with --fix to auto-fix: $0 --fix"
+fi
+
+exit $result

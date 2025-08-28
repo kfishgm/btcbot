@@ -1,0 +1,39 @@
+#!/bin/bash
+# Check dev server status for agents
+# Usage: .claude/lib/check-dev-server
+
+# Get port for this worktree
+WORKTREE_PATH="$(pwd)"
+WORKTREE_NAME="$(basename "$WORKTREE_PATH")"
+
+# Determine port based on worktree name
+if [[ "$WORKTREE_NAME" == *-seq ]]; then
+    # Sequential workflow uses port 3001
+    PORT=3001
+elif [[ "$WORKTREE_NAME" == *-arch ]] || [[ "$WORKTREE_NAME" == *-architect ]]; then
+    PORT=3001
+elif [[ "$WORKTREE_NAME" == *-test ]] || [[ "$WORKTREE_NAME" == *-tester ]]; then
+    PORT=3002
+elif [[ "$WORKTREE_NAME" == *-impl ]] || [[ "$WORKTREE_NAME" == *-implementation ]]; then
+    PORT=3003
+else
+    PORT=3000
+fi
+
+echo "Checking dev server for $WORKTREE_NAME on port $PORT..."
+
+# Check if port is in use
+if lsof -i:$PORT | grep -q LISTEN; then
+    echo "✅ Dev server is running on port $PORT"
+    
+    # Try to curl the server
+    if curl -s --max-time 2 "http://localhost:$PORT" > /dev/null 2>&1; then
+        echo "✅ Server is responding at http://localhost:$PORT"
+    else
+        echo "⚠️  Server on port $PORT is not responding to HTTP requests"
+    fi
+else
+    echo "❌ No dev server running on port $PORT"
+fi
+
+exit 0

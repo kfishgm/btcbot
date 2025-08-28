@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# agent-nudge - Remind agents to follow coordination protocol
+
+PROJECT_NAME="TriBot"
+SESSION_NAME="${PROJECT_NAME}-dev"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+echo -e "${YELLOW}📢 Nudging agents to follow coordination protocol...${NC}"
+echo "=========================================="
+
+# Check each agent's status
+echo -e "\n${YELLOW}Checking agent statuses...${NC}"
+
+# Function to check if agent completed their task
+check_agent_status() {
+    local agent=$1
+    local worktree="../${PROJECT_NAME}-${agent}"
+
+    if grep -q "Status: COMPLETED" "$worktree/TASK-"*.md 2>/dev/null; then
+        echo -e "${GREEN}✓ $agent agent marked task as COMPLETED${NC}"
+
+        # Check if they have uncommitted changes
+        cd "$worktree"
+        if [[ -n $(git status --porcelain) ]]; then
+            echo -e "${RED}  ⚠️  Has uncommitted changes!${NC}"
+        fi
+
+        # Check if they pushed
+        if ! git log origin/HEAD..HEAD --oneline | grep -q .; then
+            echo -e "${RED}  ⚠️  Hasn't pushed changes!${NC}"
+        fi
+
+        cd - > /dev/null
+        return 0
+    else
+        echo -e "${YELLOW}⏳ $agent agent still working${NC}"
+        return 1
+    fi
+}
+
+# Check all agents
+ARCH_DONE=$(check_agent_status "arch" && echo "yes" || echo "no")
+TEST_DONE=$(check_agent_status "test" && echo "yes" || echo "no")
+IMPL_DONE=$(check_agent_status "impl" && echo "yes" || echo "no")
+
+echo -e "\n${YELLOW}Sending coordination reminders...${NC}"
+
+# Message for agents who marked complete but didn't follow through
+COORDINATION_REMINDER="REMINDER: You marked your task as COMPLETED. According to your CLAUDE.md instructions, you should now:
+1. Commit and push your changes: git add -A && git commit -m 'Your message' && git push origin HEAD
+2. Enter the coordination loop to help other agents
+3. Check other agents' progress every 10-15 iminutes
+4. Continue until all agents are done and tests pass
+Please re-read the 'When Task is Complete' section in your CLAUDE.md file."
+
+# Message for still-working agents
+PROGRESS_REMINDER="REMINDER: Please check other agents' progress, follow the coordination protocol, and update your TASK file taking into account other agents statuses and work:
+1. If you are waiting for another agent, enter the coordination loop to help them.
+2. If you are making progress, continue working on your task.
+3. If you are blocked, ask for help in the coordination loop.
+4. Update your progress in the TASK file.
+5. If you complete your task, follow the 'When Task is Complete' section in your CLAUDE.md file.
+6. If you are coordinating, check other agents' progress every 10-15 minutes.
+7. If you are coordinating, ensure all agents are following the protocol.
+Update your TASK file with any coordination activities."
+
+# Send appropriate messages to each agent
+if [[ "$ARCH_DONE" == "yes" ]]; then
+    tmux send-keys -t ${SESSION_NAME}:1.0 "$COORDINATION_REMINDER" 2>/dev/null || echo "Could not reach Architecture agent"
+    sleep 1
+    tmux send-keys -t ${SESSION_NAME}:1.0 C-m 2>/dev/null
+else
+    tmux send-keys -t ${SESSION_NAME}:1.0 "$PROGRESS_REMINDER" 2>/dev/null || echo "Could not reach Architecture agent"
+    sleep 1
+    tmux send-keys -t ${SESSION_NAME}:1.0 C-m 2>/dev/null
+fi
+
+if [[ "$TEST_DONE" == "yes" ]]; then
+    tmux send-keys -t ${SESSION_NAME}:1.1 "$COORDINATION_REMINDER" 2>/dev/null || echo "Could not reach Test agent"
+    sleep 1
+    tmux send-keys -t ${SESSION_NAME}:1.1 C-m 2>/dev/null
+else
+    tmux send-keys -t ${SESSION_NAME}:1.1 "$PROGRESS_REMINDER" 2>/dev/null || echo "Could not reach Test agent"
+    sleep 1
+    tmux send-keys -t ${SESSION_NAME}:1.1 C-m 2>/dev/null
+fi
+
+if [[ "$IMPL_DONE" == "yes" ]]; then
+    tmux send-keys -t ${SESSION_NAME}:1.2 "$COORDINATION_REMINDER" 2>/dev/null || echo "Could not reach Implementation agent"
+    sleep 1
+    tmux send-keys -t ${SESSION_NAME}:1.2 C-m 2>/dev/null
+else
+    tmux send-keys -t ${SESSION_NAME}:1.2 "$PROGRESS_REMINDER" 2>/dev/null || echo "Could not reach Implementation agent"
+    sleep 1
+    tmux send-keys -t ${SESSION_NAME}:1.2 C-m 2>/dev/null
+fi
+
+echo -e "\n${GREEN}✅ Agents nudged!${NC}"
+echo ""
+echo "If agents don't respond, you can manually remind them by:"
+echo "1. Attaching to tmux: tmux attach-session -t ${SESSION_NAME}"
+echo "2. Switching to Window 1 (Ctrl+b 1)"
+echo "3. Navigating to each pane and reminding them to follow coordination protocol"

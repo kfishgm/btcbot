@@ -1,0 +1,152 @@
+#!/bin/bash
+# Remove a task from backlog.md, tasks.md, and close/delete GitHub issue
+
+set -e
+
+if [ $# -lt 2 ]; then
+  echo "Usage: backlog-remove ISSUE_NUMBER \"Reason\" [--delete]"
+  echo ""
+  echo "Options:"
+  echo "  --delete    Delete the GitHub issue instead of just closing it"
+  echo ""
+  echo "Examples:"
+  echo "  backlog-remove 45 \"Duplicate of #32\""
+  echo "  backlog-remove 45 \"No longer needed\" --delete"
+  exit 1
+fi
+
+ISSUE_NUMBER="$1"
+REASON="$2"
+DELETE_FLAG="$3"
+BACKLOG_FILE="docs/product/backlog.md"
+TASKS_FILE="docs/tasks.md"
+
+echo "🗑️  Removing issue #$ISSUE_NUMBER..."
+
+# Check if issue exists and get task ID from title
+ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --json title -q .title 2>/dev/null || echo "")
+if [ -z "$ISSUE_TITLE" ]; then
+  echo "❌ Issue #$ISSUE_NUMBER not found"
+  exit 1
+fi
+
+# Extract task ID from title (format: "TASK-ID: Title")
+TASK_ID=""
+if [[ "$ISSUE_TITLE" =~ ^([A-Z]+-[0-9]+): ]]; then
+  TASK_ID="${BASH_REMATCH[1]}"
+  echo "Found task ID: $TASK_ID"
+fi
+
+# Handle GitHub issue
+if [ "$DELETE_FLAG" = "--delete" ]; then
+  echo "Deleting GitHub issue..."
+  # GitHub CLI doesn't support delete, so we close with clear message
+  gh issue close "$ISSUE_NUMBER" --comment "DELETED from backlog: $REASON" || {
+    echo "⚠️  Failed to close issue, continuing anyway..."
+  }
+else
+  echo "Closing GitHub issue..."
+  gh issue close "$ISSUE_NUMBER" --comment "Removed from backlog: $REASON" || {
+    echo "⚠️  Failed to close issue, continuing anyway..."
+  }
+fi
+
+# Remove from backlog file
+if [ -f "$BACKLOG_FILE" ]; then
+  # Create temp file without the removed issue
+  temp_file=$(mktemp)
+  removed=false
+  
+  while IFS= read -r line; do
+    if [[ $line =~ \(#$ISSUE_NUMBER\) ]]; then
+      echo "  Removing from backlog: $line"
+      removed=true
+    else
+      echo "$line" >> "$temp_file"
+    fi
+  done < "$BACKLOG_FILE"
+  
+  if [ "$removed" = true ]; then
+    # Renumber the remaining items
+    temp_file2=$(mktemp)
+    position=1
+    
+    while IFS= read -r line; do
+      if [[ $line =~ ^[[:space:]]*[0-9]+\.[[:space:]]*(.*) ]]; then
+        echo "$position. ${BASH_REMATCH[1]}" >> "$temp_file2"
+        ((position++))
+      else
+        echo "$line" >> "$temp_file2"
+      fi
+    done < "$temp_file"
+    
+    mv "$temp_file2" "$BACKLOG_FILE"
+    echo "✅ Removed from backlog.md"
+  else
+    echo "⚠️  Issue #$ISSUE_NUMBER not found in backlog"
+    rm "$temp_file"
+  fi
+else
+  echo "⚠️  Backlog file not found"
+fi
+
+# Remove from tasks.md if task ID was found
+if [ -n "$TASK_ID" ] && [ -f "$TASKS_FILE" ]; then
+  echo "Removing from tasks.md..."
+  
+  # Create temp file without the task and its metadata lines
+  temp_file=$(mktemp)
+  skip_lines=0
+  
+  while IFS= read -r line; do
+    # Check if this is the task line
+    if [[ $line =~ \*\*$TASK_ID\*\* ]]; then
+      echo "  Removing task $TASK_ID from tasks.md"
+      skip_lines=3  # Skip this line and next 3 (Priority, Dependencies, Description)
+    elif [ $skip_lines -gt 0 ]; then
+      # Skip metadata lines
+      ((skip_lines--))
+    else
+      # Keep all other lines
+      echo "$line" >> "$temp_file"
+    fi
+  done < "$TASKS_FILE"
+  
+  mv "$temp_file" "$TASKS_FILE"
+  echo "✅ Removed from tasks.md"
+else
+  if [ -n "$TASK_ID" ]; then
+    echo "⚠️  Task $TASK_ID not found in tasks.md or file doesn't exist"
+  fi
+fi
+
+# Update positions in remaining GitHub issues
+echo "Updating positions in GitHub..."
+if [ -f "$BACKLOG_FILE" ]; then
+  position=1
+  while IFS= read -r line; do
+    if [[ $line =~ \(#([0-9]+)\) ]]; then
+      issue_num="${BASH_REMATCH[1]}"
+      echo "  Updating position for #$issue_num to $position"
+      
+      # Update the Backlog Position in the issue
+      current_body=$(gh issue view "$issue_num" --json body -q .body 2>/dev/null || echo "")
+      if [ -n "$current_body" ]; then
+        new_body=$(echo "$current_body" | sed "s/\*\*Backlog Position\*\*:.*/\*\*Backlog Position\*\*: $position/")
+        gh issue edit "$issue_num" --body "$new_body" 2>/dev/null || true
+      fi
+      
+      ((position++))
+    fi
+  done < "$BACKLOG_FILE"
+  echo "✅ Updated positions in GitHub"
+fi
+
+echo ""
+echo "✅ Task removed successfully:"
+echo "   - GitHub issue #$ISSUE_NUMBER closed"
+if [ -n "$TASK_ID" ]; then
+  echo "   - Task $TASK_ID removed from tasks.md"
+fi
+echo "   - Removed from backlog.md"
+echo "   - Remaining tasks renumbered"

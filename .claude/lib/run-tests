@@ -1,0 +1,84 @@
+#!/bin/bash
+# Run tests with automatic cleanup and concise output
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKTREE_PATH="${WORKTREE_PATH:-$(pwd)}"
+
+# Default values
+TIMEOUT_TEST="${TIMEOUT_TEST:-300}"
+JEST_OPTS="${JEST_OPTS:---maxWorkers=2 --forceExit --detectOpenHandles}"
+
+# Parse arguments
+path="${1:-}"
+extra_opts="${2:-}"
+
+# Check if --bail was passed as first argument
+if [ "$1" = "--bail" ]; then
+    extra_opts="--bail"
+    path="${2:-}"
+    echo "Running tests with --bail (stop on first failure)..."
+else
+    if [ -n "$path" ]; then
+        echo "Testing $path..."
+    else
+        echo "Running all tests..."
+    fi
+fi
+
+# Build the test command
+# Note: pnpm test already calls jest, so we pass options directly
+if [ -n "$path" ]; then
+    # If a specific path is provided, use testNamePattern or direct path
+    # For jest 30+, we can pass the path directly as an argument
+    test_cmd="pnpm test $path $JEST_OPTS $extra_opts"
+else
+    # No path specified, run all tests
+    test_cmd="pnpm test $JEST_OPTS $extra_opts"
+fi
+
+# Run once, capture output (disable Watchman to avoid file watching issues)
+output=$(WATCHMAN=false timeout "$TIMEOUT_TEST"s bash -c "$test_cmd" 2>&1)
+result=$?
+
+# Always cleanup
+"$SCRIPT_DIR/cleanup-processes.sh" >/dev/null 2>&1
+
+# Show only relevant output
+if [ $result -eq 0 ]; then
+    # Check if tests were actually run
+    if echo "$output" | grep -q "No tests found"; then
+        echo "⚠️  No tests found"
+        echo "$output" | grep -E "No tests found|testPathPattern|Pattern:" | head -5
+        echo ""
+        echo "Tip: Check that your test path is correct"
+        echo "  - For all tests: .claude/lib/run-tests"
+        echo "  - For specific file: .claude/lib/run-tests path/to/test.test.ts"
+        echo "  - For directory: .claude/lib/run-tests app/api"
+        exit 1
+    else
+        echo "✓ Tests passed"
+        # Show summary
+        echo "$output" | grep -E "Test Suites:|Tests:|Snapshots:|Time:" | tail -4
+        # Show any test counts
+        echo "$output" | grep -E "PASS" | head -5
+    fi
+else
+    # Check for timeout
+    if [ $result -eq 124 ]; then
+        echo "⏱️  Tests timed out after ${TIMEOUT_TEST}s"
+        echo "Consider increasing timeout: TIMEOUT_TEST=600 .claude/lib/run-tests"
+    else
+        echo "✗ Tests failed"
+        # Show failures but with better formatting
+        echo "$output" | grep -E "FAIL|●|Error:|Expected|Received|Test Suites:|Tests:" | head -50
+        
+        # If no output, show raw output
+        if [ -z "$(echo "$output" | grep -E "FAIL|Error:")" ]; then
+            echo "--- Raw output ---"
+            echo "$output" | head -30
+        fi
+    fi
+fi
+
+exit $result

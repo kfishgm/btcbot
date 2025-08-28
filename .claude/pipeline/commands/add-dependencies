@@ -1,0 +1,105 @@
+#!/bin/bash
+# Add dependencies to GitHub Issues based on tasks.md
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+TASKS_FILE="$PROJECT_ROOT/docs/tasks.md"
+
+echo "Adding dependencies to GitHub Issues..."
+
+# Map task IDs to issue numbers (using simple variables for compatibility)
+# Format: TASK_TO_ISSUE_TASKID=issue_number
+
+# First, build a map of task IDs to issue numbers
+echo "Building task ID to issue number mapping..."
+issues=$(gh issue list --label task --limit 100 --json number,title)
+# Create a temporary file to store mappings
+TEMP_MAP=$(mktemp)
+echo "$issues" | jq -r '.[] | "\(.title | split(":")[0])=\(.number)"' | grep -E '^[A-Z]+-[0-9]+=' > "$TEMP_MAP"
+
+# Show mappings
+while IFS='=' read -r task_id issue_num; do
+    echo "  $task_id -> #$issue_num"
+done < "$TEMP_MAP"
+
+# Now parse tasks.md for dependencies
+echo ""
+echo "Processing dependencies from tasks.md..."
+
+current_task=""
+current_deps=""
+
+while IFS= read -r line; do
+    # Task line
+    if [[ $line =~ \*\*([A-Z]+-[0-9]+)\*\*: ]]; then
+        current_task="${BASH_REMATCH[1]}"
+    fi
+    
+    # Dependencies line
+    if [[ $line =~ Dependencies:[[:space:]](.+) ]]; then
+        current_deps="${BASH_REMATCH[1]}"
+        
+        # Skip if no dependencies or "None"
+        if [[ "$current_deps" == "None" ]] || [[ -z "$current_deps" ]]; then
+            continue
+        fi
+        
+        # Get issue number for current task
+        issue_num=$(grep "^${current_task}=" "$TEMP_MAP" | cut -d'=' -f2)
+        if [[ -z "$issue_num" ]]; then
+            echo "Warning: No issue found for $current_task"
+            continue
+        fi
+        
+        # Convert task IDs to issue numbers
+        dep_issues=""
+        IFS=',' read -ra DEPS <<< "$current_deps"
+        for dep in "${DEPS[@]}"; do
+            dep=$(echo "$dep" | xargs) # Trim whitespace
+            dep_issue=$(grep "^${dep}=" "$TEMP_MAP" | cut -d'=' -f2)
+            if [[ -n "$dep_issue" ]]; then
+                if [[ -n "$dep_issues" ]]; then
+                    dep_issues="$dep_issues, #$dep_issue"
+                else
+                    dep_issues="#$dep_issue"
+                fi
+            fi
+        done
+        
+        if [[ -n "$dep_issues" ]]; then
+            echo "Updating $current_task (#$issue_num) with dependencies: $dep_issues"
+            
+            # Get current issue body
+            body=$(gh issue view "$issue_num" --json body -q .body)
+            
+            # Update dependencies section
+            if echo "$body" | grep -q "^## Dependencies"; then
+                # Replace existing dependencies section
+                new_body=$(echo "$body" | awk -v deps="- Depends on: $dep_issues ($current_deps)" '
+                    /^## Dependencies/ { print; print deps; in_deps=1; next }
+                    /^##/ && in_deps { in_deps=0 }
+                    !in_deps || /^##/ { print }
+                ')
+            else
+                # Add dependencies section before Acceptance Criteria
+                new_body=$(echo "$body" | awk -v deps="## Dependencies\n- Depends on: $dep_issues ($current_deps)\n" '
+                    /^## Acceptance Criteria/ { print deps }
+                    { print }
+                ')
+            fi
+            
+            # Update the issue
+            gh issue edit "$issue_num" --body "$new_body"
+            echo "  ✓ Updated #$issue_num"
+        fi
+    fi
+done < "$TASKS_FILE"
+
+echo ""
+echo "Dependencies added! The scheduler will now respect these dependencies."
+echo "Tasks with unmet dependencies will not be assigned until their dependencies are closed."
+
+# Clean up
+rm -f "$TEMP_MAP"

@@ -1,0 +1,27 @@
+#!/bin/bash
+# Run build with automatic cleanup
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKTREE_PATH="${WORKTREE_PATH:-$(pwd)}"
+
+# Default values
+TIMEOUT_BUILD="${TIMEOUT_BUILD:-600}"
+
+echo "Running build..."
+
+# Run build with timeout
+if timeout "$TIMEOUT_BUILD"s pnpm build:clean >/dev/null 2>&1; then
+    echo "✓ Build successful"
+    result=0
+else
+    echo "✗ Build failed"
+    # Show just errors on failure
+    timeout "$TIMEOUT_BUILD"s pnpm build:clean 2>&1 | grep -E "Error:|ERROR|Failed|failed" | head -20
+    result=1
+fi
+
+# Always cleanup
+"$SCRIPT_DIR/cleanup-processes.sh" >/dev/null 2>&1
+
+exit $result

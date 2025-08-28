@@ -1,0 +1,28 @@
+#!/bin/bash
+# Seed local Supabase database with test data
+
+echo "🌱 Seeding local Supabase database..."
+
+# Check if Supabase is running
+if ! pnpm supabase status 2>/dev/null | grep -q "RUNNING"; then
+    echo "❌ Supabase is not running. Start it first with: ./claude/commands/supabase-start"
+    exit 1
+fi
+
+# Check if seed file exists
+SEED_FILE="supabase/seed.sql"
+if [ ! -f "$SEED_FILE" ]; then
+    echo "❌ No seed file found at $SEED_FILE"
+    echo "💡 Create a seed file with test data first"
+    exit 1
+fi
+
+# Run the seed file
+pnpm supabase db seed
+
+if [ $? -eq 0 ]; then
+    echo "✅ Database seeded successfully!"
+else
+    echo "❌ Failed to seed database"
+    exit 1
+fi

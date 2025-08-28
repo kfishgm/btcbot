@@ -1,0 +1,195 @@
+#!/bin/bash
+# Create a new task with full content in tasks.md, backlog.md, and GitHub
+set -e
+
+# Check arguments
+if [ $# -lt 3 ]; then
+  echo "Usage: backlog-create \"TASK-ID\" \"Title\" \"Full description and acceptance criteria\""
+  echo "Example: backlog-create \"NAV-001\" \"Fix Navigation Accessibility\" \"Complete user story content...\""
+  exit 1
+fi
+
+TASK_ID="$1"
+TITLE="$2"
+FULL_CONTENT="$3"
+
+# File paths
+TASKS_FILE="docs/tasks.md"
+BACKLOG_FILE="docs/product/backlog.md"
+TEMPLATE_FILE=".github/ISSUE_TEMPLATE/task.md"
+
+# Validate task ID format
+if [[ ! "$TASK_ID" =~ ^[A-Z]+-[0-9]+$ ]]; then
+  echo "❌ Invalid task ID format. Use: CATEGORY-NUMBER (e.g., NAV-001)"
+  exit 1
+fi
+
+echo "📝 Creating task $TASK_ID: $TITLE"
+
+# Extract category from task ID
+CATEGORY=$(echo "$TASK_ID" | cut -d'-' -f1)
+
+# Build the full issue body using the template structure
+ISSUE_BODY="## Task Description
+
+$FULL_CONTENT
+
+## Progress Tracking
+
+Progress is tracked via labels:
+
+- \`sequential-wip\` - Task is being worked on by primary developer
+- Task is automatically closed when PR is merged
+
+## Branches
+
+_No branches yet_
+
+## Dependencies
+
+- None
+
+## Acceptance Criteria
+
+_Included in task description above_
+
+## 🔴 MANDATORY REQUIREMENTS - DIRECT ORDER 🔴
+
+**TDD REQUIREMENTS - TESTS MUST BE WRITTEN FIRST**
+
+- [ ] **Write tests BEFORE implementation** (Use test-writer consultant)
+- [ ] **Commit failing tests first** (Red phase of Red-Green-Refactor)
+- [ ] **Implementation follows to make tests pass** (Green phase)
+- [ ] **Tests define the specification** (Not the other way around)
+
+**ALL TESTS MUST PASS - NO EXCEPTIONS**
+
+- [ ] **100% of unit tests pass** (NOT 99%, ALL OF THEM)
+- [ ] **100% of E2E tests pass** (EVERY SINGLE ONE)
+- [ ] **0 TypeScript errors** (Run: pnpm typecheck)
+- [ ] **0 ESLint errors** (Run: pnpm lint)
+- [ ] **Full production-ready implementation** (NO stubs, mocks, or TODOs)
+
+**FORBIDDEN:**
+
+- Skipping tests because \"not related to task\"
+- Skipping tests because \"complex\" or \"time-consuming\"
+- Saying tests \"don't affect core functionality\"
+- Partial implementations to \"save time\"
+
+**Size, complexity, and time are IRRELEVANT. Make ALL tests pass.**
+
+## Technical Notes
+
+_To be added by primary developer_
+
+## Primary Developer Instructions
+
+The primary developer owns the ENTIRE implementation:
+
+- Design the solution architecture
+- Write comprehensive tests FIRST (TDD)
+- Implement full production-ready functionality
+- **ENSURE ALL TESTS PASS (100% - NO EXCEPTIONS)**
+- **Fix ALL TypeScript and ESLint errors**
+- **Complete FULL production implementation**
+- **NO skipping tests for ANY reason**
+- Get code review before completion
+- Use consultants for expertise when needed"
+
+# Create the GitHub issue with full content
+echo "Creating GitHub issue..."
+ISSUE_URL=$(gh issue create \
+  --title "$TASK_ID: $TITLE" \
+  --label "task" \
+  --body "$ISSUE_BODY" \
+  2>&1 | tail -1)
+
+# Extract issue number from URL
+ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -o '[0-9]*$')
+
+if [ -z "$ISSUE_NUMBER" ]; then
+  echo "❌ Failed to create GitHub issue"
+  echo "Output: $ISSUE_URL"
+  exit 1
+fi
+
+echo "✅ Created GitHub issue #$ISSUE_NUMBER"
+
+# Add to tasks.md (as unchecked item)
+echo "Adding to tasks.md..."
+
+# Ensure tasks.md exists with header
+if [ ! -f "$TASKS_FILE" ]; then
+  cat > "$TASKS_FILE" << 'EOF'
+# TriBot - Task List
+
+## Overview
+
+This document contains all development tasks for the TriBot platform, organized by category and priority. Each task includes a unique identifier, description, priority level, and dependencies.
+
+## Active Tasks
+
+EOF
+fi
+
+# Find the right section or create it
+if ! grep -q "^## Active Tasks" "$TASKS_FILE"; then
+  echo -e "\n## Active Tasks\n" >> "$TASKS_FILE"
+fi
+
+# Add the task under Active Tasks
+# Find line number of Active Tasks section
+active_line=$(grep -n "^## Active Tasks" "$TASKS_FILE" | cut -d: -f1)
+if [ -n "$active_line" ]; then
+  # Insert after the Active Tasks header (macOS compatible)
+  temp_file=$(mktemp)
+  awk -v line="$active_line" -v task="- [ ] **$TASK_ID**: $TITLE (#$ISSUE_NUMBER)" -v desc="  - Priority: MEDIUM
+  - Dependencies: None
+  - Description: See issue #$ISSUE_NUMBER" '
+    NR == line { print; print ""; print task; print desc; next }
+    { print }
+  ' "$TASKS_FILE" > "$temp_file"
+  mv "$temp_file" "$TASKS_FILE"
+else
+  # Append to end if section not found
+  echo -e "\n- [ ] **$TASK_ID**: $TITLE (#$ISSUE_NUMBER)" >> "$TASKS_FILE"
+  echo "  - Priority: MEDIUM" >> "$TASKS_FILE"
+  echo "  - Dependencies: None" >> "$TASKS_FILE"
+  echo "  - Description: See issue #$ISSUE_NUMBER" >> "$TASKS_FILE"
+fi
+
+echo "✅ Added to tasks.md"
+
+# Add to backlog.md
+echo "Adding to backlog..."
+
+# Ensure backlog.md exists
+if [ ! -f "$BACKLOG_FILE" ]; then
+  echo "# Product Backlog" > "$BACKLOG_FILE"
+  echo "" >> "$BACKLOG_FILE"
+fi
+
+# Count existing entries for position
+POSITION=$(grep -c "^[0-9]\+\." "$BACKLOG_FILE" 2>/dev/null || echo "0")
+POSITION=$((POSITION + 1))
+
+# Append to backlog
+echo "$POSITION. $TASK_ID: $TITLE (#$ISSUE_NUMBER)" >> "$BACKLOG_FILE"
+
+echo "✅ Added to backlog at position $POSITION"
+
+# Update GitHub issue with backlog position
+gh issue edit "$ISSUE_NUMBER" --body "$ISSUE_BODY
+
+## Metadata
+**Backlog Position**: $POSITION
+**Branch Pattern**: \`$ISSUE_NUMBER-sequential\`" 2>/dev/null || true
+
+echo ""
+echo "✅ Task $TASK_ID created successfully!"
+echo "   - GitHub Issue: #$ISSUE_NUMBER"
+echo "   - Backlog Position: $POSITION"
+echo "   - Added to tasks.md and backlog.md"
+echo ""
+echo "Issue URL: $ISSUE_URL"

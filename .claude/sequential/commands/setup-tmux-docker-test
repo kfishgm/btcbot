@@ -1,0 +1,116 @@
+#!/bin/bash
+# TEST VERSION: Setup tmux for sequential workflow with Docker container
+# This version starts Claude with a dummy "Hello World" prompt instead of real tasks
+set -e
+
+# Dynamic detection - PROJECT AGNOSTIC
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+PROJECT_NAME="${PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+WORKTREE_PATH="$PARENT_DIR/${PROJECT_NAME_LOWER}-seq"
+SESSION="${PROJECT_NAME_LOWER}-seq-test"  # Different session name for testing
+CONTAINER_NAME="${PROJECT_NAME_LOWER}-orchestrator-test"
+IMAGE_NAME="${PROJECT_NAME_LOWER}-orchestrator"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Check Docker is available
+if ! command -v docker &> /dev/null; then
+    echo -e "${RED}Docker is not installed or not in PATH${NC}"
+    echo "Please install Docker to use containerized orchestrator"
+    exit 1
+fi
+
+# Check if Docker daemon is running
+if ! docker version &>/dev/null; then
+    echo -e "${RED}Docker daemon is not running${NC}"
+    echo "Please start Docker Desktop and try again"
+    exit 1
+fi
+
+# Build Docker image if needed
+if ! docker images | grep -q "$IMAGE_NAME"; then
+    echo "Building Docker image for orchestrator..."
+    docker build -t $IMAGE_NAME "$PROJECT_ROOT/.claude/sequential/docker/" || {
+        echo -e "${RED}Failed to build Docker image${NC}"
+        exit 1
+    }
+else
+    echo -e "${GREEN}Docker image already exists: $IMAGE_NAME${NC}"
+fi
+
+# Kill existing session if it exists
+tmux kill-session -t $SESSION 2>/dev/null || true
+
+# Stop any existing container
+docker stop $CONTAINER_NAME 2>/dev/null || true
+docker rm $CONTAINER_NAME 2>/dev/null || true
+
+echo "Creating tmux session: $SESSION"
+
+# Create new session with main window
+tmux new-session -d -s $SESSION -n "Test-Orchestrator"
+
+# Window 0: Sequential workflow TEST (2 panes - orchestrator container and monitor)
+# Left pane: Orchestrator agent in Docker container with DUMMY PROMPT
+tmux send-keys -t $SESSION:0.0 "echo '==== TEST MODE: Docker Container Orchestrator ====' " C-m
+tmux send-keys -t $SESSION:0.0 "echo 'Working in: $WORKTREE_PATH'" C-m
+tmux send-keys -t $SESSION:0.0 "echo ''" C-m
+tmux send-keys -t $SESSION:0.0 "echo 'Starting Claude in container with Hello World prompt...'" C-m
+tmux send-keys -t $SESSION:0.0 "echo ''" C-m
+
+# Start Docker container with Claude - DUMMY HELLO WORLD PROMPT
+DUMMY_PROMPT='Hello! This is a test of the Docker sequential orchestrator. Please respond with "Hello World from Docker container!" and then list the following information: 1) Your current working directory, 2) The Claude version, 3) Whether you can see the .claude directory. Do not execute any commands or make any changes.'
+
+tmux send-keys -t $SESSION:0.0 "docker run -it --rm \\
+  --name $CONTAINER_NAME \\
+  -v $WORKTREE_PATH:/workspace \\
+  -v ~/.anthropic:/home/node/.anthropic:ro \\
+  -v ~/.config/gh:/home/node/.config/gh:ro \\
+  -w /workspace \\
+  $IMAGE_NAME \\
+  claude --model opus '$DUMMY_PROMPT'" C-m
+
+# Right pane: Simple monitor (just watches container status)
+tmux split-window -h -t $SESSION:0
+tmux send-keys -t $SESSION:0.1 "echo '==== Container Monitor ===='" C-m
+tmux send-keys -t $SESSION:0.1 "echo 'Monitoring container: $CONTAINER_NAME'" C-m
+tmux send-keys -t $SESSION:0.1 "echo ''" C-m
+tmux send-keys -t $SESSION:0.1 "# Watch container status" C-m
+tmux send-keys -t $SESSION:0.1 "while true; do" C-m
+tmux send-keys -t $SESSION:0.1 "  if docker ps --format '{{.Names}}' | grep -q '$CONTAINER_NAME'; then" C-m
+tmux send-keys -t $SESSION:0.1 "    echo -n '.'" C-m
+tmux send-keys -t $SESSION:0.1 "  else" C-m
+tmux send-keys -t $SESSION:0.1 "    echo ''" C-m
+tmux send-keys -t $SESSION:0.1 "    echo '[$(date +%H:%M:%S)] Container stopped'" C-m
+tmux send-keys -t $SESSION:0.1 "    break" C-m
+tmux send-keys -t $SESSION:0.1 "  fi" C-m
+tmux send-keys -t $SESSION:0.1 "  sleep 5" C-m
+tmux send-keys -t $SESSION:0.1 "done" C-m
+
+# Set focus to orchestrator pane
+tmux select-window -t $SESSION:0
+tmux select-pane -t $SESSION:0.0
+
+echo ""
+echo -e "${GREEN}✅ TEST Session $SESSION created successfully!${NC}"
+echo ""
+echo -e "${YELLOW}This is a TEST version that runs Claude with a dummy 'Hello World' prompt${NC}"
+echo ""
+echo "Windows:"
+echo "  0 - Test Orchestrator: Claude in Docker with dummy prompt (left), monitor (right)"
+echo ""
+echo "The orchestrator is starting with a test prompt."
+echo "Container name: $CONTAINER_NAME"
+echo ""
+echo "To attach: tmux attach-session -t $SESSION"
+echo "To kill session: tmux kill-session -t $SESSION"
+echo ""
+echo "Navigation:"
+echo "  Ctrl+b arrows   - Switch panes"
+echo "  Ctrl+b d        - Detach"

@@ -1,0 +1,418 @@
+#!/bin/bash
+# Setup multi-agent workflow: create git worktrees and generate role-specific CLAUDE.md files
+# This should be run AFTER /setup-project when you're ready to set up the multi-agent workflow
+set -e
+
+# Show help
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    cat << EOF
+Setup Multi-Agent Workflow
+
+Creates git worktrees and configures agents for parallel development.
+
+Usage: setup-agents [--help]
+
+What it does:
+1. Creates 3 git worktrees (architect, test, impl)
+2. Generates role-specific CLAUDE.md for each agent
+3. Sets up GitHub pipeline integration
+4. Configures agent environments
+
+Prerequisites:
+- Git repository initialized
+- Main project setup complete
+- GitHub repo configured
+
+After setup:
+- Use 'setup-tmux' to start agents in tmux
+- Use 'task' commands for task management
+- Monitor will auto-assign tasks based on dependencies
+EOF
+    exit 0
+fi
+
+# Dynamic path detection
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_NAME="${PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+
+# Detect if we're in a worktree and adjust paths accordingly
+if [[ "$PROJECT_NAME" == *"-arch" ]] || [[ "$PROJECT_NAME" == *"-test" ]] || [[ "$PROJECT_NAME" == *"-impl" ]]; then
+  echo "🔄 Running from worktree: $PROJECT_NAME"
+  # Extract the base project name
+  BASE_PROJECT_NAME=$(echo "$PROJECT_NAME" | sed 's/-arch$//' | sed 's/-test$//' | sed 's/-impl$//')
+  PROJECT_NAME_LOWER=$(echo "$BASE_PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+  
+  # Find the main project root
+  MAIN_PROJECT_ROOT=""
+  for variant in "$BASE_PROJECT_NAME" "$(echo "$BASE_PROJECT_NAME" | tr '[:upper:]' '[:lower:]')"; do
+    if [ -d "$PARENT_DIR/$variant" ]; then
+      MAIN_PROJECT_ROOT="$PARENT_DIR/$variant"
+      PROJECT_NAME="$variant"
+      break
+    fi
+  done
+  
+  if [ -z "$MAIN_PROJECT_ROOT" ]; then
+    echo "❌ ERROR: Could not find main project directory"
+    exit 1
+  fi
+  
+  # Update PROJECT_ROOT to point to main project for git operations
+  PROJECT_ROOT="$MAIN_PROJECT_ROOT"
+  echo "Using main project at: $PROJECT_ROOT for git operations"
+else
+  # Running from main project
+  PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+fi
+
+# Color codes
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo "🚀 Setting up multi-agent workflow for $PROJECT_NAME"
+echo "=================================================="
+echo ""
+
+# Check current state
+WORKTREES_EXIST=0
+[ -d "$PARENT_DIR/${PROJECT_NAME_LOWER}-arch" ] && ((WORKTREES_EXIST++))
+[ -d "$PARENT_DIR/${PROJECT_NAME_LOWER}-test" ] && ((WORKTREES_EXIST++))
+[ -d "$PARENT_DIR/${PROJECT_NAME_LOWER}-impl" ] && ((WORKTREES_EXIST++))
+
+if [ $WORKTREES_EXIST -eq 3 ]; then
+    echo "All worktrees already exist. Will check for updates..."
+elif [ $WORKTREES_EXIST -gt 0 ]; then
+    echo "Some worktrees exist. Will create missing ones..."
+else
+    echo "No worktrees exist. Will create all three..."
+fi
+echo ""
+
+# Function to create worktree if it doesn't exist
+create_worktree() {
+    local branch_name=$1
+    local worktree_path=$2
+    local display_name=$3
+
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${YELLOW}Creating worktree for $display_name agent...${NC}"
+
+        # First ensure we have latest from origin
+        echo "Fetching latest from origin/main..."
+        git -C "$PROJECT_ROOT" fetch origin main
+
+        # Check if branch exists locally or remotely
+        if git -C "$PROJECT_ROOT" show-ref --verify --quiet "refs/heads/$branch_name"; then
+            # Local branch exists - update it from origin/main first
+            echo "Updating existing branch $branch_name from origin/main..."
+            git -C "$PROJECT_ROOT" checkout "$branch_name"
+            git -C "$PROJECT_ROOT" merge origin/main --no-edit
+            git -C "$PROJECT_ROOT" checkout main
+            git -C "$PROJECT_ROOT" worktree add "$worktree_path" "$branch_name"
+        elif git -C "$PROJECT_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch_name"; then
+            # Remote branch exists - create local tracking branch
+            echo "Creating local branch from origin/$branch_name..."
+            git -C "$PROJECT_ROOT" worktree add -b "$branch_name" "$worktree_path" "origin/$branch_name"
+        else
+            # No branch exists - create new from origin/main
+            echo "Creating new branch $branch_name from origin/main..."
+            git -C "$PROJECT_ROOT" worktree add -b "$branch_name" "$worktree_path" origin/main
+        fi
+
+        echo -e "${GREEN}✓ Created worktree at: $worktree_path${NC}"
+    else
+        echo -e "${GREEN}✓ Worktree already exists: $worktree_path${NC}"
+        
+        # Update existing worktree to latest from origin/main
+        echo "Updating existing worktree from origin/main..."
+        git -C "$worktree_path" fetch origin main
+        
+        # Clean up any untracked files that would conflict
+        git -C "$worktree_path" clean -fd .claude/commands/ .claude/lib/ 2>/dev/null || true
+        
+        # Now merge
+        git -C "$worktree_path" merge origin/main --no-edit || {
+            echo -e "${YELLOW}Handling merge issues...${NC}"
+            # If merge fails, try to resolve
+            git -C "$worktree_path" merge --abort 2>/dev/null || true
+            git -C "$worktree_path" reset --hard origin/main
+        }
+    fi
+}
+
+
+# Function to generate CLAUDE.md from template
+generate_claude_md() {
+    local worktree_path=$1
+    local template_file=$2
+    local role_name=$3
+
+    if [ -f "$PROJECT_ROOT/.claude/templates/$template_file" ]; then
+        echo "Generating $role_name agent documentation..."
+
+        # Copy base CLAUDE.md to worktree and replace PROJECT_ROOT
+        if [ -f "$PROJECT_ROOT/CLAUDE.md" ]; then
+            # Replace {{PROJECT_ROOT}} with the worktree path
+            sed "s|{{PROJECT_ROOT}}|$worktree_path|g" "$PROJECT_ROOT/CLAUDE.md" > "$worktree_path/CLAUDE.md"
+        fi
+
+            # Also copy and update docs/configuration/mcp.md if it exists
+            if [ -f "$PROJECT_ROOT/docs/configuration/mcp.md" ]; then
+                mkdir -p "$worktree_path/docs/configuration"
+                sed "s|{{PROJECT_ROOT}}|$worktree_path|g" "$PROJECT_ROOT/docs/configuration/mcp.md" > "$worktree_path/docs/configuration/mcp.md"
+            fi
+
+            # Copy and update .mcp files for this worktree
+            if [ -f "$PROJECT_ROOT/.mcp/config.json" ]; then
+                mkdir -p "$worktree_path/.mcp"
+                # Replace both {{PROJECT_ROOT}} placeholder and hardcoded project path with worktree path
+                # Also fix any typos in the project name (missing 's' etc)
+                sed -e "s|{{PROJECT_ROOT}}|$worktree_path|g" \
+                    -e "s|$PROJECT_ROOT|$worktree_path|g" \
+                    "$PROJECT_ROOT/.mcp/config.json" > "$worktree_path/.mcp/config.json"
+            fi
+
+            # Copy .mcp.json if it exists
+            if [ -f "$PROJECT_ROOT/.mcp.json" ]; then
+                mkdir -p "$worktree_path/.mcp"
+                cp "$PROJECT_ROOT/.mcp.json" "$worktree_path/.mcp.json"
+            fi
+
+            # Copy .env files to worktree and update port settings
+            # Determine port based on agent type
+            local agent_port=""
+            if [[ "$worktree_path" == *"-arch" ]]; then
+                agent_port="3001"
+            elif [[ "$worktree_path" == *"-test" ]]; then
+                agent_port="3002"
+            elif [[ "$worktree_path" == *"-impl" ]]; then
+                agent_port="3003"
+            fi
+            
+            # Function to update env file with correct URLs
+            update_env_file() {
+                local env_file=$1
+                local port=$2
+                
+                if [ -f "$env_file" ]; then
+                    # Ensure file ends with newline
+                    if [ -n "$(tail -c 1 "$env_file")" ]; then
+                        echo "" >> "$env_file"
+                    fi
+                    
+                    # Update or add NEXT_PUBLIC_SITE_URL
+                    if grep -q "^NEXT_PUBLIC_SITE_URL=" "$env_file"; then
+                        sed -i.bak "s|^NEXT_PUBLIC_SITE_URL=.*|NEXT_PUBLIC_SITE_URL=http://localhost:${port}|" "$env_file"
+                    else
+                        echo "NEXT_PUBLIC_SITE_URL=http://localhost:${port}" >> "$env_file"
+                    fi
+                    
+                    # Update or add NEXT_PUBLIC_APP_URL
+                    if grep -q "^NEXT_PUBLIC_APP_URL=" "$env_file"; then
+                        sed -i.bak "s|^NEXT_PUBLIC_APP_URL=.*|NEXT_PUBLIC_APP_URL=http://localhost:${port}|" "$env_file"
+                    else
+                        echo "NEXT_PUBLIC_APP_URL=http://localhost:${port}" >> "$env_file"
+                    fi
+                    
+                    # Clean up backup files
+                    rm -f "${env_file}.bak"
+                fi
+            }
+            
+            # Copy and update .env.local
+            if [ -f "$PROJECT_ROOT/.env.local" ]; then
+                cp "$PROJECT_ROOT/.env.local" "$worktree_path/.env.local"
+                if [ -n "$agent_port" ]; then
+                    update_env_file "$worktree_path/.env.local" "$agent_port"
+                    echo "  ✓ Copied .env.local to $agent_type worktree (port: ${agent_port})"
+                else
+                    echo "  ✓ Copied .env.local to $agent_type worktree"
+                fi
+            else
+                echo "  ⚠ No .env.local found in main project - agents may have issues with environment variables"
+            fi
+            
+            # Copy and update .env.development.local
+            if [ -f "$PROJECT_ROOT/.env.development.local" ]; then
+                cp "$PROJECT_ROOT/.env.development.local" "$worktree_path/.env.development.local"
+                if [ -n "$agent_port" ]; then
+                    update_env_file "$worktree_path/.env.development.local" "$agent_port"
+                    echo "  ✓ Copied .env.development.local to $agent_type worktree (port: ${agent_port})"
+                fi
+            fi
+            
+            # Copy and update .env.test
+            if [ -f "$PROJECT_ROOT/.env.test" ]; then
+                cp "$PROJECT_ROOT/.env.test" "$worktree_path/.env.test"
+                if [ -n "$agent_port" ]; then
+                    update_env_file "$worktree_path/.env.test" "$agent_port"
+                    echo "  ✓ Copied .env.test to $agent_type worktree (port: ${agent_port})"
+                fi
+            fi
+
+            # Generate role-specific file from template
+            # First calculate component prefix
+            COMPONENT_PREFIX=$(echo $PROJECT_NAME | sed 's/-\(.\)/\U\1/g' | sed 's/^\(.\)/\U\1/')
+
+            sed -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+                -e "s|{{PROJECT_ROOT}}|$PROJECT_ROOT|g" \
+                -e "s|{{WORKTREE_PATH}}|$worktree_path|g" \
+                -e "s|{{ComponentPrefix}}|$COMPONENT_PREFIX|g" \
+                "$PROJECT_ROOT/.claude/templates/$template_file" > "$worktree_path/CLAUDE-${role_name}.md"
+
+            # Append role-specific content to main CLAUDE.md
+            if [ -f "$worktree_path/CLAUDE.md" ]; then
+                echo -e "\n\n# ==================== ${role_name} AGENT INSTRUCTIONS ====================\n" >> "$worktree_path/CLAUDE.md"
+                cat "$worktree_path/CLAUDE-${role_name}.md" >> "$worktree_path/CLAUDE.md"
+                # Remove the intermediate file
+                rm -f "$worktree_path/CLAUDE-${role_name}.md"
+            fi
+
+            # Add warning to CLAUDE.md about not committing it
+            echo -e "\n\n# ⚠️ IMPORTANT: DO NOT COMMIT THESE FILES ⚠️" >> "$worktree_path/CLAUDE.md"
+            echo -e "# The following files have been customized for the ${role_name} agent and should NEVER be committed:" >> "$worktree_path/CLAUDE.md"
+            echo -e "# - CLAUDE.md (this file)" >> "$worktree_path/CLAUDE.md"
+            echo -e "# - .mcp/config.json (contains worktree-specific paths)" >> "$worktree_path/CLAUDE.md"
+            echo -e "# - .mcp.json (MCP configuration)" >> "$worktree_path/CLAUDE.md"
+            echo -e "# - docs/configuration/mcp.md (contains worktree-specific paths)" >> "$worktree_path/CLAUDE.md"
+            echo -e "# NEVER use 'git add .' in this worktree. Always use specific file paths when staging changes." >> "$worktree_path/CLAUDE.md"
+
+        echo -e "${GREEN}✓ $role_name agent documentation generated${NC}"
+    else
+        echo -e "${RED}⚠️  Template not found: $template_file${NC}"
+    fi
+}
+
+# Create worktrees
+echo "Step 1: Creating Git worktrees"
+echo "------------------------------"
+create_worktree "feature/${PROJECT_NAME_LOWER}-arch" "$PARENT_DIR/${PROJECT_NAME_LOWER}-arch" "Architecture"
+create_worktree "feature/${PROJECT_NAME_LOWER}-test" "$PARENT_DIR/${PROJECT_NAME_LOWER}-test" "Testing"
+create_worktree "feature/${PROJECT_NAME_LOWER}-impl" "$PARENT_DIR/${PROJECT_NAME_LOWER}-impl" "Implementation"
+
+echo ""
+echo "Step 2: Cleaning up TASK files"
+echo "------------------------------"
+
+# Remove any lingering TASK files from all worktrees
+for worktree in arch test impl; do
+  WORKTREE_DIR="$PARENT_DIR/${PROJECT_NAME_LOWER}-${worktree}"
+  if [ -d "$WORKTREE_DIR" ]; then
+    rm -f "$WORKTREE_DIR"/TASK-*.md
+    echo -e "${GREEN}✓ Cleaned TASK files from ${worktree} worktree${NC}"
+  fi
+done
+
+echo ""
+echo "Step 3: Generating agent documentation"
+echo "-------------------------------------"
+
+# Generate documentation for each worktree
+generate_claude_md "$PARENT_DIR/${PROJECT_NAME_LOWER}-arch" "CLAUDE-ARCHITECT.md.template" "ARCHITECT"
+generate_claude_md "$PARENT_DIR/${PROJECT_NAME_LOWER}-test" "CLAUDE-TESTER.md.template" "TESTER"
+generate_claude_md "$PARENT_DIR/${PROJECT_NAME_LOWER}-impl" "CLAUDE-IMPLEMENTER.md.template" "IMPLEMENTER"
+
+echo ""
+echo "Step 4: Updating settings files"
+echo "-------------------------------"
+
+# Copy settings files to all worktrees to ensure they have the latest configuration
+for worktree in arch test impl; do
+  WORKTREE_DIR="$PARENT_DIR/${PROJECT_NAME_LOWER}-${worktree}"
+  mkdir -p "$WORKTREE_DIR/.claude"
+  
+  # Copy settings.json
+  if [ -f "$PROJECT_ROOT/.claude/settings.json" ]; then
+    cp "$PROJECT_ROOT/.claude/settings.json" "$WORKTREE_DIR/.claude/settings.json"
+    echo -e "${GREEN}✓ Updated settings.json for ${worktree} agent${NC}"
+  fi
+  
+  # Copy settings.local.json if it exists
+  if [ -f "$PROJECT_ROOT/.claude/settings.local.json" ]; then
+    cp "$PROJECT_ROOT/.claude/settings.local.json" "$WORKTREE_DIR/.claude/settings.local.json"
+    echo -e "${GREEN}✓ Updated settings.local.json for ${worktree} agent${NC}"
+  fi
+done
+
+echo ""
+echo "Step 5: Installing dependencies in worktrees"
+echo "-------------------------------"
+
+# Install dependencies in all worktrees
+for worktree in arch test impl; do
+  WORKTREE_DIR="$PARENT_DIR/${PROJECT_NAME_LOWER}-${worktree}"
+  if [ -d "$WORKTREE_DIR" ]; then
+    echo "Installing dependencies in ${worktree} worktree..."
+    (cd "$WORKTREE_DIR" && pnpm install --prefer-offline --no-frozen-lockfile) || {
+      echo -e "${YELLOW}⚠️  Failed to install dependencies in ${worktree} worktree${NC}"
+      echo "  You may need to run 'pnpm install' manually in $WORKTREE_DIR"
+    }
+    echo -e "${GREEN}✓ Dependencies installed for ${worktree} agent${NC}"
+  fi
+done
+
+echo ""
+echo "Step 6: Copying command scripts and libraries"
+echo "-------------------------------"
+
+# Copy commands and lib directories to all worktrees
+for worktree in arch test impl; do
+  WORKTREE_DIR="$PARENT_DIR/${PROJECT_NAME_LOWER}-${worktree}"
+  
+  # Copy commands directory
+  if [ -d "$PROJECT_ROOT/.claude/commands" ]; then
+    mkdir -p "$WORKTREE_DIR/.claude"
+    cp -r "$PROJECT_ROOT/.claude/commands" "$WORKTREE_DIR/.claude/"
+    echo -e "${GREEN}✓ Copied commands for ${worktree} agent${NC}"
+  fi
+  
+  # Copy lib directory with utilities
+  if [ -d "$PROJECT_ROOT/.claude/lib" ]; then
+    cp -r "$PROJECT_ROOT/.claude/lib" "$WORKTREE_DIR/.claude/"
+    echo -e "${GREEN}✓ Copied utility libraries for ${worktree} agent${NC}"
+  fi
+  
+  # Copy .gitignore to ensure TASK files are ignored
+  if [ -f "$PROJECT_ROOT/.gitignore" ]; then
+    cp "$PROJECT_ROOT/.gitignore" "$WORKTREE_DIR/.gitignore"
+    echo -e "${GREEN}✓ Updated .gitignore for ${worktree} agent${NC}"
+  fi
+done
+
+echo ""
+echo -e "${GREEN}✅ Multi-agent workflow setup complete!${NC}"
+echo ""
+
+# Check if pipeline is active
+if [ -f "$PROJECT_ROOT/.claude/pipeline/state/pipeline-state.json" ] && pgrep -f "pipeline/commands/monitor" > /dev/null; then
+    echo -e "${YELLOW}🚀 Pipeline Mode Detected!${NC}"
+    echo ""
+    echo "Pipeline is managing task assignments and worktree updates."
+    echo "Agents will receive new tasks automatically from the pipeline."
+    echo ""
+    echo "Worktrees updated:"
+else
+    echo "Worktrees created:"
+fi
+
+echo "  - Architecture: $PARENT_DIR/${PROJECT_NAME_LOWER}-arch (branch: feature/${PROJECT_NAME_LOWER}-arch)"
+echo "  - Testing:      $PARENT_DIR/${PROJECT_NAME_LOWER}-test (branch: feature/${PROJECT_NAME_LOWER}-test)"
+echo "  - Implementation: $PARENT_DIR/${PROJECT_NAME_LOWER}-impl (branch: feature/${PROJECT_NAME_LOWER}-impl)"
+echo ""
+echo "Each worktree now has:"
+echo "  - CLAUDE.md with base + role-specific instructions"
+echo "  - CLAUDE-{ROLE}.md with role-specific content only"
+echo ""
+
+# Different instructions based on mode
+if [ -f "$PROJECT_ROOT/.claude/pipeline/state/pipeline-state.json" ] && pgrep -f "pipeline/commands/monitor" > /dev/null; then
+    echo "Pipeline mode active - agents will be assigned tasks automatically"
+else
+    echo "Next steps:"
+    echo "  1. Run ./claude/commands/setup-tmux to start development session"
+    echo "  2. Each agent can work in their respective worktree"
+    echo "  3. Use git to merge changes between worktrees"
+fi

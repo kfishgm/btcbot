@@ -1,0 +1,268 @@
+#!/bin/bash
+# Setup sequential workflow: create single git worktree for sequential development
+# Based on setup-agents but simplified for single primary developer approach
+set -e
+
+# Show help
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    cat << EOF
+Setup Sequential Workflow
+
+Creates a single git worktree for sequential agent orchestration.
+
+Usage: setup-sequential [--help]
+
+What it does:
+1. Creates 1 git worktree (project-seq)
+2. Copies .claude directory with commands and libraries
+3. Copies settings.json and settings.local.json
+4. Sets up environment files
+5. Configures for sequential development
+
+Prerequisites:
+- Git repository initialized
+- Main project setup complete
+- GitHub repo configured
+
+After setup:
+- Use 'setup-tmux' to start sequential session
+- Primary developer agent runs in tmux from worktree
+- Primary developer invokes subagents sequentially
+- All development happens in project-seq worktree
+EOF
+    exit 0
+fi
+
+# Dynamic path detection - PROJECT AGNOSTIC
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+PROJECT_NAME="${PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+
+# Sequential worktree name based on project
+WORKTREE_PATH="$PARENT_DIR/${PROJECT_NAME_LOWER}-seq"
+BRANCH_NAME="feature/${PROJECT_NAME_LOWER}-sequential"
+
+# Color codes
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo "🚀 Setting up sequential workflow for $PROJECT_NAME"
+echo "=================================================="
+echo ""
+
+# Check if worktree exists
+if [ -d "$WORKTREE_PATH" ]; then
+    echo "Sequential worktree already exists. Will update..."
+else
+    echo "Creating sequential worktree..."
+fi
+echo ""
+
+# Function to create/update worktree
+setup_worktree() {
+    if [ ! -d "$WORKTREE_PATH" ]; then
+        echo -e "${YELLOW}Creating sequential worktree...${NC}"
+        
+        # Fetch latest from origin
+        echo "Fetching latest from origin/main..."
+        git -C "$PROJECT_ROOT" fetch origin main
+        
+        # Check if branch exists
+        if git -C "$PROJECT_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            # Local branch exists - update it
+            echo "Updating existing branch $BRANCH_NAME from origin/main..."
+            git -C "$PROJECT_ROOT" checkout "$BRANCH_NAME"
+            git -C "$PROJECT_ROOT" merge origin/main --no-edit
+            git -C "$PROJECT_ROOT" checkout main
+            git -C "$PROJECT_ROOT" worktree add "$WORKTREE_PATH" "$BRANCH_NAME"
+        elif git -C "$PROJECT_ROOT" show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+            # Remote branch exists
+            echo "Creating local branch from origin/$BRANCH_NAME..."
+            git -C "$PROJECT_ROOT" worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH" "origin/$BRANCH_NAME"
+        else
+            # Create new branch
+            echo "Creating new branch $BRANCH_NAME from origin/main..."
+            git -C "$PROJECT_ROOT" worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH" origin/main
+        fi
+        
+        echo -e "${GREEN}✓ Created worktree at: $WORKTREE_PATH${NC}"
+    else
+        echo -e "${GREEN}✓ Worktree already exists: $WORKTREE_PATH${NC}"
+        
+        # Update existing worktree
+        echo "Updating existing worktree from origin/main..."
+        git -C "$WORKTREE_PATH" fetch origin main
+        
+        # Clean up any untracked files in .claude
+        git -C "$WORKTREE_PATH" clean -fd .claude/commands/ .claude/lib/ 2>/dev/null || true
+        
+        # Merge latest changes
+        git -C "$WORKTREE_PATH" merge origin/main --no-edit || {
+            echo -e "${YELLOW}Handling merge issues...${NC}"
+            git -C "$WORKTREE_PATH" merge --abort 2>/dev/null || true
+            git -C "$WORKTREE_PATH" reset --hard origin/main
+        }
+    fi
+}
+
+# Create/update worktree
+echo "Step 1: Setting up Git worktree"
+echo "------------------------------"
+setup_worktree
+
+echo ""
+echo "Step 2: Cleaning up old workflow files"
+echo "------------------------------"
+rm -f "$WORKTREE_PATH"/TASK-*.md
+rm -f "$WORKTREE_PATH"/REVIEW-REQUEST-*.md
+rm -f "$WORKTREE_PATH"/REVIEW-RESULT-*.md
+echo -e "${GREEN}✓ Cleaned old workflow files from sequential worktree${NC}"
+
+echo ""
+echo "Step 3: Copying configuration files"
+echo "-------------------------------------"
+
+# Copy CLAUDE.md (base only, no templates)
+if [ -f "$PROJECT_ROOT/CLAUDE.md" ]; then
+    cp "$PROJECT_ROOT/CLAUDE.md" "$WORKTREE_PATH/CLAUDE.md"
+    echo -e "${GREEN}✓ Copied CLAUDE.md${NC}"
+fi
+
+# Copy docs/configuration/mcp.md if it exists
+if [ -f "$PROJECT_ROOT/docs/configuration/mcp.md" ]; then
+    mkdir -p "$WORKTREE_PATH/docs/configuration"
+    sed "s|{{PROJECT_ROOT}}|$WORKTREE_PATH|g" "$PROJECT_ROOT/docs/configuration/mcp.md" > "$WORKTREE_PATH/docs/configuration/mcp.md"
+    echo -e "${GREEN}✓ Copied MCP documentation${NC}"
+fi
+
+# Copy and update .mcp files
+if [ -f "$PROJECT_ROOT/.mcp/config.json" ]; then
+    mkdir -p "$WORKTREE_PATH/.mcp"
+    sed -e "s|{{PROJECT_ROOT}}|$WORKTREE_PATH|g" \
+        -e "s|$PROJECT_ROOT|$WORKTREE_PATH|g" \
+        "$PROJECT_ROOT/.mcp/config.json" > "$WORKTREE_PATH/.mcp/config.json"
+    echo -e "${GREEN}✓ Updated .mcp/config.json${NC}"
+fi
+
+# Copy .mcp.json if it exists
+if [ -f "$PROJECT_ROOT/.mcp.json" ]; then
+    cp "$PROJECT_ROOT/.mcp.json" "$WORKTREE_PATH/.mcp.json"
+    echo -e "${GREEN}✓ Copied .mcp.json${NC}"
+fi
+
+echo ""
+echo "Step 4: Copying environment files"
+echo "--------------------------------"
+
+# Sequential worktree uses port 3001 (simpler than managing 3 ports)
+AGENT_PORT="3001"
+
+# Function to update env file with correct URLs
+update_env_file() {
+    local env_file=$1
+    local port=$2
+    
+    if [ -f "$env_file" ]; then
+        # Ensure file ends with newline
+        if [ -n "$(tail -c 1 "$env_file")" ]; then
+            echo "" >> "$env_file"
+        fi
+        
+        # Update or add NEXT_PUBLIC_SITE_URL
+        if grep -q "^NEXT_PUBLIC_SITE_URL=" "$env_file"; then
+            sed -i.bak "s|^NEXT_PUBLIC_SITE_URL=.*|NEXT_PUBLIC_SITE_URL=http://localhost:${port}|" "$env_file"
+        else
+            echo "NEXT_PUBLIC_SITE_URL=http://localhost:${port}" >> "$env_file"
+        fi
+        
+        # Update or add NEXT_PUBLIC_APP_URL
+        if grep -q "^NEXT_PUBLIC_APP_URL=" "$env_file"; then
+            sed -i.bak "s|^NEXT_PUBLIC_APP_URL=.*|NEXT_PUBLIC_APP_URL=http://localhost:${port}|" "$env_file"
+        else
+            echo "NEXT_PUBLIC_APP_URL=http://localhost:${port}" >> "$env_file"
+        fi
+        
+        # Clean up backup files
+        rm -f "${env_file}.bak"
+    fi
+}
+
+# Copy and update .env files
+for env_file in .env.local .env.development.local .env.test; do
+    if [ -f "$PROJECT_ROOT/$env_file" ]; then
+        cp "$PROJECT_ROOT/$env_file" "$WORKTREE_PATH/$env_file"
+        update_env_file "$WORKTREE_PATH/$env_file" "$AGENT_PORT"
+        echo -e "${GREEN}✓ Copied and updated $env_file (port: ${AGENT_PORT})${NC}"
+    fi
+done
+
+echo ""
+echo "Step 5: Copying settings files"
+echo "-------------------------------"
+
+# Copy settings files (THIS IS WHERE settings.json IS COPIED)
+mkdir -p "$WORKTREE_PATH/.claude"
+
+if [ -f "$PROJECT_ROOT/.claude/settings.json" ]; then
+    cp "$PROJECT_ROOT/.claude/settings.json" "$WORKTREE_PATH/.claude/settings.json"
+    echo -e "${GREEN}✓ Copied settings.json${NC}"
+fi
+
+if [ -f "$PROJECT_ROOT/.claude/settings.local.json" ]; then
+    cp "$PROJECT_ROOT/.claude/settings.local.json" "$WORKTREE_PATH/.claude/settings.local.json"
+    echo -e "${GREEN}✓ Copied settings.local.json${NC}"
+fi
+
+echo ""
+echo "Step 6: Installing dependencies"
+echo "-------------------------------"
+
+echo "Installing dependencies in sequential worktree..."
+(cd "$WORKTREE_PATH" && pnpm install --prefer-offline --no-frozen-lockfile) || {
+    echo -e "${YELLOW}⚠️  Failed to install dependencies${NC}"
+    echo "  You may need to run 'pnpm install' manually in $WORKTREE_PATH"
+}
+echo -e "${GREEN}✓ Dependencies installed${NC}"
+
+echo ""
+echo "Step 7: Copying command scripts and libraries"
+echo "----------------------------------------------"
+
+# Copy all necessary directories
+for dir in commands lib pipeline sequential hooks agents templates; do
+    if [ -d "$PROJECT_ROOT/.claude/$dir" ]; then
+        cp -r "$PROJECT_ROOT/.claude/$dir" "$WORKTREE_PATH/.claude/"
+        echo -e "${GREEN}✓ Copied $dir${NC}"
+    fi
+done
+
+# Copy .gitignore
+if [ -f "$PROJECT_ROOT/.gitignore" ]; then
+    cp "$PROJECT_ROOT/.gitignore" "$WORKTREE_PATH/.gitignore"
+    echo -e "${GREEN}✓ Updated .gitignore${NC}"
+fi
+
+
+echo ""
+echo -e "${GREEN}✅ Sequential workflow setup complete!${NC}"
+echo ""
+echo "Worktree created:"
+echo "  - Sequential: $WORKTREE_PATH"
+echo "  - Branch: $BRANCH_NAME"
+echo "  - Dev server port: $AGENT_PORT"
+echo ""
+echo "The worktree has:"
+echo "  - Base CLAUDE.md with primary developer instructions"
+echo "  - settings.json and settings.local.json"
+echo "  - All .claude commands and libraries"
+echo "  - Agent definitions for subagent invocation"
+echo "  - Environment configured for port $AGENT_PORT"
+echo ""
+echo "Next steps:"
+echo "  1. Run .claude/sequential/commands/setup-tmux to start tmux session"
+echo "  2. The primary developer agent will be started automatically"
+echo "  3. Primary developer uses Task tool to invoke subagents"
+echo "  4. Monitor provides recovery if primary developer stops"

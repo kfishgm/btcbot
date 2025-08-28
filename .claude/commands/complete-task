@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# Streamlined complete-task command using utilities
+set -e
+
+# Source utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$PROJECT_ROOT/.claude/lib/complete-task-utils.sh"
+
+# Show help
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    cat << EOF
+Complete Task - Implementation Workflow
+
+This command completes the task after implementation:
+1. Verifies test agent has completed their work
+2. Runs quality checks (lint, typecheck, test, build)
+3. Fixes any quality issues found
+4. Creates feature branch for PR
+5. Deploys migrations to remote Supabase (if configured)
+6. Creates and merges a GitHub PR
+7. Cleans up branches and processes
+
+Usage: complete-task [--help]
+
+Requirements:
+- Must be run by implementation agent
+- Test agent must have completed (test-done label)
+- Issue must be open (not closed)
+
+STRICT Quality Gate:
+- ALL lint errors must be fixed (even from other tasks)
+- ALL TypeScript errors must be resolved (even pre-existing)
+- ALL tests must pass (100% success rate required)
+- Build MUST succeed (no broken imports/exports)
+- The codebase must be deployable after merge
+EOF
+    exit 0
+fi
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo -e "${YELLOW}=== Complete Task Workflow ===${NC}"
+echo "This will merge all agent work to main with quality gates"
+echo ""
+echo -e "${YELLOW}⚠️  STRICT QUALITY GATE ⚠️${NC}"
+echo "ALL checks must pass, including issues from other tasks:"
+echo "  - Lint errors → Run: pnpm lint --fix"
+echo "  - TypeScript errors → Fix each error shown"
+echo "  - Test failures → Fix or update tests"
+echo "  - Build errors → Fix imports/exports"
+echo ""
+echo "Starting quality checks..."
+echo
+
+# Run the orchestrator
+if complete_task_orchestrator; then
+    echo
+    echo -e "${GREEN}✅ Success! Task has been completed and merged to main.${NC}"
+    echo
+    echo "The TASK file has been removed automatically."
+    echo "Claude will exit and wait for the next task assignment."
+    exit 0
+else
+    EXIT_CODE=$?
+    echo
+    echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}❌ TASK CANNOT BE COMPLETED - QUALITY CHECKS FAILED ❌${NC}"
+    echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}📝 RECOMMENDED WORKFLOW:${NC}"
+    echo "1. ${GREEN}Use TodoWrite to add ALL failures as todo items${NC}"
+    echo "   - Add each lint error as a todo"
+    echo "   - Add each TypeScript error as a todo"
+    echo "   - Add each failing test as a todo"
+    echo "   - Add each build error as a todo"
+    echo ""
+    echo "2. ${GREEN}Work through todos one by one${NC}"
+    echo "   - Fix each issue individually"
+    echo "   - Test your fix in isolation"
+    echo "   - Mark the todo as complete"
+    echo ""
+    echo "3. ${GREEN}Only run complete-task again when ALL todos are done${NC}"
+    echo ""
+    echo -e "${YELLOW}AS IMPLEMENTER, YOU MUST FIX:${NC}"
+    echo "• ALL lint errors and warnings"
+    echo "• ALL TypeScript errors"
+    echo "• ALL failing tests and E2E tests"
+    echo "• ALL build errors"
+    echo ""
+    echo -e "${YELLOW}ℹ️  Your work is still saved in git and on your current branch${NC}"
+    echo -e "${YELLOW}   Continue fixing issues and run complete-task again${NC}"
+    echo ""
+    echo -e "${RED}DO NOT CREATE A PR UNTIL ALL CHECKS PASS${NC}"
+    exit $EXIT_CODE
+fi

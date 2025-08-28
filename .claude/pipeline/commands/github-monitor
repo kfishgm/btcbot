@@ -1,0 +1,437 @@
+#!/bin/bash
+# GitHub Issues-based Pipeline Monitor
+# Simplified monitoring using GitHub Issues as source of truth
+
+# Don't exit on errors - we want the monitor to be resilient
+set +e
+
+# Ignore SIGPIPE to prevent unexpected exits
+trap '' PIPE
+
+# Get directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIPELINE_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$PIPELINE_ROOT")")"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Configuration
+MONITOR_INTERVAL=${MONITOR_INTERVAL:-30}
+LOG_FILE="$PIPELINE_ROOT/logs/github-pipeline.log"
+PID_FILE="$PIPELINE_ROOT/state/github-monitor.pid"
+
+# Create directories
+mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$(dirname "$PID_FILE")"
+
+# Logging
+log() {
+    local level=$1
+    shift
+    # Use >> instead of tee to avoid potential SIGPIPE issues
+    local message="[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*"
+    echo "$message"
+    echo "$message" >> "$LOG_FILE"
+}
+
+# Check if monitor is already running
+check_running() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo -e "${RED}Monitor already running with PID $pid${NC}"
+            exit 1
+        fi
+    fi
+}
+
+# Cleanup on exit
+cleanup() {
+    # Only log if we haven't already cleaned up
+    if [ -f "$PID_FILE" ]; then
+        log INFO "Monitor shutting down (PID: $$)"
+        rm -f "$PID_FILE"
+    fi
+}
+
+# Only trap INT and TERM, not EXIT (which can fire unexpectedly)
+trap cleanup INT TERM
+
+
+# Safe command execution with timeout
+safe_exec() {
+    local cmd="$1"
+    local timeout="${2:-10}"
+    local description="${3:-command}"
+    
+    # Use timeout to prevent hanging
+    local output
+    # Direct execution without bash -c wrapper
+    if output=$(timeout "$timeout" $cmd 2>&1); then
+        echo "$output"
+        return 0
+    else
+        local exit_code=$?
+        # Only log actual errors, not timeouts
+        if [ $exit_code -ne 124 ] && [ $exit_code -ne 143 ]; then
+            log ERROR "Command failed: $description (exit code: $exit_code)"
+        fi
+        return $exit_code
+    fi
+}
+
+# Monitor loop
+monitor_loop() {
+    log INFO "GitHub Issues Pipeline Monitor started (PID: $$)"
+    echo $$ > "$PID_FILE"
+    
+    echo -e "${GREEN}=== GitHub Pipeline Monitor Started ===${NC}"
+    echo -e "Monitoring interval: ${MONITOR_INTERVAL} seconds"
+    echo -e "PID: $$\n"
+    
+    while true; do
+        # Wrap main loop body in error handling to prevent crashes
+        (
+            echo -e "\n${CYAN}=== Pipeline Status $(date '+%H:%M:%S') ===${NC}"
+            
+            
+            # Show all tasks
+            echo -e "\n${BLUE}Tasks:${NC}"
+            if ! safe_exec "$PIPELINE_ROOT/lib/github-task-scheduler.mjs list" 10 "task list"; then
+                echo -e "${RED}Error: Failed to list tasks${NC}"
+            fi
+        
+        # Check each agent
+        echo -e "\n${BLUE}Agents:${NC}"
+        for agent in architect test implementation; do
+            # Get status directly by checking TASK files
+            local status=""
+            local worktree=""
+            local agent_task_num=""  # Changed to agent-specific variable
+            
+            # Get worktree path for this agent
+            local project_lower=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+            case "$agent" in
+                architect) worktree="../${project_lower}-arch" ;;
+                test) worktree="../${project_lower}-test" ;;
+                implementation) worktree="../${project_lower}-impl" ;;
+            esac
+            
+            # Check for TASK files directly
+            if [ -d "$PROJECT_ROOT/$worktree" ]; then
+                local task_count=$(find "$PROJECT_ROOT/$worktree" -name "TASK-*.md" 2>/dev/null | wc -l)
+                if [ $task_count -eq 1 ]; then
+                    local task_file=$(find "$PROJECT_ROOT/$worktree" -name "TASK-*.md" 2>/dev/null)
+                    agent_task_num=$(basename "$task_file" | sed 's/TASK-\(.*\)\.md/\1/')
+                    status="working on task #$agent_task_num"
+                elif [ $task_count -gt 1 ]; then
+                    status="${RED}ERROR: multiple TASK files${NC}"
+                else
+                    status="idle"
+                fi
+            else
+                status="${RED}Worktree not found${NC}"
+                log WARN "Worktree not found for agent $agent at $PROJECT_ROOT/$worktree"
+            fi
+            
+            printf "  %-15s: %s\n" "$agent" "$status"
+            
+            # Get agent's tmux pane for checking
+            case "$agent" in
+                architect) pane_num=0 ;;
+                test) pane_num=1 ;;
+                implementation) pane_num=2 ;;
+                supervisor) pane_num=3 ;;
+            esac
+            
+            local session_name="$(echo "${PROJECT_NAME}" | tr '[:upper:]' '[:lower:]')-dev"
+            local pane_cmd=""
+            
+            # Check if tmux session and pane exist before querying
+            if tmux has-session -t "$session_name" 2>/dev/null; then
+                if tmux list-panes -t "$session_name:1" 2>/dev/null | grep -q "^$pane_num:"; then
+                    pane_cmd=$(tmux display-message -t "$session_name:1.$pane_num" -p '#{pane_current_command}' 2>/dev/null || echo "")
+                fi
+            fi
+            
+            # Handle agents that are working
+            if [[ "$status" =~ "working on task" ]] && [ -n "$agent_task_num" ]; then
+                # Extract task number from status (already extracted above)
+                local worktree=$("$PIPELINE_ROOT/lib/github-agent-interface.sh" worktree "$agent")
+                
+                # Check if Claude is running
+                if [ "$pane_cmd" != "node" ]; then
+                    # Claude not running but agent has task => start claude with recovery
+                    local recovery_marker="$worktree/.claude-recovery-sent"
+                    
+                    # Check if we recently sent a recovery message
+                    local should_recover=true
+                    if [ -f "$recovery_marker" ]; then
+                        # macOS compatible stat command
+                        local last_recovery=$(stat -f %m "$recovery_marker" 2>/dev/null || stat -c %Y "$recovery_marker" 2>/dev/null || echo 0)
+                        local current_time=$(date +%s)
+                        local time_since_recovery=$((current_time - last_recovery))
+                        
+                        if [ $time_since_recovery -lt 300 ]; then  # Less than 5 minutes
+                            echo -e "    ${YELLOW}→ Recovery attempted ${time_since_recovery}s ago, skipping${NC}"
+                            should_recover=false
+                        else
+                            echo -e "    ${YELLOW}→ Last recovery ${time_since_recovery}s ago, retrying${NC}"
+                        fi
+                    fi
+                    
+                    if [ "$should_recover" = true ]; then
+                        log INFO "Starting Claude for $agent who has task #$agent_task_num"
+                        echo -e "    ${YELLOW}→ Starting Claude recovery${NC}"
+                        touch "$recovery_marker"  # Update modification time
+                        
+                        # Clear terminal and navigate to worktree
+                        # Single Ctrl+C is safer for bash shells
+                        tmux send-keys -t "$session_name:1.$pane_num" C-c
+                        sleep 0.5
+                        tmux send-keys -t "$session_name:1.$pane_num" "cd $worktree"
+                        sleep 0.5
+                        tmux send-keys -t "$session_name:1.$pane_num" C-m
+                        sleep 1
+                        
+                        # Use opus for architect and implementation, sonnet for others
+                        local model="sonnet"
+                        if [ "$agent" = "architect" ] || [ "$agent" = "implementation" ]; then
+                            model="opus"
+                        fi
+                        
+                        # Start Claude with recovery message
+                        if [ "$agent" = "implementation" ]; then
+                            # Special message for implementer
+                            tmux send-keys -t "$session_name:1.$pane_num" "claude --dangerously-skip-permissions --model $model \"You are working on task #$agent_task_num. Don't run complete-task until ALL lint, typecheck, build, unit tests and e2e tests are passing - make them pass with full implementations. Don't run full test suites to check progress or count tests as that is a waste of time. Do an initial full run of unit tests and add them to your TodoWrite tool, then do a full run of e2e tests with chromium and 8 workers and add failures to your TodoWrite tool. Don't run the full test or e2e test suites until your todo is finished. If adding migrations and generating types verify they are correct, always use 'supabase db reset' locally. Validate typecheck after every fix. Validate lint after every fix. Validate specific test after every fix. Validate specific e2e test after every fix. Don't move on to the next todo unless the fix worked. Do not deviate from this workflow. Run '.claude/commands/task check' if you haven't started, or continue until you finish and run '.claude/commands/complete-task'.\""
+                        else
+                            tmux send-keys -t "$session_name:1.$pane_num" "claude --dangerously-skip-permissions --model $model \"You are the $agent agent. You have an active task! First, read your CLAUDE.md file. Then use '.claude/commands/task check' to see your task assignment (issue #$agent_task_num).\""
+                        fi
+                        sleep 0.5
+                        tmux send-keys -t "$session_name:1.$pane_num" C-m
+                    fi
+                else
+                    # Claude IS running - check if actually idle
+                    if "$PROJECT_ROOT/.claude/commands/check-agent-idle" "$pane_num"; then
+                        # Claude is idle (no "esc to interrupt" found) AND has incomplete task
+                        echo -e "    ${YELLOW}→ Claude idle with incomplete task${NC}"
+                        
+                        local idle_reminder_marker="$worktree/.claude-idle-reminder"
+                        
+                        # Check if we recently sent an idle reminder
+                        local should_remind=true
+                        if [ -f "$idle_reminder_marker" ]; then
+                            # macOS compatible stat command
+                            local last_reminder=$(stat -f %m "$idle_reminder_marker" 2>/dev/null || stat -c %Y "$idle_reminder_marker" 2>/dev/null || echo 0)
+                            local current_time=$(date +%s)
+                            local time_since_reminder=$((current_time - last_reminder))
+                            
+                            if [ $time_since_reminder -lt 60 ]; then  # 60 seconds for idle reminders
+                                echo -e "    ${YELLOW}→ Last reminder ${time_since_reminder}s ago, skipping${NC}"
+                                should_remind=false
+                            fi
+                        fi
+                        
+                        if [ "$should_remind" = true ]; then
+                            log INFO "Sending idle reminder to $agent for task #$agent_task_num"
+                            echo -e "    ${YELLOW}→ Sending idle reminder${NC}"
+                            touch "$idle_reminder_marker"  # Update modification time
+                            
+                            # Send a gentle reminder without interrupting
+                            if [ "$agent" = "implementation" ]; then
+                                # Special reminder for implementer mentioning complete-task
+                                tmux send-keys -t "$session_name:1.$pane_num" "You are working on task #$agent_task_num. Don't run complete-task until ALL lint, typecheck, build, unit tests and e2e tests are passing - make them pass with full implementations. Don't run full test suites to check progress or count tests as that is a waste of time. Do an initial full run of unit tests and add them to your TodoWrite tool, then do a full run of e2e tests with chromium and 8 workers and add failures to your TodoWrite tool. Don't run the full test or e2e test suites until your todo is finished. If adding migrations and generating types verify they are correct, always use 'supabase db reset' locally. Validate typecheck after every fix. Validate lint after every fix. Validate specific test after every fix. Validate specific e2e test after every fix. Don't move on to the next todo unless the fix worked. Do not deviate from this workflow. Run '.claude/commands/task check' if you haven't started, or continue until you finish and run '.claude/commands/complete-task'."
+                            else
+                                tmux send-keys -t "$session_name:1.$pane_num" "You are working on task #$agent_task_num. Run '.claude/commands/task check' if you haven't started. Continue or start your work."
+                            fi
+                            sleep 0.5
+                            tmux send-keys -t "$session_name:1.$pane_num" C-m
+                        fi
+                    else
+                        # Claude is actively working (has "esc to interrupt")
+                        echo -e "    ${GREEN}→ Claude actively working${NC}"
+                    fi
+                fi
+            fi
+            # else: idle => do nothing (handled by auto-assign logic below)
+            
+            # Handle error state (multiple TASK files)
+            if [[ "$status" = ERROR:* ]]; then
+                echo -e "    ${RED}⚠ $status${NC}"
+                # Clean up multiple TASK files
+                local worktree=$("$PIPELINE_ROOT/lib/github-agent-interface.sh" worktree "$agent")
+                echo -e "    ${YELLOW}→ Cleaning up multiple TASK files...${NC}"
+                rm -f "$worktree"/TASK-*.md
+                status="idle"
+            fi
+            
+            # If agent is idle, check for available work
+            if [ "$status" = "idle" ]; then
+                next_task=$("$PIPELINE_ROOT/lib/github-task-scheduler.mjs" next-task "$agent" 2>&1 || echo "error")
+                if [ "$next_task" = "error" ]; then
+                    echo -e "    ${RED}→ Error checking for available tasks${NC}"
+                elif [ "$next_task" != "No eligible tasks" ]; then
+                    echo -e "    ${YELLOW}→ Available task: #$next_task${NC}"
+                    
+                    # Auto-assign if enabled
+                    if [ "${AUTO_ASSIGN:-false}" = "true" ]; then
+                        # Check if agent has a TASK file (stateless check)
+                        local worktree=$("$PIPELINE_ROOT/lib/github-agent-interface.sh" worktree "$agent")
+                        if ls "$worktree"/TASK-*.md >/dev/null 2>&1; then
+                            log INFO "Agent $agent already has a task file, skipping assignment"
+                        else
+                            log INFO "Auto-assigning task #$next_task to $agent"
+                            if ! "$PIPELINE_ROOT/lib/github-agent-interface.sh" start "$agent" "$next_task" 2>&1; then
+                                log ERROR "Failed to assign task #$next_task to $agent"
+                                continue
+                            fi
+                            # Get agent's tmux pane
+                            case "$agent" in
+                                architect) pane_num=0 ;;
+                                test) pane_num=1 ;;
+                                implementation) pane_num=2 ;;
+                                supervisor) pane_num=3 ;;
+                            esac
+                            
+                            # Always restart Claude for new task
+                            local session_name="$(echo "${PROJECT_NAME}" | tr '[:upper:]' '[:lower:]')-dev"
+                            local pane_cmd=""
+                            if tmux has-session -t "$session_name" 2>/dev/null; then
+                                pane_cmd=$(tmux display-message -t "$session_name:1.$pane_num" -p '#{pane_current_command}' 2>/dev/null || echo "")
+                            fi
+                            
+                            # Kill any existing Claude process first
+                            if [ "$pane_cmd" = "node" ]; then
+                                # Verify this is actually a NEW task
+                                local current_task_file=$(find "$worktree" -name "TASK-*.md" 2>/dev/null | head -1)
+                                if [ -n "$current_task_file" ]; then
+                                    local current_task=$(basename "$current_task_file" | sed 's/TASK-\(.*\)\.md/\1/')
+                                    if [ "$current_task" = "$next_task" ]; then
+                                        log WARN "$agent already working on task #$next_task, not restarting Claude"
+                                        continue
+                                    fi
+                                fi
+                                
+                                log INFO "Killing existing Claude for $agent before starting new task"
+                                # Kill Claude process by targeting the worktree
+                                "$PROJECT_ROOT/.claude/lib/kill-worktree-claude.sh" "$worktree" "$agent"
+                            fi
+                            
+                            # Start fresh Claude instance
+                            log INFO "Starting fresh Claude for $agent with new task"
+                            local worktree=$("$PIPELINE_ROOT/lib/github-agent-interface.sh" worktree "$agent")
+                            
+                            # Navigate to worktree
+                            tmux send-keys -t "$session_name:1.$pane_num" "cd $worktree"
+                            sleep 0.5
+                            tmux send-keys -t "$session_name:1.$pane_num" C-m
+                            sleep 1
+                            
+                            # Use opus for architect and implementation, sonnet for others
+                            local model="sonnet"
+                            if [ "$agent" = "architect" ] || [ "$agent" = "implementation" ]; then
+                                model="opus"
+                            fi
+                            
+                            # Start Claude with task assignment message
+                            if [ "$agent" = "implementation" ]; then
+                                # Special message for implementer with new task
+                                tmux send-keys -t "$session_name:1.$pane_num" "claude --dangerously-skip-permissions --model $model \"You are the implementation agent. You have been assigned task #$next_task! Don't run complete-task until ALL lint, typecheck, build, unit tests and e2e tests are passing - make them pass with full implementations. Don't run full test suites to check progress or count tests as that is a waste of time. Do an initial full run of unit tests and add them to your TodoWrite tool, then do a full run of e2e tests with chromium and 8 workers and add failures to your TodoWrite tool. Don't run the full test or e2e test suites until your todo is finished. If adding migrations and generating types verify they are correct, always use 'supabase db reset' locally. Validate typecheck after every fix. Validate lint after every fix. Validate specific test after every fix. Validate specific e2e test after every fix. Don't move on to the next todo unless the fix worked. Do not deviate from this workflow. First, use '.claude/commands/task check' to see your task details.\""
+                            else
+                                tmux send-keys -t "$session_name:1.$pane_num" "claude --dangerously-skip-permissions --model $model \"You are the $agent agent. You have been assigned a new task! First, read your CLAUDE.md file. Then use '.claude/commands/task check' to see your task assignment.\""
+                            fi
+                            sleep 0.5
+                            tmux send-keys -t "$session_name:1.$pane_num" C-m
+                        fi
+                    fi
+                fi
+            fi
+        done
+        
+        # Show recently completed with error handling
+        echo -e "\n${BLUE}Recent Activity:${NC}"
+        local recent_output
+        if recent_output=$(safe_exec "gh issue list --state closed --label task --limit 5 --json number,title,closedAt" 10 "recent activity"); then
+            if echo "$recent_output" | jq -r '.[] | "  #\(.number): \(.title) (closed \(.closedAt))"' 2>/dev/null; then
+                : # Success
+            else
+                echo -e "  ${YELLOW}No recent activity or JSON parse error${NC}"
+            fi
+        else
+            echo -e "  ${RED}Error getting recent activity${NC}"
+        fi
+        ) || {
+            # If the subshell fails, log the error but continue
+            log ERROR "Monitor iteration failed, continuing..."
+            echo -e "${YELLOW}Monitor iteration failed, continuing in ${MONITOR_INTERVAL} seconds...${NC}"
+        }
+        
+        # Debug: Log that we're about to sleep
+        log DEBUG "Sleeping for $MONITOR_INTERVAL seconds..."
+        sleep "$MONITOR_INTERVAL"
+    done
+    
+    # This should never be reached
+    log ERROR "Monitor loop exited unexpectedly!"
+}
+
+# Main
+case "${1:-start}" in
+    start)
+        check_running
+        if [ "${2:-}" = "--auto" ]; then
+            export AUTO_ASSIGN=true
+            echo -e "${YELLOW}Auto-assignment enabled${NC}"
+        fi
+        monitor_loop
+        # Monitor loop should never return, but just in case:
+        wait
+        ;;
+        
+    stop)
+        if [ -f "$PID_FILE" ]; then
+            pid=$(cat "$PID_FILE")
+            if kill "$pid" 2>/dev/null; then
+                echo -e "${GREEN}Monitor stopped${NC}"
+            else
+                echo -e "${RED}Failed to stop monitor${NC}"
+            fi
+        else
+            echo -e "${YELLOW}Monitor not running${NC}"
+        fi
+        ;;
+        
+    status)
+        if [ -f "$PID_FILE" ]; then
+            pid=$(cat "$PID_FILE")
+            if kill -0 "$pid" 2>/dev/null; then
+                echo -e "${GREEN}Monitor running (PID: $pid)${NC}"
+                exit 0
+            fi
+        fi
+        echo -e "${RED}Monitor not running${NC}"
+        exit 1
+        ;;
+        
+    logs)
+        tail -f "$LOG_FILE"
+        ;;
+        
+    *)
+        echo "GitHub Issues Pipeline Monitor"
+        echo "Usage: github-monitor [command] [options]"
+        echo ""
+        echo "Commands:"
+        echo "  start [--auto]  - Start monitor (--auto enables auto-assignment)"
+        echo "  stop           - Stop monitor"
+        echo "  status         - Check if monitor is running"
+        echo "  logs           - Tail monitor logs"
+        ;;
+esac

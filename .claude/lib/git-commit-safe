@@ -1,0 +1,26 @@
+#!/bin/bash
+# Safe git commit with message
+
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <commit message>"
+    exit 1
+fi
+
+# Check for forbidden files in staging
+FORBIDDEN_FILES=(
+    "CLAUDE.md"
+    "TASK-*.md"
+    ".mcp/config.json"
+    "docs/configuration/mcp.md"
+)
+
+for pattern in "${FORBIDDEN_FILES[@]}"; do
+    if git diff --cached --name-only | grep -E "$pattern" >/dev/null 2>&1; then
+        echo "ERROR: Forbidden files in staging area!"
+        echo "Remove with: git reset HEAD <file>"
+        exit 1
+    fi
+done
+
+# Commit with message
+git commit -m "$*"

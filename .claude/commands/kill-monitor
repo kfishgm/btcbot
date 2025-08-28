@@ -1,0 +1,70 @@
+#!/bin/bash
+# Kill the GitHub monitor process safely
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Find the PID file
+PID_FILE=".claude/pipeline/state/github-monitor.pid"
+
+# First try to kill using PID file
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        echo -e "${YELLOW}Stopping GitHub monitor (PID: $PID)...${NC}"
+        kill -TERM "$PID"
+        sleep 2
+        
+        # If still running, force kill
+        if kill -0 "$PID" 2>/dev/null; then
+            echo -e "${RED}Monitor didn't stop gracefully, forcing...${NC}"
+            kill -9 "$PID"
+        fi
+        
+        rm -f "$PID_FILE"
+        echo -e "${GREEN}✓ Monitor stopped${NC}"
+    else
+        echo -e "${YELLOW}PID file exists but process not running${NC}"
+        rm -f "$PID_FILE"
+    fi
+else
+    echo -e "${YELLOW}No PID file found, searching for monitor process...${NC}"
+fi
+
+# Also search for any running github-monitor processes
+MONITOR_PIDS=$(pgrep -f "github-monitor" | grep -v "$$")
+
+if [ -n "$MONITOR_PIDS" ]; then
+    echo -e "${YELLOW}Found monitor processes: $MONITOR_PIDS${NC}"
+    for pid in $MONITOR_PIDS; do
+        echo "  Killing PID $pid..."
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    sleep 2
+    
+    # Force kill any remaining
+    for pid in $MONITOR_PIDS; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "  Force killing PID $pid..."
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    done
+    echo -e "${GREEN}✓ All monitor processes stopped${NC}"
+else
+    echo -e "${GREEN}No monitor processes found${NC}"
+fi
+
+# Also kill any Node processes running GitHub-related scripts
+NODE_PIDS=$(pgrep -f "github-task-scheduler\|github-agent-interface" | grep -v "$$")
+if [ -n "$NODE_PIDS" ]; then
+    echo -e "${YELLOW}Found related Node processes: $NODE_PIDS${NC}"
+    for pid in $NODE_PIDS; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    echo -e "${GREEN}✓ Related processes stopped${NC}"
+fi
+
+echo -e "${GREEN}✓ Monitor cleanup complete${NC}"

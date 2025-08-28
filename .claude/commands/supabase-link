@@ -1,0 +1,31 @@
+#!/bin/bash
+# Link to remote Supabase project
+
+if [ $# -ne 2 ]; then
+    echo "❌ Usage: $0 <project-ref> <db-password>"
+    echo ""
+    echo "Example: $0 abcdefghijklmnop your-db-password"
+    echo ""
+    echo "Get these from: https://app.supabase.com/project/_/settings/database"
+    exit 1
+fi
+
+PROJECT_REF=$1
+DB_PASSWORD=$2
+
+echo "🔗 Linking to remote Supabase project..."
+echo "📋 Project reference: $PROJECT_REF"
+
+# Link the project non-interactively
+pnpm supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD"
+
+if [ $? -eq 0 ]; then
+    echo "✅ Successfully linked to remote project!"
+    echo ""
+    echo "📋 You can now:"
+    echo "  - Pull remote schema: ./claude/commands/supabase-pull"
+    echo "  - Push to remote: ./claude/commands/supabase-push"
+else
+    echo "❌ Failed to link project"
+    exit 1
+fi

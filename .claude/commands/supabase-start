@@ -1,0 +1,28 @@
+#!/bin/bash
+# Start local Supabase instance
+
+echo "🚀 Starting local Supabase..."
+
+# Check if Supabase is already running
+if pnpm supabase status 2>/dev/null | grep -q "RUNNING"; then
+    echo "✅ Supabase is already running!"
+    pnpm supabase status
+else
+    # Start Supabase
+    pnpm supabase start
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Supabase started successfully!"
+        echo ""
+        echo "📋 Local URLs:"
+        echo "  API URL: http://localhost:54321"
+        echo "  DB URL: postgresql://postgres:postgres@localhost:54322/postgres"
+        echo "  Studio URL: http://localhost:54323"
+        echo "  Inbucket URL: http://localhost:54324"
+        echo ""
+        echo "💡 Use .env.development.local for local development"
+    else
+        echo "❌ Failed to start Supabase"
+        exit 1
+    fi
+fi

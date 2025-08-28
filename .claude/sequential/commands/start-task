@@ -1,0 +1,57 @@
+#!/bin/bash
+# Start sequential task - RUNS IN THE WORKTREE
+set -e
+
+TASK_ID=$1
+
+if [ -z "$TASK_ID" ]; then
+    echo "Usage: start-task <issue-number>"
+    exit 1
+fi
+
+# Check if already has sequential-wip (someone else working on it)
+if gh issue view $TASK_ID --json labels -q '.labels[].name' 2>/dev/null | grep -q "sequential-wip"; then
+    echo "ERROR: Task $TASK_ID already has sequential-wip label"
+    exit 1
+fi
+
+# Check if branch already exists (previous attempt)
+BRANCH="$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')-sequential"
+if git show-ref --verify --quiet "refs/heads/$BRANCH" || \
+   git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+    echo "ERROR: Branch $BRANCH already exists"
+    exit 1
+fi
+
+# Check if PR already exists
+if gh pr list --state open --search "Closes #$TASK_ID" --json number -q '.[0].number' 2>/dev/null | grep -q .; then
+    echo "ERROR: PR already exists for issue #$TASK_ID"
+    exit 1
+fi
+
+# Create branch FIRST (so if it fails, no label is added)
+# In worktree, we need to fetch and checkout from origin/main
+echo "Creating branch $BRANCH..."
+
+# Fetch latest
+git fetch origin main > /dev/null 2>&1 || {
+    echo "ERROR: Failed to fetch origin/main"
+    exit 1
+}
+
+# Create and checkout branch from origin/main
+git checkout -b $BRANCH origin/main > /dev/null 2>&1 || {
+    echo "ERROR: Failed to create branch $BRANCH"
+    echo "Try: git status to check current state"
+    exit 1
+}
+
+# Only add label AFTER branch is successfully created
+gh issue edit $TASK_ID --add-label "sequential-wip" > /dev/null || {
+    echo "ERROR: Failed to add label, but branch $BRANCH was created"
+    echo "Manually add label with: gh issue edit $TASK_ID --add-label sequential-wip"
+    exit 1
+}
+
+echo "✅ Task #$TASK_ID started"
+echo "Branch: $BRANCH"

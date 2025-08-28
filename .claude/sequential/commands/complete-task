@@ -1,0 +1,229 @@
+#!/bin/bash
+# Strict task completion - NO BYPASSES, must pass all validations
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Get task ID from argument or current sequential task
+TASK_ID=${1:-$(gh issue list --assignee @me --label "sequential-wip" --json number -q '.[0].number' 2>/dev/null)}
+
+if [ -z "$TASK_ID" ]; then
+    echo -e "${RED}No task to complete${NC}"
+    echo "Usage: complete-task [task-id]"
+    exit 1
+fi
+
+echo -e "${BLUE}=== Task Completion Process ===${NC}"
+echo "Task #$TASK_ID"
+echo ""
+
+# Step 1: Check for uncommitted changes and forbidden files
+echo -e "${BLUE}Checking git status and validating changes...${NC}"
+echo ""
+
+# Check if there are staged forbidden files
+FORBIDDEN_STAGED=$(git diff --cached --name-only | grep -E "(CLAUDE\.md|\.mcp|TASK-.*\.md|REVIEW-.*\.md|\.claude-|PRIMARY_DEVELOPER\.md)" || true)
+if [ -n "$FORBIDDEN_STAGED" ]; then
+    echo -e "${RED}❌ FORBIDDEN FILES STAGED FOR COMMIT${NC}"
+    echo ""
+    echo "The following files should NEVER be committed:"
+    echo "$FORBIDDEN_STAGED" | sed 's/^/  - /'
+    echo ""
+    echo "Reset them with:"
+    echo "  git reset HEAD $(echo $FORBIDDEN_STAGED | tr '\n' ' ')"
+    echo ""
+    exit 1
+fi
+
+# Check for uncommitted changes in important directories
+UNCOMMITTED=$(git status --porcelain | grep -E "^( M|MM|\?\?)" | grep -E "\.(ts|tsx|js|jsx|json|sql|md)$" | grep -vE "(CLAUDE\.md|\.mcp|TASK-|REVIEW-|\.claude-|PRIMARY_DEVELOPER\.md|docs/architecture/task-)" || true)
+if [ -n "$UNCOMMITTED" ]; then
+    echo -e "${YELLOW}⚠️ UNCOMMITTED CHANGES DETECTED${NC}"
+    echo ""
+    echo "You have uncommitted changes that should probably be included:"
+    echo "$UNCOMMITTED" | sed 's/^/  /'
+    echo ""
+    echo "These changes might have been made by:"
+    echo "  • Previous agents working on this task"
+    echo "  • Automated formatting or linting"
+    echo "  • Test file updates"
+    echo ""
+    echo -e "${RED}You must either:${NC}"
+    echo "  1. Commit these changes if they're part of the task:"
+    echo "     git add <files> && git commit -m 'feat: description'"
+    echo "  2. Discard them if they're not needed:"
+    echo "     git checkout -- <files>"
+    echo ""
+    echo -e "${YELLOW}Review the changes and decide, then run complete-task again.${NC}"
+    exit 1
+fi
+
+# Check if working tree is clean (excluding allowed uncommitted files)
+WORKING_TREE_STATUS=$(git status --porcelain | grep -vE "(CLAUDE\.md|\.mcp|TASK-|REVIEW-|\.claude-|PRIMARY_DEVELOPER\.md|docs/architecture/task-)" || true)
+if [ -n "$WORKING_TREE_STATUS" ]; then
+    echo -e "${YELLOW}⚠️ Working tree has unexpected changes${NC}"
+    echo "$WORKING_TREE_STATUS"
+    echo ""
+    echo "Please review and handle these changes before completing the task."
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Git status validated - no forbidden files, all changes committed${NC}"
+echo ""
+
+# Step 2: Check code review was done
+echo -e "${BLUE}Checking code review status...${NC}"
+echo ""
+
+if ! .claude/sequential/commands/validate-code-review; then
+    echo ""
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}❌ CANNOT COMPLETE TASK - No Code Review${NC}"
+    echo -e "${RED}========================================${NC}"
+    echo ""
+    echo "You MUST get a production readiness review before completing."
+    echo "This ensures the feature is actually usable by real users."
+    echo ""
+    echo "Invoke the code-reviewer consultant with:"
+    echo "'Review my implementation for production readiness'"
+    echo ""
+    echo -e "${YELLOW}Get the review and try again.${NC}"
+    exit 1
+fi
+
+echo ""
+echo -e "${GREEN}✓ Code review completed${NC}"
+echo ""
+
+# Delete REVIEW files immediately after review check passes
+# This ensures a fresh review is needed if validation fails and fixes are made
+echo "Cleaning up review files (review check passed)..."
+rm -f REVIEW-REQUEST-*.md REVIEW-RESULT-*.md
+echo -e "${GREEN}✓ Review files deleted - fresh review required if validation fails${NC}"
+echo ""
+
+# Step 3: Run MANDATORY validation - NO BYPASSES
+echo -e "${BLUE}Running mandatory validation checks...${NC}"
+echo ""
+
+if ! .claude/sequential/commands/validate-implementation; then
+    echo ""
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}❌ CANNOT COMPLETE TASK - Validation Failed${NC}"
+    echo -e "${RED}========================================${NC}"
+    echo ""
+    echo "You MUST fix ALL issues before completing the task:"
+    echo "1. All tests must pass (unit and E2E)"
+    echo "2. No linting or TypeScript errors"
+    echo "3. No stub implementations or TODOs"
+    echo "4. No hardcoded colors (use semantic tokens)"
+    echo "5. Use shadcn/ui components where applicable"
+    echo ""
+    echo "This is NOT optional. The validation MUST pass."
+    echo ""
+    echo "Tips:"
+    echo "• Run individual checks to focus on specific issues"
+    echo "• Use consultants if you need help"
+    echo "• Check 'analyze-similar-features' for patterns"
+    echo ""
+    echo -e "${YELLOW}Fix the issues and try again.${NC}"
+    exit 1
+fi
+
+echo ""
+echo -e "${GREEN}✅ All validations passed!${NC}"
+echo ""
+
+# Step 2: Push branch (labels stay on)
+echo "Pushing branch..."
+git push origin HEAD
+
+# Step 3: Create or use existing PR (labels stay on)
+BRANCH_NAME="$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')-sequential"
+EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --json number -q '.[0].number' 2>/dev/null || echo "")
+
+if [ -n "$EXISTING_PR" ]; then
+    echo "PR already exists: #$EXISTING_PR"
+    PR_NUMBER="$EXISTING_PR"
+else
+    echo "Creating PR..."
+    PR_URL=$(gh pr create \
+        --title "feat: Complete task #$TASK_ID" \
+        --body "Closes #$TASK_ID
+
+Sequential workflow completion." \
+        --base main \
+        --head "$BRANCH_NAME")
+    
+    PR_NUMBER=$(echo "$PR_URL" | grep -o '[0-9]*$')
+    
+    if [ -z "$PR_NUMBER" ]; then
+        echo -e "${RED}❌ Failed to create PR or extract PR number${NC}"
+        echo "PR URL output: $PR_URL"
+        exit 1
+    fi
+    
+    echo "Created PR #$PR_NUMBER"
+fi
+
+# Step 4: Merge immediately (don't wait for CI)
+echo "Merging PR #$PR_NUMBER..."
+# Try admin merge first to bypass protection rules
+if ! gh pr merge $PR_NUMBER --merge --admin 2>/dev/null; then
+    echo "Admin merge not available, trying standard merge..."
+    # Fallback to standard merge without --delete-branch which can cause issues
+    if ! gh pr merge $PR_NUMBER --merge; then
+        echo -e "${RED}❌ Failed to merge PR #$PR_NUMBER${NC}"
+        echo "Please check GitHub for merge conflicts or other issues"
+        echo "Manual steps:"
+        echo "  1. Go to: $(gh pr view $PR_NUMBER --json url -q .url)"
+        echo "  2. Resolve any issues"
+        echo "  3. Merge manually on GitHub"
+        exit 1
+    fi
+fi
+
+# Delete branch separately after successful merge
+echo "Deleting branch $BRANCH_NAME..."
+git push origin --delete "$BRANCH_NAME" 2>/dev/null || echo "Note: Could not delete remote branch (may already be deleted)"
+
+# Step 5: Verify issue was closed by PR
+echo "Verifying issue closure..."
+ISSUE_STATE=$(gh issue view "$TASK_ID" --json state -q .state 2>/dev/null)
+if [ "$ISSUE_STATE" != "CLOSED" ]; then
+    echo "Issue not auto-closed, closing explicitly..."
+    gh issue close "$TASK_ID" --comment "✅ Task completed via PR #$PR_NUMBER" || {
+        echo -e "${YELLOW}Warning: Could not close issue${NC}"
+    }
+else
+    echo "Issue already closed by PR"
+fi
+
+# Step 6: Clean up all labels
+echo "Cleaning up labels..."
+gh issue edit $TASK_ID --remove-label "sequential-wip" 2>/dev/null || true
+for agent in architect test-writer implementer code-reviewer test-analyzer test-e2e-analyzer; do
+    gh issue edit $TASK_ID --remove-label "${agent}-wip" 2>/dev/null || true
+    gh issue edit $TASK_ID --remove-label "${agent}-done" 2>/dev/null || true
+done
+
+# Step 7: Clean up local branch
+echo "Cleaning up local branch..."
+git checkout main
+git pull origin main
+git branch -d "$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')-sequential" 2>/dev/null || true
+
+echo ""
+echo "✅ Task #$TASK_ID complete!"
+echo "PR #$PR_NUMBER merged and issue closed."
+
+# Kill the current Claude process (monitor will handle restart)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$SCRIPT_DIR/kill-primary-developer" "$(pwd)"
+
+echo "Primary developer stopped. Monitor will assign next task."

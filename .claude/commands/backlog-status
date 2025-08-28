@@ -1,0 +1,73 @@
+#!/bin/bash
+# Show current backlog status with GitHub issue states
+
+set -e
+
+BACKLOG_FILE="docs/product/backlog.md"
+
+if [ ! -f "$BACKLOG_FILE" ]; then
+  echo "❌ Backlog file not found: $BACKLOG_FILE"
+  exit 1
+fi
+
+echo "📋 Product Backlog Status"
+echo "========================="
+echo ""
+
+# Parse backlog and show status
+while IFS= read -r line; do
+  # Match lines with format: N. TASK-ID: Title (#ISSUE)
+  if [[ $line =~ ^[[:space:]]*([0-9]+)\.[[:space:]]*([A-Z]+-[0-9]+):[[:space:]]*(.+)[[:space:]]*\(#([0-9]+)\) ]]; then
+    position="${BASH_REMATCH[1]}"
+    task_id="${BASH_REMATCH[2]}"
+    title="${BASH_REMATCH[3]}"
+    issue_number="${BASH_REMATCH[4]}"
+    
+    # Get issue status from GitHub
+    issue_data=$(gh issue view $issue_number --json state,assignees,labels 2>/dev/null || echo '{"state":"UNKNOWN"}')
+    state=$(echo "$issue_data" | jq -r .state)
+    assignees=$(echo "$issue_data" | jq -r '.assignees[]?.login' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+    
+    # Format state
+    case "$state" in
+      "OPEN")
+        if [ -n "$assignees" ]; then
+          state_icon="🔄"
+          state_text="In Progress"
+        else
+          state_icon="📋"
+          state_text="Ready"
+        fi
+        ;;
+      "CLOSED")
+        state_icon="✅"
+        state_text="Done"
+        ;;
+      *)
+        state_icon="❓"
+        state_text="Unknown"
+        ;;
+    esac
+    
+    # Check for work in progress labels
+    if echo "$issue_data" | jq -r '.labels[]?.name' 2>/dev/null | grep -q "wip"; then
+      state_icon="🔄"
+      state_text="In Progress"
+    fi
+    
+    # Display formatted line
+    printf "%2s. %s %-50s %s %s\n" \
+      "$position" \
+      "$state_icon" \
+      "$task_id: ${title:0:40}$([ ${#title} -gt 40 ] && echo '...')" \
+      "#$issue_number" \
+      "[$state_text]"
+    
+    if [ -n "$assignees" ]; then
+      echo "      Assigned to: $assignees"
+    fi
+  fi
+done < "$BACKLOG_FILE"
+
+echo ""
+echo "Legend: 📋 Ready | 🔄 In Progress | ✅ Done | ❓ Unknown"

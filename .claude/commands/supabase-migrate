@@ -1,0 +1,25 @@
+#!/bin/bash
+# Run pending migrations on local Supabase
+
+echo "🔄 Running Supabase migrations..."
+
+# Check if Supabase is running
+if ! pnpm supabase status 2>/dev/null | grep -q "RUNNING"; then
+    echo "❌ Supabase is not running. Start it first with: ./claude/commands/supabase-start"
+    exit 1
+fi
+
+# Run migrations
+pnpm supabase db push
+
+if [ $? -eq 0 ]; then
+    echo "✅ Migrations applied successfully!"
+    
+    # Show migration status
+    echo ""
+    echo "📋 Current migration status:"
+    pnpm supabase migration list
+else
+    echo "❌ Failed to apply migrations"
+    exit 1
+fi

@@ -1,0 +1,30 @@
+#!/bin/bash
+# Post-edit hook to check for type violations
+
+# Read the hook input
+HOOK_INPUT=$(cat)
+
+# Extract the file path that was edited
+FILE_PATH=$(echo "$HOOK_INPUT" | jq -r '.data.file_path // empty')
+
+# Only check TypeScript/TSX files
+if [[ "$FILE_PATH" =~ \.(ts|tsx)$ ]]; then
+    # Run ESLint on the specific file to check for type violations
+    OUTPUT=$(pnpm eslint "$FILE_PATH" --format json 2>/dev/null || true)
+    
+    # Check if there are any errors related to 'any' or 'unknown' types
+    if echo "$OUTPUT" | jq -e '.[0].messages[] | select(.ruleId | test("no-explicit-any|no-unsafe|ban-types")) | select(.severity == 2)' >/dev/null 2>&1; then
+        # Extract error details
+        ERRORS=$(echo "$OUTPUT" | jq -r '.[0].messages[] | select(.ruleId | test("no-explicit-any|no-unsafe|ban-types")) | select(.severity == 2) | "Line \(.line): \(.message)"')
+        
+        # Create a user-friendly message
+        MESSAGE="Type violations detected in $FILE_PATH:\n\n$ERRORS\n\nPlease fix these type issues before continuing."
+        
+        # Send notification to user
+        echo "$MESSAGE" | jq -Rs '{"notification": {"type": "warning", "message": .}}'
+        exit 0
+    fi
+fi
+
+# No violations or not a TypeScript file
+echo '{"decision": "approve"}'

@@ -1,0 +1,47 @@
+#!/bin/bash
+# Kill primary developer Claude process - macOS compatible
+# Helper script to cleanly terminate the primary developer
+
+WORKTREE_PATH="${1:-$(pwd)}"
+
+# Find Claude process in this worktree (macOS compatible)
+# Claude CLI appears as just "claude" in ps, not "node.*claude"
+# We need to verify the process is in the correct worktree using lsof
+CLAUDE_PIDS=""
+for pid in $(ps aux | grep -E "claude[ ]*$" | grep -v grep | grep -v "Claude.app" | awk '{print $2}'); do
+    # Check if this process is working in our worktree
+    CWD=$(lsof -p $pid 2>/dev/null | grep cwd | awk '{print $NF}')
+    if [[ "$CWD" == "$WORKTREE_PATH" ]]; then
+        CLAUDE_PIDS="$CLAUDE_PIDS $pid"
+    fi
+done
+CLAUDE_PIDS=$(echo $CLAUDE_PIDS | xargs)  # Trim whitespace
+
+if [ -z "$CLAUDE_PIDS" ]; then
+    echo "No primary developer process found in $WORKTREE_PATH"
+    exit 0
+fi
+
+echo "Found primary developer process(es) to stop:"
+for pid in $CLAUDE_PIDS; do
+    echo "  PID: $pid"
+done
+
+# Gracefully kill each process
+for pid in $CLAUDE_PIDS; do
+    echo "Stopping primary developer PID: $pid..."
+    kill $pid 2>/dev/null || true
+done
+
+# Wait a moment for graceful shutdown
+sleep 2
+
+# Force kill if still running
+for pid in $CLAUDE_PIDS; do
+    if kill -0 $pid 2>/dev/null; then
+        echo "Force stopping PID: $pid..."
+        kill -9 $pid 2>/dev/null || true
+    fi
+done
+
+echo "✅ Primary developer stopped"

@@ -1,0 +1,158 @@
+#!/bin/bash
+# Comprehensive validation for task implementation with fail-fast behavior
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${RED}=== MANDATORY VALIDATION - ALL TESTS MUST PASS ===${NC}"
+echo -e "${RED}THIS IS A DIRECT ORDER: 100% of tests MUST pass. NO EXCEPTIONS.${NC}"
+echo -e "${RED}Size, complexity, and time are IRRELEVANT. Make ALL tests pass.${NC}"
+echo ""
+
+# Helper function to handle failures
+fail_validation() {
+    local step=$1
+    local message=$2
+    echo -e "${RED}❌ Validation failed at step $step: $message${NC}"
+    echo ""
+    echo -e "${YELLOW}Fix this issue before continuing. The validation will stop here to save time.${NC}"
+    echo ""
+    echo "Tips:"
+    echo "- Focus on fixing this specific issue first"
+    echo "- Run this validation again after fixing"
+    echo "- Use consultants if you need help"
+    exit 1
+}
+
+# 1. TDD Practice Check (warning only, doesn't fail)
+echo -e "${BLUE}Step 1/10: Validating TDD practice...${NC}"
+if .claude/sequential/commands/validate-tdd; then
+    echo -e "${GREEN}✅ TDD validation passed${NC}"
+else
+    echo -e "${YELLOW}⚠️ TDD validation has warnings - review TDD practices${NC}"
+    # Don't fail overall validation for TDD warnings, just notify
+fi
+echo ""
+
+# 2. Linting
+echo -e "${BLUE}Step 2/10: Running ESLint...${NC}"
+if ! pnpm lint; then
+    fail_validation "2" "ESLint found errors"
+fi
+echo -e "${GREEN}✅ Linting passed${NC}"
+echo ""
+
+# 3. Type checking
+echo -e "${BLUE}Step 3/10: Running TypeScript check...${NC}"
+if ! pnpm typecheck; then
+    fail_validation "3" "TypeScript found type errors"
+fi
+echo -e "${GREEN}✅ Type checking passed${NC}"
+echo ""
+
+# 4. Unit tests
+echo -e "${RED}Step 4/10: Running unit tests (ALL MUST PASS - NO EXCEPTIONS)...${NC}"
+echo -e "${YELLOW}Skipping tests is FORBIDDEN. Saying tests 'don't affect core functionality' is UNACCEPTABLE.${NC}"
+if ! pnpm test; then
+    echo ""
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}UNIT TESTS FAILED - THIS IS UNACCEPTABLE${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${RED}DIRECT ORDER: Fix ALL failing tests. No exceptions.${NC}"
+    echo -e "${RED}Do NOT skip tests because they're 'complex' or 'time-consuming'.${NC}"
+    echo -e "${RED}Do NOT say they 'don't affect core functionality'.${NC}"
+    echo -e "${RED}Implement FULL production code regardless of size or complexity.${NC}"
+    echo ""
+    fail_validation "4" "Unit tests failed - FIX ALL OF THEM"
+fi
+echo -e "${GREEN}✅ Unit tests passed (100%)${NC}"
+echo ""
+
+# 5. E2E tests
+echo -e "${RED}Step 5/10: Running E2E tests (ALL MUST PASS - NO EXCEPTIONS)...${NC}"
+echo -e "${YELLOW}Every single E2E test MUST pass. Size and complexity are irrelevant.${NC}"
+if ! pnpm test:e2e:chromium; then
+    echo ""
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}E2E TESTS FAILED - THIS IS UNACCEPTABLE${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${RED}DIRECT ORDER: Fix ALL failing E2E tests. No exceptions.${NC}"
+    echo -e "${RED}Do NOT skip tests because they're 'not related to your task'.${NC}"
+    echo -e "${RED}Do NOT leave them for later.${NC}"
+    echo -e "${RED}Implement FULL functionality to make them pass.${NC}"
+    echo ""
+    fail_validation "5" "E2E tests failed - FIX ALL OF THEM"
+fi
+echo -e "${GREEN}✅ E2E tests passed (100%)${NC}"
+echo ""
+
+# 6. Check for stub implementations
+echo -e "${BLUE}Step 6/10: Checking for stub implementations...${NC}"
+if ! node .claude/hooks/check-stub-implementations.js; then
+    fail_validation "6" "Stub implementations detected"
+fi
+echo -e "${GREEN}✅ No stub implementations found${NC}"
+echo ""
+
+# 7. Check for TODOs and FIXMEs
+echo -e "${BLUE}Step 7/10: Checking for TODOs/FIXMEs...${NC}"
+TODO_COUNT=$(grep -r "TODO\|FIXME\|HACK\|XXX" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" app/ components/ lib/ 2>/dev/null | wc -l || echo "0")
+if [ "$TODO_COUNT" -ne 0 ]; then
+    echo -e "${RED}Found $TODO_COUNT TODOs/FIXMEs:${NC}"
+    grep -r "TODO\|FIXME\|HACK\|XXX" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" app/ components/ lib/ 2>/dev/null | head -5
+    fail_validation "7" "Found $TODO_COUNT TODOs/FIXMEs - complete all implementations"
+fi
+echo -e "${GREEN}✅ No TODOs or FIXMEs found${NC}"
+echo ""
+
+# 8. Check for hardcoded colors
+echo -e "${BLUE}Step 8/10: Checking for hardcoded colors...${NC}"
+HARDCODED_COLORS=$(grep -r "bg-\(blue\|green\|red\|gray\|yellow\|purple\|pink\|indigo\)-[0-9]\|text-\(blue\|green\|red\|gray\|yellow\|purple\|pink\|indigo\|white\|black\)-[0-9]" --include="*.tsx" --include="*.ts" app/ components/ 2>/dev/null | wc -l || echo "0")
+if [ "$HARDCODED_COLORS" -ne 0 ]; then
+    echo -e "${RED}Found $HARDCODED_COLORS hardcoded colors:${NC}"
+    grep -r "bg-\(blue\|green\|red\|gray\|yellow\|purple\|pink\|indigo\)-[0-9]\|text-\(blue\|green\|red\|gray\|yellow\|purple\|pink\|indigo\|white\|black\)-[0-9]" --include="*.tsx" --include="*.ts" app/ components/ 2>/dev/null | head -3
+    echo -e "${YELLOW}Use semantic tokens: bg-primary, text-secondary, etc.${NC}"
+    fail_validation "8" "Found $HARDCODED_COLORS hardcoded colors - use semantic tokens"
+fi
+echo -e "${GREEN}✅ No hardcoded colors found${NC}"
+echo ""
+
+# 9. Check shadcn/ui usage (warning only)
+echo -e "${BLUE}Step 9/10: Verifying shadcn/ui component usage...${NC}"
+SHADCN_IMPORTS=$(grep -r "@/components/ui/" --include="*.tsx" --include="*.ts" app/ components/ 2>/dev/null | wc -l || echo "0")
+if [ "$SHADCN_IMPORTS" -gt 0 ]; then
+    echo -e "${GREEN}✅ Using shadcn/ui components ($SHADCN_IMPORTS imports found)${NC}"
+else
+    echo -e "${YELLOW}⚠️  No shadcn/ui components detected - verify if this is intentional${NC}"
+fi
+echo ""
+
+# 10. Check for console.log statements (warning only)
+echo -e "${BLUE}Step 10/10: Checking for console.log statements...${NC}"
+CONSOLE_LOGS=$(grep -r "console\.\(log\|error\|warn\|debug\)" --include="*.ts" --include="*.tsx" app/ components/ lib/ 2>/dev/null | grep -v "// eslint-disable" | wc -l || echo "0")
+if [ "$CONSOLE_LOGS" -eq 0 ]; then
+    echo -e "${GREEN}✅ No console.log statements found${NC}"
+else
+    echo -e "${YELLOW}⚠️  Found $CONSOLE_LOGS console statements - consider removing for production${NC}"
+    grep -r "console\.\(log\|error\|warn\|debug\)" --include="*.ts" --include="*.tsx" app/ components/ lib/ 2>/dev/null | grep -v "// eslint-disable" | head -3
+fi
+echo ""
+
+# Success - all validations passed
+echo -e "${BLUE}=== Validation Summary ===${NC}"
+echo -e "${GREEN}✅ All validations passed! INCLUDING 100% OF ALL TESTS!${NC}"
+echo -e "${GREEN}You have successfully completed a FULL production implementation.${NC}"
+echo ""
+echo "Next steps:"
+echo "1. Get code review: Invoke code-reviewer consultant"
+echo "2. Complete task: Run .claude/sequential/commands/complete-task"
+echo ""
+echo -e "${YELLOW}Remember: The standard is 100% test pass rate. Always.${NC}"
+exit 0

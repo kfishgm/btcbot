@@ -1,0 +1,154 @@
+{
+  "version": "2.0.0",
+  "mode": "production",
+  "orchestration_mode": "parallel",
+  "agents": {
+    "architect": {
+      "status": "working",
+      "current_task": "UI-007",
+      "started_at": "2025-07-25T22:40:02.955Z",
+      "completed_count": 19,
+      "last_restart": 0,
+      "last_recovery": 0
+    },
+    "test": {
+      "status": "working",
+      "current_task": "UI-006",
+      "started_at": "2025-07-25T22:28:11.073Z",
+      "completed_count": 11,
+      "last_restart": 0,
+      "last_recovery": 0
+    },
+    "implementation": {
+      "status": "working",
+      "current_task": "UI-001",
+      "started_at": "2025-07-25T18:40:04.422Z",
+      "completed_count": 2,
+      "last_restart": 0,
+      "last_recovery": 0
+    },
+    "supervisor": {
+      "status": "idle",
+      "current_task": null,
+      "started_at": "2025-07-25T19:12:12.100Z",
+      "completed_count": 11,
+      "last_restart": 0,
+      "last_recovery": 0
+    }
+  },
+  "tasks": {
+    "UI-001": {
+      "id": "UI-001",
+      "status": "impl_wip",
+      "created_at": "2025-07-25T15:45:13.247Z",
+      "updated_at": "2025-07-25T18:40:04.423Z",
+      "assigned_to": "implementation"
+    },
+    "CORE-004": {
+      "id": "CORE-004",
+      "status": "merged",
+      "created_at": "2025-07-25T16:07:55.794Z",
+      "updated_at": "2025-07-25T17:37:27.789Z",
+      "assigned_to": "supervisor"
+    },
+    "CORE-005": {
+      "id": "CORE-005",
+      "status": "merged",
+      "created_at": "2025-07-25T16:22:47.968Z",
+      "updated_at": "2025-07-25T17:52:39.951Z",
+      "assigned_to": "supervisor"
+    },
+    "CORE-006": {
+      "id": "CORE-006",
+      "status": "merged",
+      "created_at": "2025-07-25T16:22:47.968Z",
+      "updated_at": "2025-07-25T18:04:22.599Z",
+      "assigned_to": "supervisor"
+    },
+    "UI-002": {
+      "id": "UI-002",
+      "status": "test_done",
+      "created_at": "2025-07-25T16:30:59.463Z",
+      "updated_at": "2025-07-25T19:04:57.893Z",
+      "assigned_to": "test"
+    },
+    "UI-003": {
+      "id": "UI-003",
+      "status": "merged",
+      "created_at": "2025-07-25T17:03:44.112Z",
+      "updated_at": "2025-07-25T19:12:30.416Z",
+      "assigned_to": "supervisor"
+    },
+    "UI-004": {
+      "id": "UI-004",
+      "status": "arch_done",
+      "created_at": "2025-07-25T17:31:20.089Z",
+      "updated_at": "2025-07-25T18:37:24.237Z",
+      "assigned_to": "architect"
+    },
+    "UI-005": {
+      "id": "UI-005",
+      "status": "ready_merge",
+      "created_at": "2025-07-25T17:45:31.182Z",
+      "updated_at": "2025-07-25T19:12:12.100Z",
+      "assigned_to": "supervisor"
+    },
+    "UI-006": {
+      "id": "UI-006",
+      "status": "test_wip",
+      "created_at": "2025-07-25T17:53:37.202Z",
+      "updated_at": "2025-07-25T22:28:11.074Z",
+      "assigned_to": "test"
+    },
+    "CHORE-001": {
+      "id": "CHORE-001",
+      "status": "arch_done",
+      "created_at": "2025-07-25T22:13:04.998Z",
+      "updated_at": "2025-07-25T22:30:02.862Z",
+      "assigned_to": "architect"
+    },
+    "UI-007": {
+      "id": "UI-007",
+      "status": "arch_wip",
+      "created_at": "2025-07-25T22:40:02.955Z",
+      "updated_at": "2025-07-25T22:40:02.955Z",
+      "assigned_to": "architect"
+    }
+  },
+  "queues": {
+    "unassigned": [],
+    "architect": [],
+    "test": [
+      "UI-004",
+      "CHORE-001"
+    ],
+    "implementation": [
+      "UI-002"
+    ],
+    "supervisor": [],
+    "blocked": [],
+    "completed": [
+      "CORE-004",
+      "CORE-005",
+      "CORE-006",
+      "UI-003"
+    ]
+  },
+  "metrics": {
+    "total_tasks": 10,
+    "completed_tasks": 4,
+    "active_tasks": 2,
+    "healthy_agents": 0,
+    "unhealthy_agents": 0
+  },
+  "recovery": {
+    "cooldowns": {
+      "recovery_message": 120,
+      "agent_restart": 300,
+      "task_assignment": 60
+    },
+    "last_actions": {}
+  },
+  "created_at": "2025-07-25T15:45:00Z",
+  "last_updated": "2025-07-25T15:45:00Z"
+}

@@ -1,0 +1,38 @@
+#!/bin/bash
+# Safe monitor control script
+
+ACTION="${1:-restart}"
+PANE="tribot-dev:0.0"
+
+case "$ACTION" in
+    stop)
+        # Try sending Ctrl+C first
+        tmux send-keys -t "$PANE" C-c 2>/dev/null || true
+        sleep 2
+        
+        # If that doesn't work, use the kill-monitor script
+        if pgrep -f "github-monitor" >/dev/null 2>&1; then
+            echo "Monitor still running, using kill-monitor..."
+            "$(dirname "${BASH_SOURCE[0]}")/kill-monitor"
+        fi
+        ;;
+        
+    start)
+        tmux send-keys -t "$PANE" "clear" C-m
+        sleep 0.5
+        tmux send-keys -t "$PANE" "echo 'Waiting 30 seconds for dev servers to start...'" C-m
+        tmux send-keys -t "$PANE" "sleep 30" C-m
+        tmux send-keys -t "$PANE" "echo 'Starting GitHub monitor...'" C-m
+        tmux send-keys -t "$PANE" ".claude/pipeline/commands/github-monitor start --auto" C-m
+        ;;
+        
+    restart)
+        $0 stop
+        $0 start
+        ;;
+        
+    *)
+        echo "Usage: monitor-control [stop|start|restart]"
+        exit 1
+        ;;
+esac

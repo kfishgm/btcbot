@@ -1,0 +1,90 @@
+#!/bin/bash
+# Start dev server using tmux for agents
+# Usage: .claude/lib/start-dev-server
+
+# Get worktree info
+WORKTREE_PATH="$(pwd)"
+WORKTREE_NAME="$(basename "$WORKTREE_PATH")"
+
+# Extract base project name by removing agent suffix
+if [[ "$WORKTREE_NAME" == *-arch ]] || [[ "$WORKTREE_NAME" == *-test ]] || [[ "$WORKTREE_NAME" == *-impl ]] || [[ "$WORKTREE_NAME" == *-seq ]]; then
+    # Remove the suffix to get base project name
+    PROJECT_NAME="${WORKTREE_NAME%-*}"
+else
+    # Already in main project
+    PROJECT_NAME="$WORKTREE_NAME"
+fi
+PROJECT_NAME_LOWER="$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')"
+
+# Determine port based on worktree name
+if [[ "$WORKTREE_NAME" == *-seq ]]; then
+    # Sequential workflow uses its own session and window structure
+    PORT=3001
+    TMUX_SESSION="${PROJECT_NAME_LOWER}-seq"  # Override session name for sequential
+    WINDOW=2  # Sequential uses window 2 for dev server
+    PANE_INDEX=0  # Single pane in window 2
+elif [[ "$WORKTREE_NAME" == *-arch ]] || [[ "$WORKTREE_NAME" == *-architect ]]; then
+    PORT=3001
+    WINDOW=2  # Agent servers window
+    PANE_INDEX=0  # First pane (left)
+elif [[ "$WORKTREE_NAME" == *-test ]] || [[ "$WORKTREE_NAME" == *-tester ]]; then
+    PORT=3002
+    WINDOW=2  # Agent servers window
+    PANE_INDEX=1  # Second pane (middle)
+elif [[ "$WORKTREE_NAME" == *-impl ]] || [[ "$WORKTREE_NAME" == *-implementation ]]; then
+    PORT=3003
+    WINDOW=2  # Agent servers window
+    PANE_INDEX=2  # Third pane (right)
+else
+    # Main project - runs in window 0 pane 1
+    PORT=3000
+    WINDOW=0
+    PANE_INDEX=1
+    echo "Main project dev server runs in window 0 pane 1 (already started by setup-tmux)"
+    echo "Check: tmux attach -t ${PROJECT_NAME_LOWER}-dev"
+    exit 0
+fi
+
+# Use project-specific tmux session name (unless overridden for sequential)
+if [[ "$WORKTREE_NAME" != *-seq ]]; then
+    TMUX_SESSION="${PROJECT_NAME_LOWER}-dev"
+fi
+
+# Check if tmux session exists
+if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    echo "ERROR: tmux session '$TMUX_SESSION' not found."
+    echo "Run: .claude/commands/setup-tmux first"
+    exit 1
+fi
+
+# Check if the target window exists
+if ! tmux list-windows -t "$TMUX_SESSION" | grep -q "^${WINDOW}:"; then
+    echo "ERROR: tmux window $WINDOW not found in $TMUX_SESSION session."
+    if [[ "$WORKTREE_NAME" == *-seq ]]; then
+        echo "Run: .claude/sequential/commands/setup-tmux first"
+    else
+        echo "Run: .claude/commands/setup-tmux first"
+    fi
+    exit 1
+fi
+
+# Kill any existing process on this port
+lsof -ti:$PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
+
+echo "Starting dev server for $WORKTREE_NAME on port $PORT in tmux pane $PANE_INDEX..."
+
+# Clear the pane and start the dev server
+tmux send-keys -t "$TMUX_SESSION:${WINDOW}.$PANE_INDEX" C-c 2>/dev/null || true
+sleep 0.5
+tmux send-keys -t "$TMUX_SESSION:${WINDOW}.$PANE_INDEX" "clear" C-m
+tmux send-keys -t "$TMUX_SESSION:${WINDOW}.$PANE_INDEX" "cd $WORKTREE_PATH" C-m
+tmux send-keys -t "$TMUX_SESSION:${WINDOW}.$PANE_INDEX" "export PORT=$PORT" C-m
+tmux send-keys -t "$TMUX_SESSION:${WINDOW}.$PANE_INDEX" "export NEXT_PUBLIC_SITE_URL=http://localhost:$PORT" C-m
+tmux send-keys -t "$TMUX_SESSION:${WINDOW}.$PANE_INDEX" "export NEXT_PUBLIC_APP_URL=http://localhost:$PORT" C-m
+tmux send-keys -t "$TMUX_SESSION:${WINDOW}.$PANE_INDEX" "pnpm dev" C-m
+
+echo "Dev server starting in tmux window $TMUX_SESSION:${WINDOW} pane $PANE_INDEX"
+echo "View with: tmux attach -t $TMUX_SESSION"
+echo "Check server at: http://localhost:$PORT"
+
+exit 0

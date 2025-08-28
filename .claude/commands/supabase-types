@@ -1,0 +1,27 @@
+#!/bin/bash
+# Generate TypeScript types from Supabase schema
+
+echo "🔄 Generating TypeScript types from Supabase schema..."
+
+# Check if Supabase is running
+if ! pnpm supabase status 2>/dev/null | grep -q "RUNNING"; then
+    echo "❌ Supabase is not running. Start it first with: ./claude/commands/supabase-start"
+    exit 1
+fi
+
+# Generate types
+pnpm supabase gen types typescript --local > lib/supabase/types.ts
+
+if [ $? -eq 0 ]; then
+    echo "✅ Types generated successfully!"
+    echo "📝 Updated: lib/supabase/types.ts"
+    
+    # Run prettier to format the file
+    pnpm prettier --write lib/supabase/types.ts 2>/dev/null || true
+    
+    echo ""
+    echo "💡 Remember to commit the updated types file"
+else
+    echo "❌ Failed to generate types"
+    exit 1
+fi

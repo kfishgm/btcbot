@@ -1,0 +1,122 @@
+#!/bin/bash
+# Start claude agents with autonomous permissions in their respective worktrees
+# Usage: start-agents [agent1,agent2,...]
+# Examples:
+#   start-agents                    # Start all agents (default)
+#   start-agents arch,test,impl     # Start only these three
+#   start-agents supervisor         # Start only supervisor
+
+# Get agent list from first argument, default to all
+AGENTS_TO_START="${1:-arch,test,impl}"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Dynamic path detection
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_NAME="${PROJECT_NAME:-$(basename $PROJECT_ROOT)}"
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+SESSION_NAME="${PROJECT_NAME_LOWER}-dev"
+
+# Check if tmux session exists
+if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+  echo -e "${RED}Error: tmux session $SESSION_NAME not found${NC}"
+  echo "Run ./.claude/commands/setup-tmux first"
+  exit 1
+fi
+
+# Convert comma-separated list to array
+IFS=',' read -ra AGENTS_ARRAY <<< "$AGENTS_TO_START"
+
+# Define agent configurations using separate variables for compatibility
+# Format: pane:name:model:path
+AGENT_ARCH="0:Architecture:opus:$PARENT_DIR/${PROJECT_NAME_LOWER}-arch"
+AGENT_TEST="1:Test:sonnet:$PARENT_DIR/${PROJECT_NAME_LOWER}-test"
+AGENT_IMPL="2:Implementation:sonnet:$PARENT_DIR/${PROJECT_NAME_LOWER}-impl"
+
+echo -e "${BLUE}🚀 Starting claude agents for $PROJECT_NAME${NC}"
+echo "Agents to start: $AGENTS_TO_START"
+echo "========================================"
+
+# Function to start agent in worktree
+start_agent() {
+  local pane=$1
+  local worktree_path=$2
+  local agent_name=$3
+  local model=$4
+  
+  # Message already printed in main loop, no need to duplicate
+  
+  # Clear the pane and change to worktree directory
+  tmux send-keys -t "$SESSION_NAME:1.$pane" C-c
+  tmux send-keys -t "$SESSION_NAME:1.$pane" "cd $worktree_path" C-m
+  sleep 0.5
+  
+  # Start Claude with proper permissions, model, and initial prompt
+  if [ "$agent_name" = "Implementation" ]; then
+    tmux send-keys -t "$SESSION_NAME:1.$pane" "claude --dangerously-skip-permissions --model $model \"You are the $agent_name agent. IMPORTANT: We use GitHub Issues for tasks now, NOT the old pipeline system. First, read your CLAUDE.md file. Then use '.claude/commands/task check' to see if you have a task. As the Implementation agent, you are responsible for implementing features AND completing the task by running quality checks and creating the PR.\""
+    sleep 1
+    tmux send-keys -t "$SESSION_NAME:1.$pane" C-m
+  else
+    tmux send-keys -t "$SESSION_NAME:1.$pane" "claude --dangerously-skip-permissions --model $model \"You are the $agent_name agent. IMPORTANT: We use GitHub Issues for tasks now, NOT the old pipeline system. DO NOT look for tasks in pipeline state or tasks.md. First, read your CLAUDE.md file. Then use '.claude/commands/task check' to see if you have a task. If no task, wait - the GitHub monitor will assign you one based on dependencies. Architect works first, then Test (after Architect completes), then Implementation (after Test completes).\""
+    sleep 1
+    tmux send-keys -t "$SESSION_NAME:1.$pane" C-m
+  fi
+  sleep 2
+  
+  echo -e "${GREEN}✓ $agent_name Agent started${NC}"
+}
+
+# Start only requested agents
+started_count=0
+for agent in "${AGENTS_ARRAY[@]}"; do
+    agent=$(echo "$agent" | xargs) # Trim whitespace
+    
+    # Get configuration for this agent type
+    case "$agent" in
+        "arch")
+            config="$AGENT_ARCH"
+            ;;
+        "test")
+            config="$AGENT_TEST"
+            ;;
+        "impl")
+            config="$AGENT_IMPL"
+            ;;
+        *)
+            echo -e "${YELLOW}Warning: Unknown agent '$agent' - skipping${NC}"
+            continue
+            ;;
+    esac
+    
+    # Parse configuration
+    IFS=':' read -r pane name model worktree <<< "$config"
+    
+    # Show which agent is being started
+    echo -e "${YELLOW}Starting $name Agent (pane: $pane, model: $model)...${NC}"
+    
+    # Check if worktree exists
+    if [ ! -d "$worktree" ]; then
+        echo -e "${RED}Error: Worktree $worktree not found${NC}"
+        echo "Run /setup-agents first to create worktrees"
+        continue
+    fi
+    
+    start_agent "$pane" "$worktree" "$name" "$model"
+    ((started_count++))
+done
+
+echo ""
+if [ $started_count -gt 0 ]; then
+    echo -e "${GREEN}✅ Started $started_count agent(s)!${NC}"
+else
+    echo -e "${RED}❌ No agents were started${NC}"
+fi
+echo ""
+echo "Agents are running with autonomous permissions in their worktrees."
+echo "Monitor with: tmux attach-session -t $SESSION_NAME"

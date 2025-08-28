@@ -1,0 +1,17 @@
+#!/bin/bash
+# Check status of local Supabase instance
+
+echo "📊 Checking Supabase status..."
+
+pnpm supabase status
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "💡 Tips:"
+    echo "  - Use 'supabase-start' to start the local instance"
+    echo "  - Use 'supabase-stop' to stop the local instance"
+    echo "  - Studio URL: http://localhost:54323"
+else
+    echo "❌ Failed to get status. Is Supabase installed?"
+    exit 1
+fi

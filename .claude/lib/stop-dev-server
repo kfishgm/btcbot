@@ -1,0 +1,59 @@
+#!/bin/bash
+# Stop dev server using tmux for agents
+# Usage: .claude/lib/stop-dev-server
+
+# Get worktree info
+WORKTREE_PATH="$(pwd)"
+WORKTREE_NAME="$(basename "$WORKTREE_PATH")"
+
+# Extract base project name by removing agent suffix
+if [[ "$WORKTREE_NAME" == *-arch ]] || [[ "$WORKTREE_NAME" == *-test ]] || [[ "$WORKTREE_NAME" == *-impl ]] || [[ "$WORKTREE_NAME" == *-seq ]]; then
+    # Remove the suffix to get base project name
+    PROJECT_NAME="${WORKTREE_NAME%-*}"
+else
+    # Already in main project
+    PROJECT_NAME="$WORKTREE_NAME"
+fi
+PROJECT_NAME_LOWER="$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')"
+
+# Determine port and pane based on worktree name
+if [[ "$WORKTREE_NAME" == *-seq ]]; then
+    # Sequential workflow uses its own session and window structure
+    PORT=3001
+    TMUX_SESSION="${PROJECT_NAME_LOWER}-seq"  # Override session name for sequential
+    WINDOW=2  # Sequential uses window 2 for dev server
+    PANE_INDEX=0  # Single pane in window 2
+elif [[ "$WORKTREE_NAME" == *-arch ]] || [[ "$WORKTREE_NAME" == *-architect ]]; then
+    PORT=3001
+    WINDOW=2
+    PANE_INDEX=0
+elif [[ "$WORKTREE_NAME" == *-test ]] || [[ "$WORKTREE_NAME" == *-tester ]]; then
+    PORT=3002
+    WINDOW=2
+    PANE_INDEX=1
+elif [[ "$WORKTREE_NAME" == *-impl ]] || [[ "$WORKTREE_NAME" == *-implementation ]]; then
+    PORT=3003
+    WINDOW=2
+    PANE_INDEX=2
+else
+    # Main project - runs in window 0 pane 1
+    PORT=3000
+    echo "Stopping main project dev server in window 0 pane 1..."
+    tmux send-keys -t "${PROJECT_NAME_LOWER}-dev:0.1" C-c 2>/dev/null || true
+    exit 0
+fi
+
+# Use project-specific tmux session name (unless overridden for sequential)
+if [[ "$WORKTREE_NAME" != *-seq ]]; then
+    TMUX_SESSION="${PROJECT_NAME_LOWER}-dev"
+fi
+
+# Kill any existing process on this port
+lsof -ti:$PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
+
+# Send Ctrl-C to the tmux pane to stop the server
+echo "Stopping dev server for $WORKTREE_NAME on port $PORT..."
+tmux send-keys -t "$TMUX_SESSION:${WINDOW}.$PANE_INDEX" C-c 2>/dev/null || true
+
+echo "Dev server stopped"
+exit 0

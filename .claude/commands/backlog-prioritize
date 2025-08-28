@@ -1,0 +1,199 @@
+#!/bin/bash
+# Re-prioritize tasks in the backlog - updates backlog.md and GitHub issues
+
+set -e
+
+BACKLOG_FILE="docs/product/backlog.md"
+
+# Function to update GitHub issue positions
+update_github_positions() {
+  echo "Updating positions in GitHub issues..."
+  position=1
+  
+  while IFS= read -r line; do
+    if [[ $line =~ \(#([0-9]+)\) ]]; then
+      issue_num="${BASH_REMATCH[1]}"
+      echo "  Setting #$issue_num to position $position"
+      
+      # Update the Backlog Position in the issue
+      current_body=$(gh issue view "$issue_num" --json body -q .body 2>/dev/null || echo "")
+      if [ -n "$current_body" ]; then
+        if echo "$current_body" | grep -q "\*\*Backlog Position\*\*:"; then
+          # Update existing position
+          new_body=$(echo "$current_body" | sed "s/\*\*Backlog Position\*\*:.*/\*\*Backlog Position\*\*: $position/")
+        else
+          # Add position if missing
+          if echo "$current_body" | grep -q "## Metadata"; then
+            new_body=$(echo "$current_body" | sed "/## Metadata/a\\
+**Backlog Position**: $position")
+          else
+            new_body="$current_body
+
+## Metadata
+**Backlog Position**: $position"
+          fi
+        fi
+        gh issue edit "$issue_num" --body "$new_body" 2>/dev/null || echo "    ⚠️  Failed to update #$issue_num"
+      fi
+      
+      ((position++))
+    fi
+  done < "$BACKLOG_FILE"
+  
+  echo "✅ GitHub issues updated with new positions"
+}
+
+# Check command type
+if [ "$1" = "reorder" ]; then
+  # Complete reorder mode
+  if [ $# -lt 2 ]; then
+    echo "Usage: backlog-prioritize reorder \"ISSUE1 ISSUE2 ISSUE3...\""
+    echo "Example: backlog-prioritize reorder \"200 45 67\""
+    exit 1
+  fi
+  
+  ISSUE_ORDER="$2"
+  echo "📋 Reordering backlog to: $ISSUE_ORDER"
+  
+  if [ ! -f "$BACKLOG_FILE" ]; then
+    echo "❌ Backlog file not found: $BACKLOG_FILE"
+    exit 1
+  fi
+  
+  # Create a new backlog file with the specified order
+  temp_file=$(mktemp)
+  echo "# Product Backlog" > "$temp_file"
+  echo "" >> "$temp_file"
+  
+  position=1
+  for issue_num in $ISSUE_ORDER; do
+    # Find the task line for this issue
+    task_line=$(grep "(#$issue_num)" "$BACKLOG_FILE" 2>/dev/null | sed 's/^[0-9]*\. //' || echo "")
+    
+    if [ -n "$task_line" ]; then
+      echo "$position. $task_line" >> "$temp_file"
+      echo "  Position $position: #$issue_num"
+      ((position++))
+    else
+      echo "  ⚠️  Issue #$issue_num not found in backlog"
+    fi
+  done
+  
+  # Add any tasks not in the specified order at the end
+  while IFS= read -r line; do
+    if [[ $line =~ \(#([0-9]+)\) ]]; then
+      issue_num="${BASH_REMATCH[1]}"
+      # Check if this issue was already added
+      if ! echo "$ISSUE_ORDER" | grep -q "\b$issue_num\b"; then
+        task_line=$(echo "$line" | sed 's/^[0-9]*\. //')
+        echo "$position. $task_line" >> "$temp_file"
+        echo "  Position $position: #$issue_num (not in specified order, added at end)"
+        ((position++))
+      fi
+    elif [[ ! $line =~ ^[0-9]+\. ]] && [ -n "$line" ]; then
+      # Keep non-task lines (like headers)
+      echo "$line" >> "$temp_file"
+    fi
+  done < "$BACKLOG_FILE"
+  
+  mv "$temp_file" "$BACKLOG_FILE"
+  echo "✅ Backlog reordered"
+  
+  # Update GitHub issues
+  update_github_positions
+  
+else
+  # Single task move mode
+  if [ $# -lt 2 ]; then
+    echo "Usage: backlog-prioritize ISSUE_NUMBER NEW_POSITION"
+    echo "       backlog-prioritize reorder \"ISSUE1 ISSUE2 ISSUE3...\""
+    echo ""
+    echo "Examples:"
+    echo "  backlog-prioritize 45 1        # Move issue #45 to position 1"
+    echo "  backlog-prioritize reorder \"200 45 67\"  # Set exact order"
+    exit 1
+  fi
+  
+  ISSUE_NUMBER="$1"
+  NEW_POSITION="$2"
+  
+  # Validate position is a number
+  if ! [[ "$NEW_POSITION" =~ ^[0-9]+$ ]]; then
+    echo "❌ Position must be a number"
+    exit 1
+  fi
+  
+  if [ "$NEW_POSITION" -lt 1 ]; then
+    echo "❌ Position must be 1 or greater"
+    exit 1
+  fi
+  
+  echo "📋 Moving issue #$ISSUE_NUMBER to position $NEW_POSITION"
+  
+  if [ ! -f "$BACKLOG_FILE" ]; then
+    echo "❌ Backlog file not found: $BACKLOG_FILE"
+    exit 1
+  fi
+  
+  # Check if issue exists in backlog
+  if ! grep -q "(#$ISSUE_NUMBER)" "$BACKLOG_FILE"; then
+    echo "❌ Issue #$ISSUE_NUMBER not found in backlog"
+    echo ""
+    echo "Current backlog:"
+    grep -E "^[0-9]+\." "$BACKLOG_FILE" | head -10
+    exit 1
+  fi
+  
+  # Extract all tasks
+  temp_file=$(mktemp)
+  task_to_move=""
+  other_tasks=()
+  
+  while IFS= read -r line; do
+    if [[ $line =~ ^[[:space:]]*[0-9]+\.[[:space:]]*(.*\(#([0-9]+)\).*)$ ]]; then
+      task_content="${BASH_REMATCH[1]}"
+      issue_num="${BASH_REMATCH[2]}"
+      
+      if [ "$issue_num" = "$ISSUE_NUMBER" ]; then
+        task_to_move="$task_content"
+      else
+        other_tasks+=("$task_content")
+      fi
+    fi
+  done < "$BACKLOG_FILE"
+  
+  if [ -z "$task_to_move" ]; then
+    echo "❌ Failed to extract task for issue #$ISSUE_NUMBER"
+    exit 1
+  fi
+  
+  # Rebuild backlog with new order
+  echo "# Product Backlog" > "$temp_file"
+  echo "" >> "$temp_file"
+  
+  position=1
+  for i in "${!other_tasks[@]}"; do
+    if [ $position -eq $NEW_POSITION ]; then
+      echo "$position. $task_to_move" >> "$temp_file"
+      ((position++))
+    fi
+    echo "$position. ${other_tasks[$i]}" >> "$temp_file"
+    ((position++))
+  done
+  
+  # Add task at end if position is beyond current list
+  if [ $NEW_POSITION -ge $position ]; then
+    echo "$position. $task_to_move" >> "$temp_file"
+  fi
+  
+  mv "$temp_file" "$BACKLOG_FILE"
+  echo "✅ Moved #$ISSUE_NUMBER to position $NEW_POSITION"
+  
+  # Update GitHub issues
+  update_github_positions
+fi
+
+echo ""
+echo "✅ Backlog prioritization complete!"
+echo "   - Updated backlog.md"
+echo "   - Updated GitHub issue positions"

@@ -1,0 +1,51 @@
+#!/bin/bash
+# Deploy project to Vercel
+set -e
+
+# Show help
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    cat << EOF
+Deploy to Vercel
+
+Usage: deploy [staging|production|prod]
+
+Options:
+  staging     Deploy to staging (default)
+  production  Deploy to production
+  prod        Alias for production
+  --help      Show this help
+
+Examples:
+  deploy              # Deploy to staging
+  deploy production   # Deploy to production
+
+Prerequisites:
+  - Vercel CLI (will auto-install if missing)
+  - Clean git status recommended
+  - Successful build required
+EOF
+    exit 0
+fi
+
+PROJECT_NAME="$(basename $(pwd))"
+echo "🚀 $PROJECT_NAME Deployment"
+echo "========================="
+echo ""
+
+# Check if vercel CLI is installed
+if ! command -v vercel &> /dev/null; then
+  echo "❌ Vercel CLI not found. Installing..."
+  pnpm add -g vercel
+fi
+
+# Production or staging?
+if [ "$1" == "prod" ] || [ "$1" == "production" ]; then
+  echo "Deploying to PRODUCTION"
+  vercel --prod
+else
+  echo "Deploying to STAGING"
+  vercel
+fi
+
+echo ""
+echo "Deployment complete! Check the URL above."

@@ -1,0 +1,73 @@
+#!/bin/bash
+# Migrate existing tasks from docs/tasks.md to GitHub Issues
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+
+echo "Migrating tasks to GitHub Issues..."
+
+# Read tasks.md and create issues
+TASKS_FILE="$PROJECT_ROOT/docs/tasks.md"
+
+if [ ! -f "$TASKS_FILE" ]; then
+    echo "No tasks.md file found"
+    exit 1
+fi
+
+# Parse tasks and create issues
+current_category=""
+while IFS= read -r line; do
+    # Category header
+    if [[ $line =~ ^###[[:space:]]+(.+) ]]; then
+        current_category="${BASH_REMATCH[1]}"
+        echo "Category: $current_category"
+    fi
+    
+    # Task line: - [ ] **TASK-ID**: Description
+    if [[ $line =~ ^-[[:space:]]\[[[:space:]]\][[:space:]]\*\*([A-Z]+-[0-9]+)\*\*:[[:space:]](.+) ]]; then
+        task_id="${BASH_REMATCH[1]}"
+        description="${BASH_REMATCH[2]}"
+        
+        echo "Creating issue for $task_id: $description"
+        
+        # Check if issue already exists
+        existing=$(gh issue list --search "$task_id" --json number --jq '.[0].number' 2>/dev/null || echo "")
+        
+        if [ -n "$existing" ]; then
+            echo "  → Issue #$existing already exists, skipping"
+            continue
+        fi
+        
+        # Create issue body
+        body="## Task: $description
+
+Category: $current_category
+
+## Progress Checklist
+- [ ] ARCHITECT: Design and architecture
+- [ ] TEST: Write tests
+- [ ] IMPLEMENTATION: Implement functionality
+
+## Branches
+_Branches will be listed here as work progresses_
+
+## Acceptance Criteria
+_To be defined_"
+
+        # Create issue
+        gh issue create \
+            --title "$task_id: $description" \
+            --body "$body" \
+            --label "task"
+        
+        echo "  → Created issue for $task_id"
+    fi
+done < "$TASKS_FILE"
+
+echo "Migration complete!"
+echo ""
+echo "Next steps:"
+echo "1. Start the monitor: .claude/pipeline/commands/github-monitor start"
+echo "2. Agents will use GitHub Issues for task tracking"

@@ -1,0 +1,57 @@
+#!/bin/bash
+# Mark agent status - helps primary developer track progress
+
+# Get task ID from argument or current sequential task
+TASK_ID=${1:-$(gh issue list --assignee @me --label "sequential-wip" --json number -q '.[0].number' 2>/dev/null)}
+AGENT=$2
+STATUS=$3  # wip or done
+
+# Show usage if missing arguments
+if [ -z "$AGENT" ] || [ -z "$STATUS" ]; then
+    echo "Usage: mark-agent [task_id] <agent> <wip|done>"
+    echo ""
+    echo "Available agents:"
+    echo "  - architect"
+    echo "  - test-writer"
+    echo "  - implementer"
+    echo "  - code-reviewer"
+    echo "  - test-analyzer"
+    echo "  - test-e2e-analyzer"
+    echo ""
+    echo "Example: mark-agent architect wip"
+    echo "Example: mark-agent 123 test-writer done"
+    exit 1
+fi
+
+# Validate status
+if [ "$STATUS" != "wip" ] && [ "$STATUS" != "done" ]; then
+    echo "ERROR: Status must be 'wip' or 'done'"
+    exit 1
+fi
+
+# If no task ID, check for active task
+if [ -z "$TASK_ID" ]; then
+    echo "ERROR: No active sequential task found"
+    echo "Start a task first with: start-task <issue>"
+    exit 1
+fi
+
+if [ "$STATUS" = "wip" ]; then
+    # Remove any other agent's wip first (only one agent works at a time)
+    echo "Marking $AGENT as working on task #$TASK_ID..."
+    for other_agent in architect test-writer implementer code-reviewer test-analyzer test-e2e-analyzer; do
+        if [ "$other_agent" != "$AGENT" ]; then
+            gh issue edit $TASK_ID --remove-label "${other_agent}-wip" 2>/dev/null || true
+        fi
+    done
+    # Add this agent's wip
+    gh issue edit $TASK_ID --add-label "${AGENT}-wip"
+    echo "✅ Marked $AGENT as working on task #$TASK_ID"
+    
+elif [ "$STATUS" = "done" ]; then
+    # Remove wip and add done
+    echo "Marking $AGENT as done for task #$TASK_ID..."
+    gh issue edit $TASK_ID --remove-label "${AGENT}-wip" 2>/dev/null || true
+    gh issue edit $TASK_ID --add-label "${AGENT}-done"
+    echo "✅ Marked $AGENT as done for task #$TASK_ID"
+fi

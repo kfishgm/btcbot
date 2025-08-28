@@ -1,0 +1,28 @@
+#!/bin/bash
+# Run TypeScript type checking with cleanup
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKTREE_PATH="${WORKTREE_PATH:-$(pwd)}"
+
+# Default values
+TIMEOUT_TYPECHECK="${TIMEOUT_TYPECHECK:-300}"
+
+echo "Running TypeScript check..."
+
+# Capture output
+output=$(timeout "$TIMEOUT_TYPECHECK"s pnpm typecheck 2>&1)
+result=$?
+
+# Always cleanup
+"$SCRIPT_DIR/cleanup-processes.sh" >/dev/null 2>&1
+
+if [ $result -eq 0 ]; then
+    echo "✓ Types OK"
+else
+    echo "✗ Type errors found"
+    # Show errors but limit output
+    echo "$output" | grep -E "error TS|Error:|ERROR" | head -30
+fi
+
+exit $result

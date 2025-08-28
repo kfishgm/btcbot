@@ -1,0 +1,43 @@
+#!/bin/bash
+# Check if agent work is already complete
+
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <role>"
+    echo "Valid roles: architect, test, implementation"
+    exit 1
+fi
+
+ROLE="$1"
+echo "=== Agent Startup Check ==="
+echo "Agent role: $ROLE"
+
+# Check for TASK file
+TASK_FILE=$(find . -name "TASK-*.md" -type f | head -1)
+
+if [ -z "$TASK_FILE" ]; then
+    echo "No TASK file found. Waiting for assignment..."
+    echo "Run: .claude/commands/task check"
+    echo ""
+    echo "AGENT_WORK_ALREADY_COMPLETE=false"
+    exit 0
+fi
+
+# Extract issue number from TASK file
+ISSUE_NUM=$(basename "$TASK_FILE" | sed 's/TASK-\(.*\)\.md/\1/')
+echo "Found task: #$ISSUE_NUM"
+
+# Check if work is already marked complete in GitHub
+CHECKBOX_STATUS=$(gh issue view "$ISSUE_NUM" --json body -q .body 2>/dev/null | grep -E "^\s*-\s*\[[xX ]\]\s+${ROLE^^}" || echo "")
+
+if echo "$CHECKBOX_STATUS" | grep -q "\[x\]"; then
+    echo ""
+    echo "✅ Your work is already marked complete for this task!"
+    echo "Skip to: .claude/commands/task-complete"
+    echo ""
+    echo "AGENT_WORK_ALREADY_COMPLETE=true"
+else
+    echo ""
+    echo "Work not yet complete. Proceed with task."
+    echo ""
+    echo "AGENT_WORK_ALREADY_COMPLETE=false"
+fi

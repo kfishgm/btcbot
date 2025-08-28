@@ -1,0 +1,63 @@
+#!/bin/bash
+# Create priority labels for GitHub issues
+
+set -e
+
+echo "Creating priority labels for GitHub repository..."
+
+# Colors for priority levels
+P0_COLOR="FF0000"  # Red
+P1_COLOR="FF8C00"  # Dark Orange  
+P2_COLOR="FFD700"  # Gold
+P3_COLOR="90EE90"  # Light Green
+
+# Create each priority label
+echo "Creating priority:P0 label..."
+gh label create "priority:P0" \
+  --color "$P0_COLOR" \
+  --description "Critical - Must have for MVP" \
+  --force || echo "Label priority:P0 already exists"
+
+echo "Creating priority:P1 label..."
+gh label create "priority:P1" \
+  --color "$P1_COLOR" \
+  --description "High - Should have" \
+  --force || echo "Label priority:P1 already exists"
+
+echo "Creating priority:P2 label..."
+gh label create "priority:P2" \
+  --color "$P2_COLOR" \
+  --description "Medium - Nice to have" \
+  --force || echo "Label priority:P2 already exists"
+
+echo "Creating priority:P3 label..."
+gh label create "priority:P3" \
+  --color "$P3_COLOR" \
+  --description "Low - Future enhancement" \
+  --force || echo "Label priority:P3 already exists"
+
+# Create additional useful labels
+echo "Creating backlog position labels..."
+gh label create "sprint:current" \
+  --color "0E8A16" \
+  --description "Current sprint" \
+  --force || echo "Label sprint:current already exists"
+
+gh label create "sprint:next" \
+  --color "2188FF" \
+  --description "Next sprint" \
+  --force || echo "Label sprint:next already exists"
+
+gh label create "sprint:future" \
+  --color "6F42C1" \
+  --description "Future sprints" \
+  --force || echo "Label sprint:future already exists"
+
+echo "✅ Priority labels created successfully!"
+echo ""
+echo "Available priority labels:"
+gh label list --search "priority:" --limit 10
+
+echo ""
+echo "Available sprint labels:"
+gh label list --search "sprint:" --limit 10

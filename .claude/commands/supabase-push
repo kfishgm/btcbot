@@ -1,0 +1,24 @@
+#!/bin/bash
+# Push schema to remote Supabase project
+
+echo "⬆️ Pushing schema to remote Supabase..."
+echo "⚠️  This will apply migrations to the PRODUCTION database!"
+
+# Check if project is linked
+if [ ! -f "supabase/.temp/project-ref" ]; then
+    echo "❌ No project linked. Run supabase-link first."
+    exit 1
+fi
+
+# Push schema changes
+pnpm supabase db push
+
+if [ $? -eq 0 ]; then
+    echo "✅ Schema pushed successfully!"
+    echo ""
+    echo "🚀 Migrations applied to remote database"
+    echo "💡 Generate types from remote: pnpm supabase gen types typescript --project-id <your-project-id>"
+else
+    echo "❌ Failed to push schema"
+    exit 1
+fi

@@ -1,0 +1,203 @@
+#!/bin/bash
+# Set up tmux session for multi-agent development
+set -e
+
+# Show help
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    cat << EOF
+Setup Tmux for Multi-Agent Development
+
+Creates a tmux session with panes for all agents and monitor.
+
+Usage: setup-tmux [--help]
+
+Layout:
+  Top:         Architect agent
+  Bottom Left: Test agent  
+  Bottom Right: Implementation agent
+  Bottom Bar:  GitHub monitor (auto-assigns tasks)
+
+Commands:
+  Ctrl+b, arrow - Navigate between panes
+  Ctrl+b, z     - Zoom/unzoom current pane
+  Ctrl+b, d     - Detach from session
+  tmux attach   - Reattach to session
+
+Prerequisites:
+- Agents must be set up (run setup-agents first)
+- Tmux must be installed
+EOF
+    exit 0
+fi
+
+# Get project name from directory or use default
+PROJECT_NAME="${PROJECT_NAME:-$(basename $(pwd))}"
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+SESSION_NAME="${PROJECT_NAME_LOWER}-dev"
+
+# Dynamic path detection
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Load tmux config if it exists
+if [ -f "$PROJECT_ROOT/.tmux.conf" ]; then
+  export TMUX_CONF="$PROJECT_ROOT/.tmux.conf"
+  echo "Using project tmux configuration for better performance"
+fi
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+ARCH_ROOT="$PARENT_DIR/${PROJECT_NAME_LOWER}-arch"
+TEST_ROOT="$PARENT_DIR/${PROJECT_NAME_LOWER}-test"
+IMPL_ROOT="$PARENT_DIR/${PROJECT_NAME_LOWER}-impl"
+
+# Check if worktrees exist
+WORKTREES_MISSING=false
+if [ ! -d "$ARCH_ROOT" ]; then
+  echo "⚠️  Architecture worktree not found at $ARCH_ROOT"
+  WORKTREES_MISSING=true
+fi
+if [ ! -d "$TEST_ROOT" ]; then
+  echo "⚠️  Test worktree not found at $TEST_ROOT"
+  WORKTREES_MISSING=true
+fi
+if [ ! -d "$IMPL_ROOT" ]; then
+  echo "⚠️  Implementation worktree not found at $IMPL_ROOT"
+  WORKTREES_MISSING=true
+fi
+
+if [ "$WORKTREES_MISSING" = true ]; then
+  echo ""
+  echo "Agent worktrees are missing. Run /setup-agents first."
+  exit 1
+fi
+
+# Check if session already exists
+if tmux has-session -t $SESSION_NAME 2>/dev/null; then
+  echo "Session $SESSION_NAME already exists."
+  echo ""
+  echo "To attach: tmux attach-session -t $SESSION_NAME"
+  echo "To kill session: tmux kill-session -t $SESSION_NAME"
+  exit 0
+fi
+
+# Create new session
+echo "Creating tmux session: $SESSION_NAME"
+if [ -f "$PROJECT_ROOT/.tmux.conf" ]; then
+  tmux -f "$PROJECT_ROOT/.tmux.conf" new-session -d -s $SESSION_NAME -n 'Main' -c $PROJECT_ROOT
+else
+  tmux new-session -d -s $SESSION_NAME -n 'Main' -c $PROJECT_ROOT
+fi
+
+# Window 0: Main Development - 5 panes
+# Pane 0: GitHub Issues Monitor
+tmux send-keys -t $SESSION_NAME:0.0 'echo "🚀 GitHub Issues Monitor"' C-m
+if [ -f "$PROJECT_ROOT/.claude/pipeline/commands/github-monitor" ]; then
+  tmux send-keys -t $SESSION_NAME:0.0 "$PROJECT_ROOT/.claude/pipeline/commands/github-monitor start --auto" C-m
+else
+  tmux send-keys -t $SESSION_NAME:0.0 'echo "GitHub monitor not found - check .claude/pipeline/commands/"' C-m
+fi
+
+# Pane 1: Dev server (right) - DEDICATED PANE, NO SPLITS FROM THIS
+tmux split-window -h -t $SESSION_NAME:0.0 -c $PROJECT_ROOT
+tmux send-keys -t $SESSION_NAME:0.1 'echo "🚀 Starting development server on port 3000..." && pnpm dev' C-m
+
+# Pane 2: Test runner (bottom left)
+tmux split-window -v -t $SESSION_NAME:0.0 -c $PROJECT_ROOT
+tmux send-keys -t $SESSION_NAME:0.2 'echo "🧪 Starting test watcher..." && pnpm test:watch' C-m
+
+# Pane 3: Git status / general monitoring (bottom middle)
+tmux split-window -h -t $SESSION_NAME:0.2 -c $PROJECT_ROOT
+tmux send-keys -t $SESSION_NAME:0.3 'echo "📊 Git Status Monitor"' C-m
+tmux send-keys -t $SESSION_NAME:0.3 'watch -n 30 "git status -sb && echo && git log --oneline -5"' C-m
+
+# Pane 4: Supabase (bottom right) - Split from pane 3 instead of pane 1
+tmux split-window -h -t $SESSION_NAME:0.3 -c $PROJECT_ROOT
+tmux send-keys -t $SESSION_NAME:0.4 'echo "🗄️ Starting Supabase..." && ./.claude/commands/supabase-start' C-m
+
+# Balance panes in main window
+tmux select-layout -t $SESSION_NAME:0 tiled
+
+# Create other windows without switching focus
+# Window 1: All three agents in split view
+# Target order: 0:architect, 1:test, 2:implementation
+
+tmux new-window -d -t $SESSION_NAME:1 -n 'Agents' -c $ARCH_ROOT
+
+# Use a specific splitting pattern to achieve the desired pane order
+# First split horizontally: 0:arch | 1:test
+tmux split-window -h -t $SESSION_NAME:1.0 -c $TEST_ROOT -p 50
+
+# Split the left pane (0) vertically: creates 0:arch, 1:impl (test moves to 2)
+tmux split-window -v -t $SESSION_NAME:1.0 -c $IMPL_ROOT -p 50
+
+# Now the layout is: 0:arch, 1:impl, 2:test
+# We need to swap panes 1 and 2 to get the desired order
+
+# Use tmux swap-pane to swap implementation (pane 1) with test (pane 2)
+tmux swap-pane -s $SESSION_NAME:1.1 -t $SESSION_NAME:1.2
+
+# Now we have the desired order: 0:arch, 1:test, 2:impl
+
+# Apply tiled layout for equal sizing
+tmux select-layout -t $SESSION_NAME:1 tiled
+
+# ====================================
+# Window 2: Agent Monitors (Optional)
+# ====================================
+echo "Setting up Window 2: Agent Monitors..."
+tmux new-window -d -t $SESSION_NAME:2 -n 'Monitors' -c $PROJECT_ROOT
+
+# Create 3-pane layout for agent dev servers
+# Pane 0: Architect dev server (port 3001)
+tmux send-keys -t $SESSION_NAME:2.0 "echo 'Architect server (port 3001) - Will start when agent runs start-dev-server'" C-m
+tmux send-keys -t $SESSION_NAME:2.0 "cd $ARCH_ROOT" C-m
+
+# Pane 1: Test dev server (port 3002)
+tmux split-window -h -t $SESSION_NAME:2.0 -c $TEST_ROOT
+tmux send-keys -t $SESSION_NAME:2.1 "echo 'Test server (port 3002) - Will start when agent runs start-dev-server'" C-m
+tmux send-keys -t $SESSION_NAME:2.1 "cd $TEST_ROOT" C-m
+
+# Pane 2: Implementation dev server (port 3003)
+tmux split-window -h -t $SESSION_NAME:2.1 -c $IMPL_ROOT
+tmux send-keys -t $SESSION_NAME:2.2 "echo 'Implementation server (port 3003) - Will start when agent runs start-dev-server'" C-m
+tmux send-keys -t $SESSION_NAME:2.2 "cd $IMPL_ROOT" C-m
+
+# Apply even-horizontal layout for 3 equal panes
+tmux select-layout -t $SESSION_NAME:2 even-horizontal
+
+# Session created
+echo "Session $SESSION_NAME created successfully!"
+echo ""
+echo "Windows:"
+echo "  0 - Main:           5 panes (pipeline monitor, server, tests, git status, supabase)"
+echo "  1 - Agents:         All 3 agents in split view"
+echo "  2 - Monitors:       Dev server status and process monitors"
+echo ""
+echo "Window 0 (Main) panes:"
+echo "  Pane 0: Pipeline monitor"
+echo "  Pane 1: Dev server (pnpm dev - port 3000)"
+echo "  Pane 2: Test runner (pnpm test:watch)"
+echo "  Pane 3: Git status monitor"
+echo "  Pane 4: Supabase local instance"
+echo ""
+echo "Window 1 (Agents) panes:"
+echo "  Pane 0: Architecture agent ($PROJECT_NAME_LOWER-arch)"
+echo "  Pane 1: Test agent ($PROJECT_NAME_LOWER-test)"
+echo "  Pane 2: Implementation agent ($PROJECT_NAME_LOWER-impl)"
+echo ""
+echo "Window 2 (Monitors) panes:"
+echo "  Pane 0: Dev server status information"
+echo "  Pane 1: Process monitor for agent dev servers"
+echo ""
+echo "Agents now manage their own dev servers using:"
+echo "  .claude/lib/dev-server-utils.sh start    # Start dev server"
+echo "  .claude/lib/dev-server-utils.sh stop     # Stop dev server"
+echo "  .claude/lib/dev-server-utils.sh restart  # Restart dev server"
+echo ""
+echo "To attach, run: tmux attach-session -t $SESSION_NAME"
+echo ""
+echo "Navigation:"
+echo "  Ctrl+b <number>     - Switch to window"
+echo "  Ctrl+b <arrow>      - Switch between panes"
+echo "  Ctrl+b d            - Detach from session"
+
+# Ensure script exits immediately
+exit 0

@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# Update agent CLAUDE.md files with new templates
+
+# Dynamic path detection
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+PARENT_DIR="$(dirname "$PROJECT_ROOT")"
+
+echo "🔄 Updating agent CLAUDE.md files with new templates..."
+echo "========================================================"
+
+# Function to regenerate CLAUDE.md for an agent
+update_agent_docs() {
+    local agent_type=$1
+    local worktree_path=$2
+    local template_file=$3
+    
+    echo ""
+    echo "Updating $agent_type agent documentation..."
+    
+    # Check if worktree exists
+    if [ ! -d "$worktree_path" ]; then
+        echo "⚠️  $agent_type worktree not found at $worktree_path - skipping"
+        return
+    fi
+    
+    # Check if template exists
+    if [ ! -f "$PROJECT_ROOT/.claude/templates/$template_file" ]; then
+        echo "❌ Template not found: $template_file"
+        return
+    fi
+    
+    # Copy base CLAUDE.md
+    cp "$PROJECT_ROOT/CLAUDE.md" "$worktree_path/CLAUDE.md"
+    
+    # Add agent-specific content
+    echo -e "\n\n# ==================== ${agent_type} AGENT INSTRUCTIONS ====================\n" >> "$worktree_path/CLAUDE.md"
+    
+    # Process template and append
+    sed -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+        -e "s|{{PROJECT_ROOT}}|$PROJECT_ROOT|g" \
+        -e "s|{{WORKTREE_PATH}}|$worktree_path|g" \
+        -e "s|{{ComponentPrefix}}|$(echo $PROJECT_NAME | sed 's/-\(.\)/\U\1/g' | sed 's/^\(.\)/\U\1/')|g" \
+        "$PROJECT_ROOT/.claude/templates/$template_file" >> "$worktree_path/CLAUDE.md"
+    
+    echo "✅ $agent_type agent CLAUDE.md updated"
+}
+
+# Update all agents
+update_agent_docs "ARCHITECT" "$PARENT_DIR/${PROJECT_NAME}-arch" "CLAUDE-ARCHITECT.md.template"
+update_agent_docs "TESTER" "$PARENT_DIR/${PROJECT_NAME}-test" "CLAUDE-TESTER.md.template"
+update_agent_docs "IMPLEMENTER" "$PARENT_DIR/${PROJECT_NAME}-impl" "CLAUDE-IMPLEMENTER.md.template"
+update_agent_docs "SUPERVISOR" "$PARENT_DIR/${PROJECT_NAME}-supervisor" "CLAUDE-SUPERVISOR.md.template"
+
+echo ""
+echo "✅ All agent documentation updated!"
+echo ""
+echo "The agents now have:"
+echo "  - Updated instructions from their templates"
+echo "  - Critical coordination protocols"
+echo "  - Role-specific guidelines"
+echo "  - Supervisor agent for workflow automation"
+echo ""
+echo "⚠️  IMPORTANT: The agents need to re-read their CLAUDE.md files!"
+echo "Send them a message to check their updated instructions."

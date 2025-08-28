@@ -1,0 +1,45 @@
+#!/bin/bash
+# Check if a specific agent is idle
+# Usage: check-agent-idle <agent-number>
+# Returns: 0 if idle, 1 if active, 2 if error
+
+AGENT_NUM=$1
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+TMUX_SESSION="${PROJECT_NAME_LOWER}-dev"
+
+if [ -z "$AGENT_NUM" ]; then
+    echo "Usage: check-agent-idle <agent-number>"
+    echo "  0 = Architecture agent"
+    echo "  1 = Test agent"
+    echo "  2 = Implementation agent"
+    echo "  3 = Supervisor agent"
+    exit 2
+fi
+
+# Check if tmux session exists
+if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    exit 2
+fi
+
+# Find the Agents window
+agents_window=$(tmux list-windows -t "$TMUX_SESSION" -F "#{window_index}:#{window_name}" | grep "Agents" | cut -d: -f1)
+
+if [ -z "$agents_window" ]; then
+    exit 2
+fi
+
+# Capture the last 10 lines from the specified pane (more recent state)
+pane_content=$(tmux capture-pane -t "$TMUX_SESSION:$agents_window.$AGENT_NUM" -p -S -10 2>/dev/null)
+
+if [ -z "$pane_content" ]; then
+    exit 2
+fi
+
+# Look for "esc to interrupt" OR "ctrl+b to run in background" which indicates active processing
+if echo "$pane_content" | grep -qE "(esc to interrupt|ctrl\+b to run in background)"; then
+    exit 1  # Active
+else
+    exit 0  # Idle
+fi

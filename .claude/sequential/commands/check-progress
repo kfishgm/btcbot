@@ -1,0 +1,123 @@
+#!/bin/bash
+# Check progress on current sequential task
+
+# Get task ID from argument, GitHub Issue label, or current branch
+TASK_ID="$1"
+
+# If no argument, try to get from GitHub Issue with sequential-wip label
+# Note: We don't filter by assignee since sequential tasks might not be assigned
+if [ -z "$TASK_ID" ]; then
+    TASK_ID=$(gh issue list --label "sequential-wip" --json number -q '.[0].number' 2>/dev/null)
+fi
+
+# If still no task, try to extract from current branch name (format: {task-id}-sequential)
+if [ -z "$TASK_ID" ]; then
+    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
+    if [[ "$CURRENT_BRANCH" =~ ^([0-9]+)-sequential$ ]]; then
+        TASK_ID="${BASH_REMATCH[1]}"
+        echo "Detected task #$TASK_ID from branch: $CURRENT_BRANCH"
+        echo ""
+    fi
+fi
+
+if [ -z "$TASK_ID" ]; then
+    echo "No active sequential task detected"
+    echo ""
+    echo "Options:"
+    echo "  1. Run: start-task <issue-number>"
+    echo "  2. Switch to a task branch: git checkout {task-id}-sequential"
+    echo "  3. Specify task: check-progress <task-id>"
+    exit 0
+fi
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GRAY='\033[0;90m'
+NC='\033[0m'
+
+echo "Task #$TASK_ID Progress:"
+echo "========================"
+echo ""
+
+# Get issue title
+TITLE=$(gh issue view $TASK_ID --json title -q '.title')
+echo "Title: $TITLE"
+echo ""
+
+# Get all labels
+LABELS=$(gh issue view $TASK_ID --json labels -q '.labels[].name')
+
+# Check status of each agent
+echo "Agent Status:"
+echo "-------------"
+for agent in architect test-writer implementer code-reviewer test-analyzer test-e2e-analyzer; do
+    if echo "$LABELS" | grep -q "${agent}-done"; then
+        echo -e "${GREEN}✅ $agent: DONE${NC}"
+    elif echo "$LABELS" | grep -q "${agent}-wip"; then
+        echo -e "${YELLOW}🔄 $agent: IN PROGRESS${NC}"
+    else
+        echo -e "${GRAY}⏳ $agent: Not started${NC}"
+    fi
+done
+
+# Check git status
+echo ""
+echo "Git Information:"
+echo "----------------"
+echo "Current branch: $(git branch --show-current)"
+echo "Uncommitted changes: $(git status --porcelain | wc -l) files"
+
+echo ""
+echo "Recent commits:"
+git log --oneline -5 2>/dev/null || echo "No commits yet"
+
+# Check test status
+echo ""
+echo "🔴 MANDATORY TEST STATUS (ALL MUST PASS - NO EXCEPTIONS):"
+echo "--------------------------------------------------------"
+echo "THIS IS A DIRECT ORDER: ALL tests MUST pass before task completion."
+echo ""
+
+# Run quick test check
+TYPECHECK_ERRORS=$(pnpm typecheck 2>&1 | grep -c "error" || echo "0")
+LINT_ERRORS=$(pnpm lint 2>&1 | grep -c "error" || echo "0")
+
+if [ "$TYPECHECK_ERRORS" -eq "0" ]; then
+    echo -e "${GREEN}✅ TypeScript: 0 errors${NC}"
+else
+    echo -e "${RED}❌ TypeScript: $TYPECHECK_ERRORS errors - MUST FIX ALL${NC}"
+fi
+
+if [ "$LINT_ERRORS" -eq "0" ]; then
+    echo -e "${GREEN}✅ ESLint: 0 errors${NC}"
+else
+    echo -e "${RED}❌ ESLint: $LINT_ERRORS errors - MUST FIX ALL${NC}"
+fi
+
+echo ""
+echo "Unit Tests: Run 'pnpm test' - ALL MUST PASS (100%)"
+echo "E2E Tests: Run 'pnpm test:e2e' - ALL MUST PASS (100%)"
+echo ""
+echo "⚠️  Skipping tests is FORBIDDEN. Size/complexity/time are IRRELEVANT."
+echo "⚠️  Saying tests 'don't affect core functionality' is UNACCEPTABLE."
+
+# Check for existing PR
+echo ""
+PR=$(gh pr list --state open --search "Closes #$TASK_ID" --json number,url -q '.[0]' 2>/dev/null)
+if [ -n "$PR" ]; then
+    PR_NUM=$(echo "$PR" | jq -r '.number')
+    PR_URL=$(echo "$PR" | jq -r '.url')
+    echo -e "${YELLOW}PR #$PR_NUM already exists: $PR_URL${NC}"
+else
+    echo "No PR created yet"
+fi
+
+echo ""
+echo "Commands:"
+echo "---------"
+echo "  mark-agent <agent> wip    - Mark agent as working"
+echo "  mark-agent <agent> done   - Mark agent as complete"
+echo "  complete-task             - Finish task and create PR"
+echo "  abort-task                - Cancel current task"

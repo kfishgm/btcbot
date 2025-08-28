@@ -1,0 +1,13 @@
+#!/bin/bash
+# Stop local Supabase instance
+
+echo "🛑 Stopping local Supabase..."
+
+pnpm supabase stop
+
+if [ $? -eq 0 ]; then
+    echo "✅ Supabase stopped successfully!"
+else
+    echo "❌ Failed to stop Supabase"
+    exit 1
+fi

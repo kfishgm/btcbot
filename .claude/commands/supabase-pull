@@ -1,0 +1,23 @@
+#!/bin/bash
+# Pull schema from remote Supabase project
+
+echo "⬇️ Pulling schema from remote Supabase..."
+
+# Check if project is linked
+if [ ! -f "supabase/.temp/project-ref" ]; then
+    echo "❌ No project linked. Run supabase-link first."
+    exit 1
+fi
+
+# Pull schema changes
+pnpm supabase db pull
+
+if [ $? -eq 0 ]; then
+    echo "✅ Schema pulled successfully!"
+    echo ""
+    echo "📋 Changes pulled to: supabase/migrations/"
+    echo "💡 Review the changes before applying them locally"
+else
+    echo "❌ Failed to pull schema"
+    exit 1
+fi

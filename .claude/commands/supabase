@@ -1,0 +1,123 @@
+#!/bin/bash
+# Unified Supabase command - replaces 11 separate .md files
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Show help
+show_help() {
+    cat << EOF
+Supabase Development Commands
+
+Usage: supabase <command> [options]
+
+Commands:
+  start       Start local Supabase instance
+  stop        Stop local Supabase instance
+  status      Show Supabase status
+  reset       Reset database to fresh state
+  migrate     Create new migration
+  types       Generate TypeScript types
+  seed        Seed database with test data
+  logs        Show Supabase logs
+  push        Push local changes to remote
+  pull        Pull remote schema to local
+  link        Link to remote project
+
+Examples:
+  supabase start
+  supabase migrate "add_user_table"
+  supabase types > src/types/database.types.ts
+
+Environment:
+  API URL: http://localhost:54321
+  Studio: http://localhost:54323
+  DB: postgresql://postgres:postgres@localhost:54322/postgres
+EOF
+}
+
+# Commands
+case "${1:-help}" in
+    start)
+        echo -e "${GREEN}Starting Supabase...${NC}"
+        if pnpm supabase status 2>/dev/null | grep -q "RUNNING"; then
+            echo "✅ Already running!"
+        else
+            pnpm supabase start
+        fi
+        ;;
+        
+    stop)
+        echo -e "${YELLOW}Stopping Supabase...${NC}"
+        pnpm supabase stop
+        ;;
+        
+    status)
+        pnpm supabase status
+        ;;
+        
+    reset)
+        echo -e "${YELLOW}Resetting database...${NC}"
+        pnpm supabase db reset
+        echo -e "${GREEN}✅ Database reset complete${NC}"
+        ;;
+        
+    migrate)
+        if [ -z "$2" ]; then
+            echo -e "${RED}Error: Migration name required${NC}"
+            echo "Usage: supabase migrate <name>"
+            exit 1
+        fi
+        pnpm supabase migration new "$2"
+        echo -e "${GREEN}✅ Created migration: $2${NC}"
+        ;;
+        
+    types)
+        echo -e "${GREEN}Generating TypeScript types...${NC}"
+        pnpm supabase gen types typescript --local
+        ;;
+        
+    seed)
+        echo -e "${GREEN}Seeding database...${NC}"
+        if [ -f "supabase/seed.sql" ]; then
+            pnpm supabase db seed
+            echo -e "${GREEN}✅ Database seeded${NC}"
+        else
+            echo -e "${YELLOW}No seed file found at supabase/seed.sql${NC}"
+        fi
+        ;;
+        
+    logs)
+        pnpm supabase logs ${2:---tail=100}
+        ;;
+        
+    push)
+        echo -e "${YELLOW}Pushing to remote...${NC}"
+        pnpm supabase db push
+        echo -e "${GREEN}✅ Pushed to remote${NC}"
+        ;;
+        
+    pull)
+        echo -e "${YELLOW}Pulling from remote...${NC}"
+        pnpm supabase db pull
+        echo -e "${GREEN}✅ Pulled from remote${NC}"
+        ;;
+        
+    link)
+        if [ -z "$2" ]; then
+            echo -e "${RED}Error: Project ref required${NC}"
+            echo "Usage: supabase link <project-ref>"
+            exit 1
+        fi
+        pnpm supabase link --project-ref "$2"
+        echo -e "${GREEN}✅ Linked to project${NC}"
+        ;;
+        
+    help|--help|-h|*)
+        show_help
+        ;;
+esac

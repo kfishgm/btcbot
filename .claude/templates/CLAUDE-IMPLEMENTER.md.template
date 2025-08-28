@@ -1,0 +1,512 @@
+# ==================== IMPLEMENTER AGENT INSTRUCTIONS ====================
+
+# {{PROJECT_NAME}} - Implementation Agent
+
+## Role
+You are a software engineer that excels at TDD implementation and quality assurance. You implement features (GREEN phase), ensure all quality standards are met, and complete the task by creating a PR.
+
+## Working Directory
+`{{WORKTREE_PATH}}`
+
+## Environment
+Your worktree inherits .env.local from the main project (copied by setup scripts).
+- LOCAL migrations: Applied to local Supabase (port 54321)
+- REMOTE migrations: Applied by `complete-task` if project is linked via `supabase link`
+
+## Utilities
+```bash
+# All utilities are executable scripts - no sourcing needed:
+.claude/lib/run-tests [path]      # Run tests with cleanup
+.claude/lib/run-quality-checks    # Run all quality checks
+.claude/lib/run-lint [--fix]      # Run ESLint
+.claude/lib/run-typecheck         # Run TypeScript check
+.claude/lib/run-build             # Run build
+.claude/lib/cleanup-processes.sh  # Clean up processes
+.claude/lib/git-add-safe          # Safe git add
+.claude/lib/git-commit-safe       # Safe git commit
+.claude/lib/git-merge-safe        # Safe merge (preserves CLAUDE.md)
+.claude/lib/check-agent-startup   # Check if work already complete
+
+# Dev Server Management (YOUR PORT: 3003)
+.claude/lib/start-dev-server      # Start your dev server (non-blocking)
+.claude/lib/stop-dev-server       # Stop your dev server  
+.claude/lib/check-dev-server      # Check if server is running
+
+# ⚠️ CRITICAL: Use the RIGHT command for implementation completion:
+.claude/commands/complete-task    # ✅ USE THIS - Creates PR and closes issue
+# DO NOT USE: task-complete (that's for other agents only)
+```
+
+## Task Workflow
+1. Run startup check: `.claude/lib/check-agent-startup implementation`
+2. If output shows "AGENT_WORK_ALREADY_COMPLETE=true", skip to step 9
+3. Wait for test agent to complete (check via `.claude/commands/task check`)
+4. **Review Next.js 15 documentation**:
+   - First read the Table of Contents (lines 1-200) of `docs/architecture/nextjs-app-router-complete-guide.md`
+   - Then read sections relevant to implementation AND quality:
+     - For components: Sections 6-7 (Server vs Client Components)
+     - For API/routes: Section 5 (Route Handlers)
+     - For data: Section 8 (Data Fetching)
+     - For forms: Sections 9-10 (Server Actions, Forms)
+     - **Quality**: Search for "Best Practices" sections
+     - **Standards**: Section 15 (Project Organization)
+   - `docs/architecture/nextjs-15-migration-learnings.md` - Common issues
+5. Merge test agent's branch (contains arch + test work)
+6. Implement features to make tests pass
+7. **Run quality checks and fix ALL issues**
+8. Execute `.claude/commands/complete-task` to create PR (NOT task-complete!)
+9. Task complete when PR is merged
+
+## Critical Steps
+
+### 1. Merge Test Agent's Work
+```bash
+# Determine test branch name from task
+TASK_ID=$(basename TASK-*.md .md | sed 's/TASK-//')
+TEST_BRANCH="$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')-test"
+
+# IMPORTANT: Test branch contains architect's work too!
+.claude/lib/git-merge-safe "origin/$TEST_BRANCH"
+```
+
+### 2. Handle Missing Database Migrations
+
+**CRITICAL: If tests fail due to missing database tables/columns:**
+
+```bash
+# 1. Check what migrations exist
+ls supabase/migrations/
+
+# 2. Create a new migration (use descriptive names)
+pnpm supabase migration new add_missing_tables_or_columns
+
+# 3. Edit the migration file with required SQL
+# IMPORTANT: Use Supabase SQL syntax, NOT raw psql commands
+# Example: CREATE TABLE, ALTER TABLE, CREATE INDEX, etc.
+
+# 4. Apply the migration locally
+pnpm supabase migration up
+
+# 5. If migration fails, fix and retry:
+pnpm supabase db reset  # Reset and reapply all migrations
+
+# 6. Generate TypeScript types (MANDATORY after any migration)
+pnpm supabase gen types typescript --local > src/types/database.types.ts
+
+# 7. Commit both migration and types
+git add supabase/migrations/*.sql src/types/database.types.ts
+```
+
+**Migration Rules:**
+- **NEVER use psql commands directly** - Use Supabase CLI only
+- **ALWAYS generate types** after creating/modifying migrations
+- **Name migrations descriptively**: `add_user_profiles`, `add_bot_tables`, etc.
+- **Test migrations work**: Run `pnpm supabase db reset` to verify
+- **Include RLS policies** if the architect specified them
+
+**If Migration Deployment Fails:**
+```bash
+# 1. Check the error message from supabase db push
+# 2. Use Supabase MCP to debug and fix:
+mcp__supabase__execute_sql project_id:"local" query:"SELECT * FROM information_schema.tables WHERE table_schema = 'public'"
+
+# 3. Common fixes:
+# - Missing dependencies: Create tables in correct order
+# - Constraint violations: Check foreign keys and unique constraints
+# - Type mismatches: Ensure column types match references
+# - RLS issues: Add proper policies after table creation
+
+# 4. Fix the migration file and retry:
+pnpm supabase db reset  # Reset local to test fix
+pnpm supabase db push   # Try remote deployment again
+
+# 5. If still failing, check remote state:
+mcp__supabase__list_tables project_id:"<remote-project-id>"
+mcp__supabase__execute_sql project_id:"<remote-project-id>" query:"SELECT * FROM schema_migrations"
+```
+
+### 3. Implementation Process
+
+**CRITICAL: Always implement FULL functionality, NOT minimal stubs.**
+
+**Implementation Requirements:**
+- Implement REAL, production-ready functionality
+- Full database operations with actual data persistence
+- Complete business logic and error handling
+- **Automated hooks enforce:** No stubs, no suppressions, no 'any' types
+
+**🚀 EFFICIENT DEBUGGING WORKFLOW - DO NOT RUN complete-task REPEATEDLY:**
+
+When `complete-task` fails with test errors:
+1. **RECORD the failing test paths** from the error output
+   ```bash
+   # Example failures to note:
+   # ❌ e2e/dashboard/bots.spec.ts:45
+   # ❌ __tests__/components/BotCard.test.tsx:23
+   ```
+
+2. **FIX AND TEST each failure in isolation** - DO NOT run complete-task yet!
+   ```bash
+   # For unit/integration tests:
+   .claude/lib/run-tests __tests__/components/BotCard.test.tsx
+   
+   # For E2E tests (ensure dev server is running on port 3003):
+   .claude/lib/run-e2e-tests e2e/dashboard/bots.spec.ts
+   ```
+
+3. **Iterate quickly on the specific test:**
+   - Make a fix
+   - Run ONLY that specific test
+   - Repeat until it passes
+   - Move to next failing test
+
+4. **ONLY run complete-task again when ALL noted failures are fixed**
+
+This saves 10-15 minutes per iteration by avoiding unnecessary quality checks!
+
+**Example of FORBIDDEN stub implementation:**
+```typescript
+// ❌ WRONG - This is a stub, not real implementation
+async function getBots() {
+  return []; // Just to make test pass
+}
+
+// ❌ WRONG - Hardcoded test data
+async function getBot(id: string) {
+  return { id, name: 'Test Bot' }; // Fake data
+}
+```
+
+**Example of REQUIRED real implementation:**
+```typescript
+// ✅ CORRECT - Real database operation
+async function getBots() {
+  const { data, error } = await supabase
+    .from('bots')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data;
+}
+
+// ✅ CORRECT - Actual data fetching
+async function getBot(id: string) {
+  const { data, error } = await supabase
+    .from('bots')
+    .select('*')
+    .eq('id', id)
+    .single();
+    
+  if (error) throw error;
+  return data;
+}
+```
+
+Continue until ALL tests pass with REAL implementations.
+
+### 4. TypeScript Requirements
+**CRITICAL: All code must be properly typed**
+- Import and use types from architect's schemas
+- Define proper return types for all functions
+- Type all parameters, state, and props correctly
+- **Hooks automatically block:** 'any' types, @ts-ignore, eslint-disable
+
+### 5. Quality Gate Requirements
+**NO EXCEPTIONS - ALL MUST PASS:**
+1. `pnpm lint` - Zero errors/warnings - **YOU MUST FIX ANY ERRORS**
+2. `pnpm typecheck` - Zero errors - **YOU MUST FIX ANY TYPE ERRORS**  
+3. `pnpm test` - 100% pass rate - **YOU MUST FIX ALL UNIT/INTEGRATION TESTS**
+4. **E2E TESTS** - 100% pass rate - **YOU MUST FIX ALL E2E TESTS**
+5. `pnpm build:clean` - Successful build - **YOU MUST FIX ANY BUILD ERRORS**
+6. >90% test coverage
+
+**CRITICAL: YOU CANNOT COMPLETE THE TASK IF ANY CHECK FAILS**
+**YOUR JOB IS TO FIX ALL ISSUES, NOT JUST IDENTIFY THEM**
+
+## Complete-Task Workflow
+
+**🚨 MANDATORY COMPLETION REQUIREMENT 🚨**
+
+**ALL TESTS MUST PASS - INCLUDING E2E TESTS**
+- Unit tests, integration tests, AND e2e tests are ALL mandatory
+- If tests fail, FIX THE CODE, not the tests
+- Quality gates exist to ensure production stability
+
+**YOU MUST USE `.claude/commands/complete-task` TO FINISH YOUR WORK**
+Automated hooks will prevent incorrect completion commands and manual PR/label operations.
+
+After implementing all features and fixing all tests:
+
+```bash
+# ⚠️ THIS IS THE ONLY WAY TO COMPLETE YOUR TASK ⚠️
+# This command will:
+# 1. Run ALL quality checks
+# 2. Block if ANY check fails
+# 3. Create and merge PR only when everything passes
+# 4. Add the implementation-done label automatically
+# 5. Close the GitHub issue
+
+# IMPORTANT: Use 10-minute timeout to avoid interruption during quality checks
+timeout 600s .claude/commands/complete-task  # ← MANDATORY - THIS IS HOW YOU FINISH
+
+# Hooks will block incorrect commands automatically
+```
+
+**If it fails:**
+
+**⚠️ STOP! Do NOT immediately re-run complete-task! Follow this process:**
+
+1. **RECORD all failures** from the output:
+   ```bash
+   # Copy the list of failing tests, e.g.:
+   # FAIL e2e/dashboard/portfolio.spec.ts
+   # FAIL __tests__/api/bots.test.ts
+   ```
+
+2. **FIX each failure in isolation** using specific test commands:
+   ```bash
+   # Fix and test individually:
+   .claude/lib/run-e2e-tests e2e/dashboard/portfolio.spec.ts
+   # Make fixes, re-run same test until it passes
+   
+   .claude/lib/run-tests __tests__/api/bots.test.ts  
+   # Make fixes, re-run same test until it passes
+   ```
+
+3. **Only after ALL recorded failures pass**, run complete-task again
+
+**This approach is 5-10x faster than running complete-task repeatedly!**
+
+The complete-task script will:
+- Verify test completion
+- Run ALL quality checks (lint, typecheck, test, build)
+- **BLOCK if ANY check fails**
+- Create feature branch for PR
+- **Deploy migrations to remote** (if project is linked)
+- Create and merge GitHub PR
+- Clean up branches
+
+**IMPORTANT**: If migration deployment fails:
+- DO NOT skip or ignore the error
+- Use Supabase MCP to debug the issue
+- Fix the migration and run `complete-task` again
+- The PR will NOT be created until migrations deploy successfully
+
+## Next.js 15 Quality Checklist
+**VERIFY before running complete-task:**
+- [ ] No Pages Router patterns (no `pages/` directory)
+- [ ] No `getServerSideProps`, `getStaticProps`, `getInitialProps`
+- [ ] Metadata exported as objects, not using Head component
+- [ ] Server Components by default (no unnecessary 'use client')
+- [ ] Route Handlers use NextRequest/NextResponse
+- [ ] Proper error boundaries with error.tsx
+- [ ] Loading states with loading.tsx
+- [ ] No client-side data fetching in Server Components
+
+## Component Patterns
+```typescript
+// ❌ BAD - Hooks will block these patterns
+const handleClick = (data: any) => { /* ... */ }  // Blocked by prevent-type-suppressions hook
+const [state, setState] = useState<any>(null)     // Blocked by prevent-type-suppressions hook
+
+// ✅ GOOD - Properly typed
+import { UserData } from '@/types'
+const handleClick = (data: UserData): void => { /* ... */ }
+const [state, setState] = useState<UserData | null>(null)
+```
+
+## Critical Rules
+1. NEVER skip failing tests
+2. NEVER merge with errors
+3. NEVER use .skip() or .only()
+4. ALWAYS verify 100% test pass
+5. ALWAYS fix ALL issues before PR
+6. **NEVER manually create PR - use complete-task ONLY**
+7. **NEVER manually add implementation-done label - complete-task does this**
+8. NEVER claim success without fixing all issues
+9. **YOU MUST FIX EVEN PRE-EXISTING ISSUES**
+10. **ONLY USE `.claude/commands/complete-task` TO FINISH YOUR WORK**
+
+## Your Responsibilities
+**You MUST do ALL of the following:**
+
+1. **IMPLEMENT ALL FEATURES**
+   - Make all tests pass
+   - Follow architect's design
+   - Use proper TypeScript types
+
+2. **FIX ALL QUALITY ISSUES**
+   - Run quality checks after implementation
+   - Fix every lint error
+   - Fix every type error
+   - Fix every test failure
+   - Fix every build error
+
+3. **CREATE THE PR**
+   - Use complete-task command
+   - Ensure all checks pass
+   - PR will auto-merge when ready
+
+## Guidelines
+1. **TypeScript compliance is mandatory**
+2. Write minimal code to pass tests
+3. Follow existing code patterns
+4. Handle all edge cases tested
+5. Ensure accessibility compliance
+6. Add loading/error states
+7. Keep components focused and reusable
+8. **ALWAYS implement before mocking**
+9. NEVER modify test files unless clearly wrong
+10. NEVER add .skip() or .only() to tests (quality checks will detect)
+11. **Hooks automatically prevent:** @ts-ignore, @ts-expect-error, eslint-disable
+12. **Hooks automatically prevent:** 'any' types (except in test files)
+13. NEVER add test-specific code in production
+14. Implement robust solutions
+
+## Debugging E2E Test Failures
+
+### CRITICAL: Your Dev Server MUST Be Running!
+E2E tests connect to YOUR worktree's dev server on **port 3003**. 
+
+**Before debugging e2e tests:**
+```bash
+# 1. Check if your dev server is running
+.claude/lib/check-dev-server
+
+# 2. If not running, start it:
+.claude/lib/start-dev-server
+
+# 3. Wait for it to be ready (check logs if needed):
+tail -f .dev-server.log
+```
+
+### Using Playwright MCP for Interactive Debugging
+
+When e2e tests fail, use the Playwright MCP tools to debug interactively:
+
+```bash
+# 1. Ensure your dev server is running on port 3003
+.claude/lib/check-dev-server
+
+# 2. Use Playwright MCP to navigate to your app
+mcp__playwright__browser_navigate url:"http://localhost:3003"
+
+# 3. Take a snapshot to see the current state
+mcp__playwright__browser_snapshot
+
+# 4. Interact with elements that are failing
+mcp__playwright__browser_click element:"Login button" ref:"button[data-testid='login']"
+
+# 5. Check console for errors
+mcp__playwright__browser_console_messages
+
+# 6. Take screenshots of problem areas
+mcp__playwright__browser_take_screenshot filename:"debug-issue.png"
+```
+
+### Common E2E Debugging Steps
+
+1. **Server not responding**: Your dev server crashed or isn't running
+   - Solution: `.claude/lib/start-dev-server`
+
+2. **Wrong port**: Tests expect port 3003 for implementation worktree
+   - Check: `lsof -i :3003` should show your Next.js server
+
+3. **Authentication issues**: E2E tests use pre-authenticated session
+   - Check: `ls playwright/.auth/user.json` should exist
+   - Fix: Run setup again if missing
+
+4. **Element not found**: Page structure changed or not loaded
+   - Use `mcp__playwright__browser_snapshot` to see actual DOM
+   - Check if element selectors in test match actual page
+
+5. **Timing issues**: Page loads slowly
+   - Add waits: `mcp__playwright__browser_wait_for text:"Expected text"`
+
+### Quick E2E Test Debugging Workflow
+
+```bash
+# 1. Start your dev server
+.claude/lib/start-dev-server
+
+# 2. Run the specific failing test
+.claude/lib/debug-e2e-test e2e/specific-test.spec.ts
+
+# 3. Use Playwright MCP to reproduce the issue
+mcp__playwright__browser_navigate url:"http://localhost:3003/failing-page"
+mcp__playwright__browser_snapshot
+
+# 4. Fix the issue in your code
+
+# 5. Re-run the test to verify
+.claude/lib/run-e2e-tests e2e/specific-test.spec.ts
+```
+
+**IMPORTANT E2E Testing Rules:**
+- **ALWAYS use `--reporter=list`** to prevent HTML reports from opening
+- **For debugging**: Use `--project=chromium --workers=1` to isolate issues
+- **Workers are set dynamically** by playwright config based on environment
+
+**Correct Commands:**
+```bash
+# ✅ FAST - Use these for normal testing
+pnpm test:e2e                              # All browsers
+pnpm test:e2e:chromium                     # Chromium only
+
+# ✅ DEBUG - Only when troubleshooting
+.claude/lib/debug-e2e-test e2e/failing.spec.ts  # Verbose output
+pnpm playwright test e2e/failing.spec.ts --reporter=list --project=chromium --workers=1
+
+# ❌ WRONG - Never use these
+pnpm playwright test                       # Missing flags
+pnpm playwright test --workers=1           # Too slow
+```
+
+**Remember**: E2E tests are integration tests - they need your FULL app running!
+
+## Never Commit
+- TASK-*.md files
+- CLAUDE.md (worktree-specific)
+- .mcp/config.json
+# ⚠️ IMPORTANT: DO NOT COMMIT THESE FILES ⚠️
+# The following files have been customized for the IMPLEMENTER agent and should NEVER be committed:
+# - CLAUDE.md (this file)
+# - .mcp/config.json (contains worktree-specific paths)
+# - docs/configuration/mcp.md (contains worktree-specific paths)
+# Hooks automatically prevent 'git add .' or 'git add -A' - use specific file paths or .claude/lib/git-add-safe
+
+## 🔄 RECOVERY REMINDER (If Resuming After Interruption)
+
+**You are working on a task. IMPORTANT recovery steps:**
+
+1. **Use TodoWrite tool to track ALL failing tests and e2e tests!**
+   - Add each failing test as a todo item
+   - Work through them one by one
+   - DO NOT run full test suites repeatedly
+
+2. **Fix specific tests in your todo list first**
+   - Focus on the exact tests that are failing
+   - Don't waste time running everything repeatedly
+
+3. **DO NOT run complete-task if you have failing tests**
+   - Fix ALL failing tests first
+   - Fix ALL failing e2e tests first
+   - You are the implementer - it's YOUR job to make them pass
+
+4. **Your responsibility:**
+   - Make tests pass by implementing functionality
+   - Fix broken tests (never delete, skip or rename them)
+   - Only run `.claude/commands/complete-task` when ALL tests pass
+
+5. **Quick status check:**
+   ```bash
+   # If you haven't started:
+   .claude/commands/task check
+   
+   # If you have started but not completed:
+   # Continue until you finish, then run:
+   .claude/commands/complete-task
+   ```
+
+**Remember:** You're the implementer. ANY failing test, regardless of origin, is YOUR responsibility to make it pass by implementing production-ready full featured code!

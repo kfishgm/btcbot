@@ -1,0 +1,29 @@
+#!/bin/bash
+# Hook to check if the command is a git add/commit and run protection
+
+# Read the hook input
+HOOK_INPUT=$(cat)
+
+# Extract the command from the input
+COMMAND=$(echo "$HOOK_INPUT" | jq -r '.data.command // empty')
+
+# Check if it's a git add or commit command
+if echo "$COMMAND" | grep -qE '(^|;|&&|\|\|)\s*git\s+(add|commit)'; then
+    # Run the protection hooks
+    .claude/hooks/pre-commit-no-task-files
+    EXIT_CODE=$?
+    
+    if [ $EXIT_CODE -eq 0 ]; then
+        .claude/hooks/pre-commit-claude-md-main-only
+        EXIT_CODE=$?
+    fi
+    
+    # If any hook failed, block the command
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo '{"decision": "block", "reason": "Git command blocked by pre-commit hooks"}'
+        exit 0
+    fi
+fi
+
+# Allow all other commands
+echo '{"decision": "approve"}'

@@ -1,0 +1,73 @@
+#!/bin/bash
+# Safe merge that preserves agent-specific files
+
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <branch>"
+    exit 1
+fi
+
+BRANCH="$1"
+
+# Save CLAUDE.md if it exists
+CLAUDE_BACKUP=""
+if [ -f "CLAUDE.md" ]; then
+    CLAUDE_BACKUP=$(mktemp)
+    cp CLAUDE.md "$CLAUDE_BACKUP"
+fi
+
+# Save port-specific environment variables from .env files
+ENV_URLS_BACKUP=""
+if [ -f ".env.local" ]; then
+    ENV_URLS_BACKUP=$(mktemp)
+    # Extract NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL
+    grep -E "^NEXT_PUBLIC_(SITE|APP)_URL=" .env.local > "$ENV_URLS_BACKUP" || true
+fi
+
+# Perform merge
+echo "Merging $BRANCH..."
+if ! git merge "$BRANCH" --no-edit; then
+    echo "Merge failed. Resolve conflicts and commit."
+    # Restore CLAUDE.md even on failure
+    if [ -n "$CLAUDE_BACKUP" ] && [ -f "$CLAUDE_BACKUP" ]; then
+        cp "$CLAUDE_BACKUP" CLAUDE.md
+        rm -f "$CLAUDE_BACKUP"
+    fi
+    # Restore URLs even on failure
+    if [ -n "$ENV_URLS_BACKUP" ] && [ -f "$ENV_URLS_BACKUP" ] && [ -s "$ENV_URLS_BACKUP" ]; then
+        for env_file in .env.local .env.development.local .env.test.local; do
+            if [ -f "$env_file" ]; then
+                grep -v "^NEXT_PUBLIC_SITE_URL=" "$env_file" | grep -v "^NEXT_PUBLIC_APP_URL=" > "${env_file}.tmp" || true
+                cat "$ENV_URLS_BACKUP" >> "${env_file}.tmp"
+                mv "${env_file}.tmp" "$env_file"
+            fi
+        done
+        rm -f "$ENV_URLS_BACKUP"
+    fi
+    exit 1
+fi
+
+# Restore CLAUDE.md after successful merge
+if [ -n "$CLAUDE_BACKUP" ] && [ -f "$CLAUDE_BACKUP" ]; then
+    cp "$CLAUDE_BACKUP" CLAUDE.md
+    rm -f "$CLAUDE_BACKUP"
+    echo "✓ Preserved agent-specific CLAUDE.md"
+fi
+
+# Restore port-specific URLs in .env files
+if [ -n "$ENV_URLS_BACKUP" ] && [ -f "$ENV_URLS_BACKUP" ] && [ -s "$ENV_URLS_BACKUP" ]; then
+    # For each .env file that exists
+    for env_file in .env.local .env.development.local .env.test.local; do
+        if [ -f "$env_file" ]; then
+            # Remove the old URL lines
+            grep -v "^NEXT_PUBLIC_SITE_URL=" "$env_file" | grep -v "^NEXT_PUBLIC_APP_URL=" > "${env_file}.tmp" || true
+            # Append the saved URLs
+            cat "$ENV_URLS_BACKUP" >> "${env_file}.tmp"
+            # Replace the file
+            mv "${env_file}.tmp" "$env_file"
+        fi
+    done
+    rm -f "$ENV_URLS_BACKUP"
+    echo "✓ Preserved agent-specific port URLs"
+fi
+
+echo "✓ Merge completed successfully"

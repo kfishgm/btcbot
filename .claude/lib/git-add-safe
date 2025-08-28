@@ -1,0 +1,41 @@
+#!/bin/bash
+# Safe git add that excludes forbidden files
+
+# Files that should never be committed
+FORBIDDEN_FILES=(
+    "CLAUDE.md"
+    "TASK-*.md"
+    ".mcp/config.json"
+    "docs/configuration/mcp.md"
+    ".env.local"
+    ".env.development.local"
+    ".env.test.local"
+    "*-implementation-guide.md"
+    "*-testing-guide.md"
+    "*-architecture-*.md"
+    "*-design.md"
+    "docs/architecture/task-*"
+    "nextjs-app-router-complete-guide.md"
+)
+
+# Check if any forbidden files are being added
+for pattern in "${FORBIDDEN_FILES[@]}"; do
+    if git diff --cached --name-only | grep -E "$pattern" >/dev/null 2>&1; then
+        echo "ERROR: Attempting to add forbidden file matching pattern: $pattern"
+        echo "These files should never be committed."
+        exit 1
+    fi
+done
+
+# Add files
+git add "$@"
+
+# Double-check staged files
+for pattern in "${FORBIDDEN_FILES[@]}"; do
+    if git diff --cached --name-only | grep -E "$pattern" >/dev/null 2>&1; then
+        echo "WARNING: Forbidden file pattern detected in staging: $pattern"
+        git reset HEAD $(git diff --cached --name-only | grep -E "$pattern")
+    fi
+done
+
+echo "✓ Files added safely"

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Reset local Supabase database
+
+echo "🔄 Resetting local Supabase database..."
+echo "⚠️  This will delete all local data!"
+
+# Reset the database without prompting
+pnpm supabase db reset
+
+if [ $? -eq 0 ]; then
+    echo "✅ Database reset successfully!"
+    echo "📝 All migrations have been reapplied"
+else
+    echo "❌ Failed to reset database"
+    exit 1
+fi
