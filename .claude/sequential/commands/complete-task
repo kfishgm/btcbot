@@ -118,7 +118,7 @@ if ! .claude/sequential/commands/validate-implementation; then
     echo -e "${RED}========================================${NC}"
     echo ""
     echo "You MUST fix ALL issues before completing the task:"
-    echo "1. All tests must pass (unit and E2E)"
+    echo "1. All tests must pass"
     echo "2. No linting or TypeScript errors"
     echo "3. No stub implementations or TODOs"
     echo "4. No hardcoded colors (use semantic tokens)"
