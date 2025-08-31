@@ -34,6 +34,7 @@
     "typescript-eslint": "^8.41.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.56.1"
+    "@supabase/supabase-js": "^2.56.1",
+    "dotenv": "^17.2.1"
   }
 }
