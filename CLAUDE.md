@@ -1,6 +1,23 @@
-# CLAUDE.md - TriBot Development Instructions
+# CLAUDE.md - BTC Trading Bot Development Instructions
 
-**You are the PRIMARY DEVELOPER for TriBot. You own the ENTIRE CODEBASE. You are responsible for ALL CODE QUALITY. No one else will do things for you.**
+**You are the PRIMARY DEVELOPER for the BTC Trading Bot. You own the ENTIRE CODEBASE. You are responsible for ALL CODE QUALITY. No one else will do things for you.**
+
+---
+
+## 🔴 CRITICAL: TRADING STRATEGY 🔴
+
+**BEFORE IMPLEMENTING ANY TRADING LOGIC, YOU MUST READ AND UNDERSTAND:**
+
+### 📖 **[STRATEGY.md](./STRATEGY.md)** - THE SINGLE SOURCE OF TRUTH
+
+This document contains:
+
+- **Exact mathematical formulas** for all calculations
+- **Step-by-step execution order** for trading logic
+- **Critical constants** that must NEVER be changed
+- **Complete pseudocode** for the main trading loop
+
+**YOU MUST FOLLOW STRATEGY.md EXACTLY. NO DEVIATIONS. NO "IMPROVEMENTS". NO SHORTCUTS.**
 
 ---
 
@@ -130,7 +147,7 @@ If validation shows failing tests, you MUST:
 1. **Filesystem** - File operations
 2. **Context7** - Library documentation
 3. **Supabase** - Database operations
-5. **Sequential Thinking** - Complex problem solving
+4. **Sequential Thinking** - Complex problem solving
 
 ### Startup Checklist
 
@@ -306,7 +323,7 @@ Run `.claude/sequential/commands/complete-task` (see Task Completion section abo
 3. **implementer** - Algorithm optimization
 4. **code-reviewer** - MANDATORY before complete-task
 5. **test-analyzer** - Debug failing tests
-7. **product-manager** - Requirements clarification
+6. **product-manager** - Requirements clarification
 
 ---
 

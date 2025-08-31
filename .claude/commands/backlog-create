@@ -143,20 +143,14 @@ fi
 active_line=$(grep -n "^## Active Tasks" "$TASKS_FILE" | cut -d: -f1)
 if [ -n "$active_line" ]; then
   # Insert after the Active Tasks header (macOS compatible)
-  temp_file=$(mktemp)
-  awk -v line="$active_line" -v task="- [ ] **$TASK_ID**: $TITLE (#$ISSUE_NUMBER)" -v desc="  - Priority: MEDIUM
-  - Dependencies: None
-  - Description: See issue #$ISSUE_NUMBER" '
-    NR == line { print; print ""; print task; print desc; next }
-    { print }
-  ' "$TASKS_FILE" > "$temp_file"
-  mv "$temp_file" "$TASKS_FILE"
+  # Use sed to insert the task after the Active Tasks line
+  sed -i '' "${active_line}a\\
+\\
+- [ ] **$TASK_ID**: $TITLE (#$ISSUE_NUMBER)
+" "$TASKS_FILE"
 else
   # Append to end if section not found
   echo -e "\n- [ ] **$TASK_ID**: $TITLE (#$ISSUE_NUMBER)" >> "$TASKS_FILE"
-  echo "  - Priority: MEDIUM" >> "$TASKS_FILE"
-  echo "  - Dependencies: None" >> "$TASKS_FILE"
-  echo "  - Description: See issue #$ISSUE_NUMBER" >> "$TASKS_FILE"
 fi
 
 echo "✅ Added to tasks.md"
@@ -171,7 +165,11 @@ if [ ! -f "$BACKLOG_FILE" ]; then
 fi
 
 # Count existing entries for position
-POSITION=$(grep -c "^[0-9]\+\." "$BACKLOG_FILE" 2>/dev/null || echo "0")
+if [ -f "$BACKLOG_FILE" ]; then
+  POSITION=$(grep -c "^[0-9]*\." "$BACKLOG_FILE" 2>/dev/null || echo "0")
+else
+  POSITION=0
+fi
 POSITION=$((POSITION + 1))
 
 # Append to backlog
