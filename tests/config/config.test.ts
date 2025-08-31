@@ -180,8 +180,6 @@ describe("Configuration Module", () => {
     });
 
     it("should accept valid URLs including localhost and custom domains", async () => {
-      const { getConfig } = await import("../../src/config/index.js");
-
       // Test various valid URLs
       const validUrls = [
         "https://project.supabase.co",
