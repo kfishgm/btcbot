@@ -46,32 +46,38 @@ describe("StrategyConfigLoader", () => {
     jest.resetModules();
 
     // Create mock for Supabase client with proper typing
+    const mockSingle = jest.fn();
+    const mockInsert = jest.fn();
     mockSupabaseClient = {
       from: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       eq: jest.fn().mockReturnThis(),
-      single: jest.fn(),
-      insert: jest.fn(),
+      single: mockSingle,
+      insert: mockInsert,
       update: jest.fn().mockReturnThis(),
     } as MockSupabaseClient;
 
-    // Mock database module
-    jest.unstable_mockModule(
-      "../../src/database/connection-manager.js",
-      () => ({
-        DatabaseConnectionManager: jest.fn().mockImplementation(() => ({
-          getClient: jest.fn().mockResolvedValue(mockSupabaseClient),
-          disconnect: jest.fn(),
-        })),
+    // Mock Supabase client
+    jest.unstable_mockModule("@supabase/supabase-js", () => ({
+      createClient: jest.fn().mockReturnValue(mockSupabaseClient),
+    }));
+
+    // Mock config module
+    jest.unstable_mockModule("../../src/config/index.js", () => ({
+      getConfig: jest.fn().mockReturnValue({
+        supabase: {
+          url: "https://test.supabase.co",
+          serviceRoleKey: "test-key",
+        },
       }),
-    );
+    }));
 
     // Import the module to test (this will fail initially in TDD Red phase)
     try {
       const module = await import("../../src/config/strategy-config-loader.js");
       StrategyConfigLoaderClass = module.StrategyConfigLoader;
       loader = new StrategyConfigLoaderClass();
-    } catch (error) {
+    } catch {
       // Module doesn't exist yet - that's expected in TDD Red phase
       loader = undefined;
     }

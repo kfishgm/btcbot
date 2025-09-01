@@ -1,4 +1,5 @@
-import { DatabaseConnectionManager } from "../database/connection-manager.js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { getConfig } from "./index.js";
 
 // Strategy configuration interface matching database schema
 export interface StrategyConfig {
@@ -40,11 +41,15 @@ export class StrategyConfigError extends Error {
 
 // Strategy configuration loader class
 export class StrategyConfigLoader {
-  private dbManager: DatabaseConnectionManager;
+  private client: SupabaseClient;
   private cachedConfig: StrategyConfig | null = null;
 
   constructor() {
-    this.dbManager = new DatabaseConnectionManager();
+    const config = getConfig();
+    this.client = createClient(
+      config.supabase.url,
+      config.supabase.serviceRoleKey,
+    );
   }
 
   /**
@@ -58,11 +63,9 @@ export class StrategyConfigLoader {
       return this.cachedConfig;
     }
 
-    const client = await this.dbManager.getClient();
-
     try {
       // Try to load active configuration
-      const { data, error } = await client
+      const { data, error } = await this.client
         .from("strategy_config")
         .select("*")
         .eq("is_active", true)
@@ -71,7 +74,7 @@ export class StrategyConfigLoader {
       if (error && error.code === "PGRST116") {
         // No configuration found, create default
         console.log("No configuration found, creating default configuration");
-        const defaultConfig = await this.createDefaultConfig(client);
+        const defaultConfig = await this.createDefaultConfig();
         this.cachedConfig = defaultConfig;
         return defaultConfig;
       }
@@ -245,7 +248,7 @@ export class StrategyConfigLoader {
   /**
    * Create default configuration per STRATEGY.md
    */
-  private async createDefaultConfig(client: unknown): Promise<StrategyConfig> {
+  private async createDefaultConfig(): Promise<StrategyConfig> {
     const defaultConfig: Omit<DatabaseStrategyConfig, "id" | "updated_at"> = {
       timeframe: "4h",
       drop_percentage: 0.05,
@@ -258,22 +261,8 @@ export class StrategyConfigLoader {
       is_active: false, // MUST be inactive by default
     };
 
-    const supabaseClient = client as {
-      from: (table: string) => {
-        insert: (data: unknown) => Promise<{ data: unknown; error: unknown }>;
-        select: (columns: string) => {
-          eq: (
-            column: string,
-            value: unknown,
-          ) => {
-            single: () => Promise<{ data: unknown; error: unknown }>;
-          };
-        };
-      };
-    };
-
     // Insert default configuration
-    const { data: insertedData, error: insertError } = await supabaseClient
+    const { error: insertError } = await this.client
       .from("strategy_config")
       .insert(defaultConfig);
 
@@ -284,7 +273,7 @@ export class StrategyConfigLoader {
     }
 
     // Fetch the inserted configuration
-    const { data: createdConfig, error: fetchError } = await supabaseClient
+    const { data: createdConfig, error: fetchError } = await this.client
       .from("strategy_config")
       .select("*")
       .eq("is_active", false)
