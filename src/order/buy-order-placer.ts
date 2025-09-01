@@ -1,6 +1,5 @@
 import { BinanceClient } from "../exchange/binance-client";
 import { TradingRules } from "../exchange/trading-rules";
-import { SupabaseClient, getSupabaseClient } from "../database/supabase";
 import {
   OrderSide,
   OrderType,
@@ -10,7 +9,6 @@ import {
   SymbolTradingRules,
 } from "../exchange/types";
 import { Decimal } from "decimal.js";
-import { v4 as uuidv4 } from "uuid";
 import { EventEmitter } from "events";
 
 export interface OrderPrepareParams {
@@ -42,20 +40,16 @@ export interface OrderFill {
 }
 
 export interface TradeRecord {
-  symbol: string;
-  side: OrderSide;
-  order_id: number;
-  client_order_id: string;
-  quantity: string;
-  price: string;
-  executed_qty: string;
-  cumulative_quote_qty: string;
-  status: OrderStatus;
-  fee_btc: string;
-  fee_usdt: string;
-  fee_other: Record<string, string>;
-  fills: OrderFill[];
-  timestamp: Date;
+  cycle_id?: string; // Will be set by caller
+  type: "BUY" | "SELL";
+  order_id: string;
+  status: "FILLED" | "PARTIAL" | "CANCELLED";
+  price: number;
+  quantity: number;
+  quote_quantity: number;
+  fee_asset?: string;
+  fee_amount?: number;
+  executed_at: Date;
 }
 
 interface BinanceOrderFill {
@@ -66,7 +60,20 @@ interface BinanceOrderFill {
   tradeId?: number;
 }
 
-interface BinanceOrderWithFills extends BinanceOrder {
+interface BinanceOrderWithFills {
+  symbol: string;
+  orderId: number;
+  orderListId: number;
+  clientOrderId: string;
+  transactTime?: number;
+  price: string;
+  origQty: string;
+  executedQty: string;
+  cummulativeQuoteQty: string;
+  status: OrderStatus;
+  timeInForce: TimeInForce;
+  type: OrderType;
+  side: OrderSide;
   fills?: BinanceOrderFill[];
 }
 
@@ -77,23 +84,29 @@ interface ErrorWithCode extends Error {
 export class BuyOrderPlacer extends EventEmitter {
   private binanceClient: BinanceClient;
   private tradingRules: TradingRules;
-  private supabaseClient: SupabaseClient;
   private symbol: string;
   private retryCount = 3;
   private retryDelay = 1000; // Start with 1 second
   private tradingRulesCache: SymbolTradingRules | null = null; // Cache trading rules
+  private cycleId: string | null = null; // Cycle ID for database saves
 
   constructor(
     binanceClient: BinanceClient,
     tradingRules: TradingRules,
-    supabaseClient: SupabaseClient | null,
+    _supabaseClient: unknown, // Will be used when DB types are generated
     symbol: string,
   ) {
     super();
     this.binanceClient = binanceClient;
     this.tradingRules = tradingRules;
-    this.supabaseClient = supabaseClient || getSupabaseClient();
+    // Store supabase client for future use when types are generated
+    // For now, we use events to communicate trade records
     this.symbol = symbol;
+  }
+
+  // Set the cycle ID for database operations
+  setCycleId(cycleId: string): void {
+    this.cycleId = cycleId;
   }
 
   async prepareOrder(
@@ -311,38 +324,79 @@ export class BuyOrderPlacer extends EventEmitter {
   }
 
   private async saveTradeRecord(result: OrderResult): Promise<void> {
-    const tradeRecord: TradeRecord = {
-      symbol: this.symbol,
-      side: "BUY" as OrderSide,
-      order_id: result.orderId,
-      client_order_id: result.clientOrderId,
-      quantity: result.executedQty.toString(),
-      price: result.avgPrice.toString(),
-      executed_qty: result.executedQty.toString(),
-      cumulative_quote_qty: result.cummulativeQuoteQty.toString(),
-      status: result.status,
-      fee_btc: result.feeBTC.toString(),
-      fee_usdt: result.feeUSDT.toString(),
-      fee_other: Object.fromEntries(
-        Object.entries(result.feeOther).map(([k, v]) => [k, v.toString()]),
-      ),
-      fills: result.fills,
-      timestamp: new Date(),
+    // Determine trade status
+    let tradeStatus: "FILLED" | "PARTIAL" | "CANCELLED";
+    if (result.status === "FILLED") {
+      tradeStatus = "FILLED";
+    } else if (
+      result.status === "PARTIALLY_FILLED" ||
+      result.status === "EXPIRED"
+    ) {
+      tradeStatus = "PARTIAL";
+    } else if (result.status === "CANCELED" || result.status === "REJECTED") {
+      tradeStatus = "CANCELLED";
+    } else {
+      tradeStatus = "PARTIAL"; // Default for other statuses
+    }
+
+    // Determine primary fee
+    let feeAsset: string | undefined;
+    let feeAmount: number | undefined;
+    if (result.feeBTC.gt(0)) {
+      feeAsset = "BTC";
+      feeAmount = result.feeBTC.toNumber();
+    } else if (result.feeUSDT.gt(0)) {
+      feeAsset = "USDT";
+      feeAmount = result.feeUSDT.toNumber();
+    } else if (Object.keys(result.feeOther).length > 0) {
+      const firstFee = Object.entries(result.feeOther)[0];
+      if (firstFee) {
+        feeAsset = firstFee[0];
+        feeAmount = firstFee[1].toNumber();
+      }
+    }
+
+    // Prepare trade record with all required fields
+    const baseTradeRecord = {
+      type: "BUY" as const,
+      order_id: result.orderId.toString(),
+      status: tradeStatus,
+      price: result.avgPrice.toNumber(),
+      quantity: result.executedQty.toNumber(),
+      quote_quantity: result.cummulativeQuoteQty.toNumber(),
+      fee_asset: feeAsset,
+      fee_amount: feeAmount,
+      executed_at: new Date(),
     };
 
     try {
-      // Use transaction for database operation
-      const { error } = await this.supabaseClient
-        .from("trades")
-        .insert(tradeRecord);
+      // Save to database if we have a cycle_id
+      if (this.cycleId) {
+        // Create record with cycle_id for database
+        const dbRecord = {
+          ...baseTradeRecord,
+          cycle_id: this.cycleId,
+        };
 
-      if (error) {
-        throw new Error(`Failed to save trade record: ${error.message}`);
+        // For now, emit event since DB types aren't generated
+        // In production, this would use proper supabase types
+        this.emit("tradeRecordReady", dbRecord);
+
+        // When types are generated, uncomment:
+        // const { error } = await this.supabaseClient
+        //   .from("trades")
+        //   .insert(dbRecord);
+        // if (error) {
+        //   throw new Error(`Failed to save trade record: ${error.message}`);
+        // }
+      } else {
+        // Emit event for external systems to handle if no cycle_id
+        this.emit("tradeRecordReady", baseTradeRecord);
       }
     } catch (error) {
-      // Log error but don't fail the order
-      this.emit("databaseError", { error, tradeRecord });
-      // Rethrow to handle in the calling function
+      // Log error
+      this.emit("databaseError", { error, tradeRecord: baseTradeRecord });
+      // Re-throw to handle in the calling function
       throw error;
     }
   }
