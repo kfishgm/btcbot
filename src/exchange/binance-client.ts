@@ -13,6 +13,7 @@ import type {
   BinanceTrade,
   BinanceListenKey,
   CreateOrderParams,
+  BinanceExchangeInfo,
 } from "./types";
 
 export class BinanceClient {
@@ -354,6 +355,18 @@ export class BinanceClient {
     }
 
     throw lastError || new Error("Request failed after retries");
+  }
+
+  async getExchangeInfo(symbol?: string): Promise<BinanceExchangeInfo> {
+    const params: Record<string, unknown> = {};
+    if (symbol) {
+      params.symbol = symbol;
+    }
+    return this.makeRequest<BinanceExchangeInfo>(
+      "/api/v3/exchangeInfo",
+      "GET",
+      params,
+    );
   }
 
   async getPrice(symbol: string): Promise<BinanceTickerPrice> {
