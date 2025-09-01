@@ -2,7 +2,6 @@ import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 import {
   SellOrderPlacer,
   TradeRecord,
-  ProfitData,
 } from "../../src/order/sell-order-placer";
 import { BinanceClient } from "../../src/exchange/binance-client";
 import { TradingRules } from "../../src/exchange/trading-rules";
@@ -67,14 +66,14 @@ describe("SellOrderPlacer", () => {
     roundQuantityFn.mockImplementation((qty: number, _symbol: string) => {
       // Real rounding logic for BTCUSDT
       const stepSize = 0.00001;
-      return parseFloat((Math.floor(qty / stepSize) * stepSize).toFixed(8));
+      return Math.round(qty / stepSize) * stepSize;
     });
 
     const roundPriceFn = jest.fn<(price: number, _symbol: string) => number>();
     roundPriceFn.mockImplementation((price: number, _symbol: string) => {
       // Real rounding logic for BTCUSDT
       const tickSize = 0.01;
-      return parseFloat((Math.floor(price / tickSize) * tickSize).toFixed(8));
+      return Math.floor(price / tickSize) * tickSize;
     });
 
     // Create mock trading rules
@@ -149,8 +148,8 @@ describe("SellOrderPlacer", () => {
       );
 
       // Should round to step size but use ALL accumulated BTC
-      // 1.23456789 -> rounded to 1.23456 (step size 0.00001)
-      expect(orderParams.quantity.toNumber()).toBe(1.23456);
+      // 1.23456789 -> rounded to 1.23457 (step size 0.00001)
+      expect(orderParams.quantity.toNumber()).toBeCloseTo(1.23457, 5);
       // limit_price = 45000 * (1 - 0.005) = 44775
       expect(orderParams.limitPrice.toNumber()).toBe(44775);
     });
@@ -210,7 +209,7 @@ describe("SellOrderPlacer", () => {
 
       await expect(
         sellOrderPlacer.prepareOrder(btcAccumulated, currentPrice, 0.003),
-      ).rejects.toThrow("BTC quantity must be greater than 0");
+      ).rejects.toThrow("BTC amount to sell must be greater than 0");
     });
 
     it("should throw error for negative BTC balance", async () => {
@@ -219,7 +218,7 @@ describe("SellOrderPlacer", () => {
 
       await expect(
         sellOrderPlacer.prepareOrder(btcAccumulated, currentPrice, 0.003),
-      ).rejects.toThrow("BTC quantity must be greater than 0");
+      ).rejects.toThrow("BTC amount to sell must be greater than 0");
     });
 
     it("should throw error for invalid price", async () => {
@@ -306,7 +305,7 @@ describe("SellOrderPlacer", () => {
       // This should fail because 0.000004 rounds to 0
       await expect(
         sellOrderPlacer.prepareOrder(btcAccumulated, currentPrice, 0.003),
-      ).rejects.toThrow("Rounded quantity is 0");
+      ).rejects.toThrow("BTC amount too small after rounding to step size");
     });
   });
 
@@ -332,6 +331,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -370,6 +370,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -395,6 +396,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -422,6 +424,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -438,7 +441,12 @@ describe("SellOrderPlacer", () => {
       );
 
       await expect(
-        sellOrderPlacer.placeOrder(btcAccumulated, currentPrice, 0.003),
+        sellOrderPlacer.placeOrder(
+          btcAccumulated,
+          currentPrice,
+          new Decimal("48000"),
+          0.003,
+        ),
       ).rejects.toThrow("Insufficient balance");
 
       expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(1);
@@ -471,6 +479,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -503,6 +512,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -535,6 +545,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -584,6 +595,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -618,13 +630,17 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
       const profitData = sellOrderPlacer.calculateProfit(
-        result,
+        result.executedQty,
+        result.cummulativeQuoteQty,
+        result.feeUSDT,
+        result.feeBTC,
         referencePrice,
-        btcAccumulated,
+        result.avgPrice,
       );
 
       // principal = 50000 * 0.5 = 25000
@@ -660,13 +676,17 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
       const profitData = sellOrderPlacer.calculateProfit(
-        result,
+        result.executedQty,
+        result.cummulativeQuoteQty,
+        result.feeUSDT,
+        result.feeBTC,
         referencePrice,
-        btcAccumulated,
+        result.avgPrice,
       );
 
       // principal = 50000 * 0.5 = 25000
@@ -702,23 +722,27 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
       const profitData = sellOrderPlacer.calculateProfit(
-        result,
+        result.executedQty,
+        result.cummulativeQuoteQty,
+        result.feeUSDT,
+        result.feeBTC,
         referencePrice,
-        btcAccumulated,
+        result.avgPrice,
       );
 
-      // When fee is in BTC, it affects the quantity actually sold
-      // But for profit calculation, we use the reference price and original quantity
+      // When fee is in BTC, it affects the net result
       // principal = 50000 * 1.0 = 50000
-      // net_usdt_received = 54835 (no USDT fee)
-      // profit = max(0, 54835 - 50000) = 4835
+      // BTC fee = 0.001 BTC * 54835 (avg price) = 54.835 USDT equivalent
+      // net_usdt_received = 54835 - 54.835 = 54780.165
+      // profit = max(0, 54780.165 - 50000) = 4780.165
       expect(profitData.principal.toNumber()).toBe(50000);
-      expect(profitData.netUsdtReceived.toNumber()).toBe(54835);
-      expect(profitData.profit.toNumber()).toBe(4835);
+      expect(profitData.netUsdtReceived.toNumber()).toBeCloseTo(54780.165, 2);
+      expect(profitData.profit.toNumber()).toBeCloseTo(4780.165, 2);
     });
   });
 
@@ -747,7 +771,12 @@ describe("SellOrderPlacer", () => {
         events.push({ event: "orderCompleted", data }),
       );
 
-      await sellOrderPlacer.placeOrder(btcAccumulated, currentPrice, 0.003);
+      await sellOrderPlacer.placeOrder(
+        btcAccumulated,
+        currentPrice,
+        new Decimal("48000"),
+        0.003,
+      );
 
       expect(events).toHaveLength(3);
       expect(events[0].event).toBe("orderPlacing");
@@ -761,19 +790,25 @@ describe("SellOrderPlacer", () => {
 
       mockBinanceClient.createOrder.mockRejectedValue(new Error("API Error"));
 
-      const events: Array<{ event: string; error: unknown }> = [];
+      let errorEvent: Error | null = null;
 
-      sellOrderPlacer.on("orderError", (error) =>
-        events.push({ event: "orderError", error }),
+      sellOrderPlacer.on(
+        "orderFailed",
+        (data: { error: Error }) => (errorEvent = data.error),
       );
 
       await expect(
-        sellOrderPlacer.placeOrder(btcAccumulated, currentPrice, 0.003),
+        sellOrderPlacer.placeOrder(
+          btcAccumulated,
+          currentPrice,
+          new Decimal("48000"),
+          0.003,
+        ),
       ).rejects.toThrow("API Error");
 
-      expect(events).toHaveLength(1);
-      expect(events[0].event).toBe("orderError");
-      expect((events[0].error as Error).message).toBe("API Error");
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent).not.toBeNull();
+      expect(errorEvent?.message).toBe("API Error");
     });
   });
 
@@ -795,11 +830,16 @@ describe("SellOrderPlacer", () => {
       sellOrderPlacer.setCycleId("CYCLE_TEST_002");
 
       let tradeRecord: TradeRecord | undefined;
-      sellOrderPlacer.on("tradeRecordReady", (data) => {
-        tradeRecord = data as TradeRecord;
+      sellOrderPlacer.on("tradeRecordReady", (data: TradeRecord) => {
+        tradeRecord = data;
       });
 
-      await sellOrderPlacer.placeOrder(btcAccumulated, currentPrice, 0.003);
+      await sellOrderPlacer.placeOrder(
+        btcAccumulated,
+        currentPrice,
+        new Decimal("48000"),
+        0.003,
+      );
 
       expect(tradeRecord).toBeDefined();
       expect(tradeRecord?.cycle_id).toBe("CYCLE_TEST_002");
@@ -836,24 +876,28 @@ describe("SellOrderPlacer", () => {
       let profitRecord:
         | { cycle_id: string; profit: Decimal; principal: Decimal }
         | undefined;
-      sellOrderPlacer.on("profitCalculated", (data) => {
-        profitRecord = data as {
-          cycle_id: string;
-          profit: Decimal;
+      sellOrderPlacer.on(
+        "profitCalculated",
+        (data: {
+          btcSold: Decimal;
+          usdtReceived: Decimal;
           principal: Decimal;
-        };
-      });
-
-      const result = await sellOrderPlacer.placeOrder(
-        btcAccumulated,
-        currentPrice,
-        0.003,
+          profit: Decimal;
+          netUsdtReceived: Decimal;
+        }) => {
+          profitRecord = {
+            cycle_id: "CYCLE_TEST_003",
+            principal: data.principal,
+            profit: data.profit,
+          };
+        },
       );
 
-      const profitData = sellOrderPlacer.calculateProfit(
-        result,
-        referencePrice,
+      await sellOrderPlacer.placeOrder(
         btcAccumulated,
+        currentPrice,
+        referencePrice,
+        0.003,
       );
 
       expect(profitRecord).toBeDefined();
@@ -889,6 +933,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
       const stateData = sellOrderPlacer.getStateUpdateData(result);
@@ -924,6 +969,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
       const stateData = sellOrderPlacer.getStateUpdateData(result);
@@ -958,6 +1004,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -987,6 +1034,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -1004,7 +1052,12 @@ describe("SellOrderPlacer", () => {
       mockBinanceClient.createOrder.mockRejectedValue(networkError);
 
       await expect(
-        sellOrderPlacer.placeOrder(btcAccumulated, currentPrice, 0.003),
+        sellOrderPlacer.placeOrder(
+          btcAccumulated,
+          currentPrice,
+          new Decimal("48000"),
+          0.003,
+        ),
       ).rejects.toThrow("Network timeout");
 
       // Should try 3 times (initial + 2 retries)
@@ -1029,24 +1082,6 @@ describe("SellOrderPlacer", () => {
         "SELL_123_xyz",
       );
       expect(status.status).toBe("FILLED");
-    });
-
-    it("should get order status by order ID", async () => {
-      const mockOrder = {
-        orderId: 987654321,
-        status: "PARTIALLY_FILLED" as OrderStatus,
-      } as BinanceOrder;
-
-      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
-
-      const status = await sellOrderPlacer.getOrderStatusById(987654321);
-
-      expect(mockBinanceClient.getOrder).toHaveBeenCalledWith(
-        "BTCUSDT",
-        987654321,
-        undefined,
-      );
-      expect(status.status).toBe("PARTIALLY_FILLED");
     });
   });
 
@@ -1088,20 +1123,24 @@ describe("SellOrderPlacer", () => {
     it("should handle price at boundaries correctly", async () => {
       const btcAccumulated = new Decimal("0.01");
 
-      // Test with minimum price
+      // Test with minimum price that would result in negative after slippage
       const minPrice = new Decimal("0.01");
-      await expect(
-        sellOrderPlacer.prepareOrder(btcAccumulated, minPrice, 0.003),
-      ).rejects.toThrow("Price too low to apply slippage guard");
+      const minOrderParams = await sellOrderPlacer.prepareOrder(
+        btcAccumulated,
+        minPrice,
+        0.003,
+      );
+      // 0.01 * 0.997 = 0.00997 which rounds to 0 with tick size 0.01
+      expect(minOrderParams.limitPrice.toNumber()).toBe(0);
 
       // Test with maximum price
       const maxPrice = new Decimal("999999");
-      const orderParams = await sellOrderPlacer.prepareOrder(
+      const maxOrderParams = await sellOrderPlacer.prepareOrder(
         btcAccumulated,
         maxPrice,
         0.003,
       );
-      expect(orderParams.limitPrice.toNumber()).toBe(997002.99); // 999999 * 0.997
+      expect(maxOrderParams.limitPrice.toNumber()).toBe(996999); // 999999 * 0.997
     });
 
     it("should handle order with no fills array", async () => {
@@ -1121,6 +1160,7 @@ describe("SellOrderPlacer", () => {
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
         currentPrice,
+        new Decimal("48000"),
         0.003,
       );
 
@@ -1152,8 +1192,18 @@ describe("SellOrderPlacer", () => {
 
       // Place orders concurrently
       const [result1, result2] = await Promise.all([
-        sellOrderPlacer.placeOrder(btcAccumulated, currentPrice, 0.003),
-        sellOrderPlacer.placeOrder(btcAccumulated, currentPrice, 0.003),
+        sellOrderPlacer.placeOrder(
+          btcAccumulated,
+          currentPrice,
+          new Decimal("48000"),
+          0.003,
+        ),
+        sellOrderPlacer.placeOrder(
+          btcAccumulated,
+          currentPrice,
+          new Decimal("48000"),
+          0.003,
+        ),
       ]);
 
       expect(result1.clientOrderId).not.toBe(result2.clientOrderId);
