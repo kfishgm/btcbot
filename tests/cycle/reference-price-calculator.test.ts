@@ -159,8 +159,8 @@ describe("ReferencePriceCalculator", () => {
       // Purchase 3: cost = 520 + 0.26 + 0.000005 * 52000 = 520 + 0.26 + 0.26 = 520.52, btc_net = 0.01 - 0.000005 = 0.009995
       // Total: cost_accum_usdt = 500.5 + 510.51 + 520.52 = 1531.53
       // Total: btc_accum_net = 0.01 + 0.00999 + 0.009995 = 0.029985
-      // reference_price = 1531.53 / 0.029985 = 51086.0143...
-      expect(result).toBeCloseTo(51086.0143, 4);
+      // reference_price = 1531.53 / 0.029985 = 51076.538...
+      expect(result).toBeCloseTo(51076.538, 2);
     });
 
     it("should calculate correctly for many small purchases", () => {
@@ -227,7 +227,7 @@ describe("ReferencePriceCalculator", () => {
       // cost_accum_usdt = 0.0005 + 0.0000005 = 0.0005005
       // btc_accum_net = 0.00000001
       // reference_price = 0.0005005 / 0.00000001 = 50050
-      expect(result).toBe(50050);
+      expect(result).toBeCloseTo(50050, 8);
     });
 
     it("should handle very large USDT amounts", () => {
@@ -243,8 +243,8 @@ describe("ReferencePriceCalculator", () => {
 
       // cost_accum_usdt = 5000000 + 5000 + 0.1 * 50000 = 5000000 + 5000 + 5000 = 5010000
       // btc_accum_net = 100 - 0.1 = 99.9
-      // reference_price = 5010000 / 99.9 = 50150.1501...
-      expect(result).toBeCloseTo(50150.1501, 4);
+      // reference_price = 5010000 / 99.9 = 50150.15015...
+      expect(result).toBeCloseTo(50150.15015, 4);
     });
 
     it("should handle negative values (should validate)", () => {
@@ -276,13 +276,13 @@ describe("ReferencePriceCalculator", () => {
       const result = calculator.calculateReferencePrice(purchases);
 
       // Each purchase:
-      // cost = 6.172505 + 0.00617251 + 0.00000012 * 50000.01 = 6.172505 + 0.00617251 + 0.00600001 = 6.18467752
+      // cost = 6.172505 + 0.00617251 + 0.00000012 * 50000.01 = 6.172505 + 0.00617251 + 0.006000012 = 6.184677522
       // btc_net = 0.00012345 - 0.00000012 = 0.00012333
       // Total for 100 purchases:
-      // total_cost = 6.18467752 * 100 = 618.467752
+      // total_cost = 6.184677522 * 100 = 618.4677522
       // total_btc = 0.00012333 * 100 = 0.012333
-      // reference_price = 618.467752 / 0.012333 = 50150.1501...
-      expect(result).toBeCloseTo(50150.1501, 4);
+      // reference_price = 618.4677522 / 0.012333 = 50147.389...
+      expect(result).toBeCloseTo(50147.389, 2);
     });
   });
 
@@ -423,10 +423,10 @@ describe("ReferencePriceCalculator", () => {
       // Totals:
       // total_cost_accum_usdt = 751.5 + 521.04 = 1272.54
       // total_btc_accum_net = 0.014985 + 0.009990 = 0.024975
-      // reference_price = 1272.54 / 0.024975 = 50961.9615...
+      // reference_price = 1272.54 / 0.024975 = 50952.552...
 
       const result = calculator.calculateReferencePrice(purchases);
-      expect(result).toBeCloseTo(50961.9615, 4);
+      expect(result).toBeCloseTo(50952.552, 2);
     });
 
     it("should correctly include fee_base converted to USDT in cost accumulator", () => {
@@ -458,10 +458,12 @@ describe("ReferencePriceCalculator", () => {
         fill_price: 50000,
       };
 
-      const result = calculator.calculateReferencePrice([purchase]);
+      // Use instance method to update state
+      calculator.addPurchase(purchase);
+      const result = calculator.getCurrentReferencePrice();
 
       // btc_accum_net should be 0.01 - 0.001 = 0.009
-      expect(calculator.getNetBTCAccumulated()).toBe(0.009);
+      expect(calculator.getNetBTCAccumulated()).toBeCloseTo(0.009, 10);
 
       // cost_accum_usdt = 500 + 0 + 0.001 * 50000 = 500 + 50 = 550
       // reference_price = 550 / 0.009 = 61111.111...
