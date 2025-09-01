@@ -73,7 +73,7 @@ export class StrategyConfigLoader {
 
       if (error && error.code === "PGRST116") {
         // No configuration found, create default
-        console.log("No configuration found, creating default configuration");
+        // No configuration found, create default
         const defaultConfig = await this.createDefaultConfig();
         this.cachedConfig = defaultConfig;
         return defaultConfig;
@@ -96,7 +96,7 @@ export class StrategyConfigLoader {
       // Validate configuration
       this.validateConfig(config);
 
-      console.log("Strategy configuration loaded successfully");
+      // Configuration loaded successfully
       this.cachedConfig = config;
       return config;
     } catch (error) {
@@ -285,7 +285,7 @@ export class StrategyConfigLoader {
       );
     }
 
-    console.log("Default configuration created with is_active=false");
+    // Default configuration created with is_active=false
     return this.convertFromDatabase(createdConfig as DatabaseStrategyConfig);
   }
 
