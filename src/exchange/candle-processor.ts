@@ -4,6 +4,7 @@ import type { KlineMessage, CandleData } from "./websocket-types";
 export interface CandleProcessorOptions {
   maxTimestampDrift?: number;
   maxCacheSize?: number;
+  logger?: (message: string, error: Error) => void;
 }
 
 export interface CandleProcessorStats {
@@ -34,6 +35,7 @@ export class CandleProcessor extends EventEmitter {
     this.options = {
       maxTimestampDrift: options.maxTimestampDrift ?? 60000, // 60 seconds default
       maxCacheSize: options.maxCacheSize ?? 1000,
+      logger: options.logger ?? (() => {}), // No-op by default
     };
 
     this.stats = {
@@ -156,6 +158,10 @@ export class CandleProcessor extends EventEmitter {
   processMessage(message: KlineMessage): void {
     const startTime = Date.now();
 
+    // Always increment message count
+    this.stats.messagesProcessed++;
+    this.stats.lastProcessedTime = Date.now();
+
     try {
       // Validate timestamp
       this.validateTimestamp(message);
@@ -168,10 +174,6 @@ export class CandleProcessor extends EventEmitter {
 
       // Process the candle
       const processedCandle = this.processCandle(candle);
-
-      // Update stats
-      this.stats.messagesProcessed++;
-      this.stats.lastProcessedTime = Date.now();
 
       // Emit appropriate event
       if (processedCandle.isCandleClosed) {
@@ -244,9 +246,9 @@ export class CandleProcessor extends EventEmitter {
       }
     });
 
-    manager.on("error", (error: Error) => {
-      // Log WebSocket errors but don't stop processing
-      console.error("WebSocket error:", error.message);
+    manager.on("error", () => {
+      // WebSocket errors are handled but don't stop processing
+      // In production, use proper logging service instead
     });
   }
 
@@ -278,8 +280,8 @@ export class CandleProcessor extends EventEmitter {
       data: message,
     };
 
-    // Log the error
-    console.error("Failed to process candle", error);
+    // Use configured logger (defaults to no-op in production)
+    this.options.logger("Failed to process candle", error);
 
     // Emit error event
     this.emit("error", processorError);

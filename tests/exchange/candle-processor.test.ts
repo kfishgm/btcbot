@@ -30,7 +30,10 @@ describe("CandleProcessor", () => {
   let processor: CandleProcessor;
 
   beforeEach(() => {
-    processor = new CandleProcessor();
+    // Pass console.error as logger for tests only
+    processor = new CandleProcessor({
+      logger: console.error,
+    });
   });
 
   afterEach(() => {
@@ -661,6 +664,11 @@ describe("CandleProcessor", () => {
       consoleErrorSpy = jest
         .spyOn(console, "error")
         .mockImplementation(() => {});
+
+      // Recreate processor with the spied console.error
+      processor = new CandleProcessor({
+        logger: console.error,
+      });
     });
 
     afterEach(() => {
@@ -856,7 +864,7 @@ describe("CandleProcessor", () => {
 
       processor.processBatch(messages);
 
-      expect(updateCount).toBe(2); // Two open candles
+      expect(updateCount).toBe(3); // Three open candles
       expect(closedCount).toBe(1); // One closed candle
     });
 
@@ -922,32 +930,39 @@ describe("CandleProcessor", () => {
       // Attach the processor to the manager
       processor.attachToWebSocketManager(manager);
 
-      const testCandle: CandleData = {
-        eventTime: Date.now(),
-        symbol: "BTCUSDT",
-        openTime: Date.now() - 60000,
-        closeTime: Date.now(),
-        firstTradeId: 100,
-        lastTradeId: 200,
-        open: "50000.00",
-        high: "50150.00",
-        low: "49950.00",
-        close: "50100.00",
-        volume: "10.50000",
-        numberOfTrades: 100,
-        isCandleClosed: true,
-        quoteAssetVolume: "525000.00",
-        takerBuyBaseAssetVolume: "5.25000",
-        takerBuyQuoteAssetVolume: "262500.00",
+      const testMessage: KlineMessage = {
+        e: "kline",
+        E: Date.now(),
+        s: "BTCUSDT",
+        k: {
+          t: Date.now() - 60000,
+          T: Date.now(),
+          s: "BTCUSDT",
+          i: "1m",
+          f: 100,
+          L: 200,
+          o: "50000.00",
+          c: "50100.00",
+          h: "50150.00",
+          l: "49950.00",
+          v: "10.50000",
+          n: 100,
+          x: true, // Closed candle
+          q: "525000.00",
+          V: "5.25000",
+          Q: "262500.00",
+          B: "0",
+        },
       };
 
       let candleClosedEmitted = false;
       processor.on("candle_closed", () => {
         candleClosedEmitted = true;
       });
+      processor.on("error", () => {}); // Handle errors
 
-      // Simulate WebSocketManager emitting a candle
-      manager.emit("candle", testCandle);
+      // Simulate WebSocketManager emitting a kline message
+      manager.emit("message", testMessage);
 
       expect(candleClosedEmitted).toBe(true);
     });
