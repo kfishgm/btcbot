@@ -346,6 +346,23 @@ export class Logger {
       }
     }
 
+    // In test environment with file transport, also write synchronously
+    if (
+      process.env.NODE_ENV === "test" &&
+      this.config.transports?.includes("file") &&
+      this.config.filePath
+    ) {
+      const logDir = path.dirname(this.config.filePath);
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+      const logData =
+        this.config.format === "json"
+          ? JSON.stringify({ timestamp, level, message, ...meta }) + "\n"
+          : `${timestamp} [${level.toUpperCase()}]: ${message}${Object.keys(meta).length > 0 ? " " + JSON.stringify(meta, null, 2) : ""}\n`;
+      fs.appendFileSync(this.config.filePath, logData);
+    }
+
     // Also log through Winston for actual transport handling
     this.winston.log({
       level,
