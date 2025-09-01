@@ -434,13 +434,11 @@ export class ConnectionManager extends EventEmitter {
     let client: SupabaseClient<Database> | null = null;
 
     // Track this operation so it can be cancelled during force shutdown
-    let operationReject: ((error: Error) => void) | null = null;
+    let activeOp: { reject: (reason?: unknown) => void } | undefined;
     const operationPromise = new Promise<T>((_resolve, reject) => {
-      operationReject = reject;
+      activeOp = { reject };
+      this.activeOperations.add(activeOp);
     });
-
-    const activeOp = { reject: operationReject! };
-    this.activeOperations.add(activeOp);
 
     try {
       client = await this.acquireConnection(options?.timeout);
@@ -483,7 +481,9 @@ export class ConnectionManager extends EventEmitter {
       throw this.wrapError(error as Error, "unknown");
     } finally {
       // Clean up active operation tracking
-      this.activeOperations.delete(activeOp);
+      if (activeOp) {
+        this.activeOperations.delete(activeOp);
+      }
 
       if (client) {
         this.releaseConnection(client);

@@ -124,8 +124,10 @@ describe("BinanceClient", () => {
       await client.getAccountInfo();
 
       // Check that API key header was set
-      const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
-      const headers = lastCall![1]?.headers as Headers;
+      const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as
+        | [string, RequestInit?]
+        | undefined;
+      const headers = lastCall?.[1]?.headers as Headers;
       expect(headers.get("X-MBX-APIKEY")).toBe(TEST_API_KEY);
     }, 10000);
   });
@@ -183,8 +185,10 @@ describe("BinanceClient", () => {
 
       await client.getAccountInfo();
 
-      const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
-      const url = lastCall![0] as string;
+      const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as
+        | [string, RequestInit?]
+        | undefined;
+      const url = lastCall?.[0] as string;
       expect(url).toContain("timestamp=");
       expect(url).toContain("signature=");
     });

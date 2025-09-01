@@ -17,6 +17,12 @@ export type {
   CandleProcessorStats,
   CandleProcessorError,
 } from "./candle-processor";
+export { HistoricalCandleManager } from "./historical-candle-manager";
+export type {
+  HistoricalCandleConfig,
+  CandleStatistics,
+  CandleMetrics,
+} from "./historical-candle-manager";
 
 // Re-export all types
 export * from "./types";
