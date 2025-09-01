@@ -198,6 +198,42 @@ export type Database = {
           },
         ];
       };
+      pause_states: {
+        Row: {
+          id: number;
+          status: string;
+          pause_reason: string;
+          pause_metadata: Json;
+          paused_at: string;
+          resumed_at: string | null;
+          resume_metadata: Json | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: number;
+          status: string;
+          pause_reason: string;
+          pause_metadata?: Json;
+          paused_at?: string;
+          resumed_at?: string | null;
+          resume_metadata?: Json | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: number;
+          status?: string;
+          pause_reason?: string;
+          pause_metadata?: Json;
+          paused_at?: string;
+          resumed_at?: string | null;
+          resume_metadata?: Json | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -237,6 +273,20 @@ export type Database = {
           p_bot_id: string;
         };
         Returns: Json;
+      };
+      get_account_balances: {
+        Args: {};
+        Returns: {
+          usdt_balance: number;
+          btc_balance: number;
+        };
+      };
+      check_exchange_connectivity: {
+        Args: {};
+        Returns: {
+          connected: boolean;
+          latency_ms: number;
+        };
       };
     };
     Enums: {
