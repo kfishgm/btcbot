@@ -188,7 +188,7 @@ describe("ConnectionManager", () => {
       await manager.connect();
 
       // Simulate 10 concurrent queries
-      const queries = Array.from({ length: 10 }, (_, i) =>
+      const queries = Array.from({ length: 10 }, () =>
         manager.executeQuery(async (client) => {
           return client.from("strategy_config").select("*");
         }),
@@ -662,6 +662,7 @@ describe("ConnectionManager", () => {
 
       // Should wait for query to complete
       await shutdownPromise;
+      await longQuery; // Verify query completed
       expect(queryCompleted).toBe(true);
       expect(manager.getState()).toBe("closed");
     });
@@ -689,6 +690,8 @@ describe("ConnectionManager", () => {
       // Force shutdown after 100ms
       await manager.shutdown({ gracefulTimeout: 100 });
 
+      // Verify query was terminated
+      await longQuery;
       expect(queryCompleted).toBe(false);
       expect(manager.getState()).toBe("closed");
     });
@@ -926,7 +929,7 @@ describe("ConnectionManager", () => {
 
     it("should support custom retry strategies", async () => {
       // This will fail - custom retry strategies not implemented
-      const customRetry = jest.fn().mockImplementation((attempt: number) => {
+      const customRetry = jest.fn().mockImplementation((_attempt: number) => {
         // Custom logic: fixed delay of 50ms
         return 50;
       });
