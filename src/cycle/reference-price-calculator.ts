@@ -1,8 +1,15 @@
 /**
  * Reference Price Calculator
+ *
  * Implements TRD-001: Calculate weighted average reference price including fees
+ *
  * Formula from STRATEGY.md:
- * reference_price = cost_accum_usdt / btc_accum_net
+ * - reference_price = cost_accum_usdt / btc_accum_net
+ * - cost_accum_usdt = Σ(usdt_spent + fee_usdt + fee_btc * fill_price)
+ * - btc_accum_net = Σ(btc_filled - fee_btc)
+ *
+ * When no BTC is held (btc_accum_net = 0), returns the ATH price.
+ * Tracks fees in both BTC and USDT currencies.
  */
 
 export interface Purchase {
@@ -21,6 +28,47 @@ export class ReferencePriceCalculator {
 
   constructor(athPrice: number = 0) {
     this.athPrice = athPrice;
+  }
+
+  /**
+   * Validate purchase data
+   * @param purchase Purchase to validate
+   * @throws Error if any values are negative
+   */
+  private static validatePurchase(purchase: Purchase): void {
+    const errors: string[] = [];
+
+    if (purchase.usdt_spent < 0) errors.push("usdt_spent");
+    if (purchase.btc_filled < 0) errors.push("btc_filled");
+    if (purchase.fee_usdt < 0) errors.push("fee_usdt");
+    if (purchase.fee_btc < 0) errors.push("fee_btc");
+    if (purchase.fill_price < 0) errors.push("fill_price");
+
+    if (errors.length > 0) {
+      throw new Error("Invalid purchase data: negative values not allowed");
+    }
+  }
+
+  /**
+   * Calculate cost for a single purchase including fees
+   * @param purchase Purchase data
+   * @returns Total cost in USDT including all fees
+   */
+  private static calculatePurchaseCost(purchase: Purchase): number {
+    return (
+      purchase.usdt_spent +
+      purchase.fee_usdt +
+      purchase.fee_btc * purchase.fill_price
+    );
+  }
+
+  /**
+   * Calculate net BTC received after fees
+   * @param purchase Purchase data
+   * @returns Net BTC amount after subtracting fees
+   */
+  private static calculateNetBtc(purchase: Purchase): number {
+    return purchase.btc_filled - purchase.fee_btc;
   }
 
   /**
@@ -67,27 +115,9 @@ export class ReferencePriceCalculator {
     let btcAccumNet = 0;
 
     for (const purchase of purchases) {
-      // Validate input
-      if (
-        purchase.usdt_spent < 0 ||
-        purchase.btc_filled < 0 ||
-        purchase.fee_usdt < 0 ||
-        purchase.fee_btc < 0 ||
-        purchase.fill_price < 0
-      ) {
-        throw new Error("Invalid purchase data: negative values not allowed");
-      }
-
-      // Calculate cost accumulator
-      // cost_accum_usdt = Σ(usdt_spent + fee_usdt + fee_btc * fill_price)
-      costAccumUsdt +=
-        purchase.usdt_spent +
-        purchase.fee_usdt +
-        purchase.fee_btc * purchase.fill_price;
-
-      // Calculate net BTC
-      // btc_accum_net = Σ(btc_filled - fee_btc)
-      btcAccumNet += purchase.btc_filled - purchase.fee_btc;
+      ReferencePriceCalculator.validatePurchase(purchase);
+      costAccumUsdt += ReferencePriceCalculator.calculatePurchaseCost(purchase);
+      btcAccumNet += ReferencePriceCalculator.calculateNetBtc(purchase);
     }
 
     // Handle division by zero
@@ -106,25 +136,12 @@ export class ReferencePriceCalculator {
    * @param purchase Purchase transaction to add
    */
   public addPurchase(purchase: Purchase): void {
-    // Validate input
-    if (
-      purchase.usdt_spent < 0 ||
-      purchase.btc_filled < 0 ||
-      purchase.fee_usdt < 0 ||
-      purchase.fee_btc < 0 ||
-      purchase.fill_price < 0
-    ) {
-      throw new Error("Invalid purchase data: negative values not allowed");
-    }
+    ReferencePriceCalculator.validatePurchase(purchase);
 
-    // Update cost accumulator
+    // Update accumulators using helper methods
     this.costAccumUsdt +=
-      purchase.usdt_spent +
-      purchase.fee_usdt +
-      purchase.fee_btc * purchase.fill_price;
-
-    // Update net BTC
-    this.btcAccumNet += purchase.btc_filled - purchase.fee_btc;
+      ReferencePriceCalculator.calculatePurchaseCost(purchase);
+    this.btcAccumNet += ReferencePriceCalculator.calculateNetBtc(purchase);
 
     // Mark that we have purchases
     this.hasPurchases = true;
