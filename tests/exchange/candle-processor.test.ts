@@ -693,7 +693,9 @@ describe("CandleProcessor", () => {
         },
       };
 
-      // This will fail - processMessage with error handling doesn't exist yet
+      // Add error handler to prevent unhandled error
+      processor.on("error", () => {});
+
       processor.processMessage(invalidCandle);
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -793,6 +795,7 @@ describe("CandleProcessor", () => {
       processor.on("candle_closed", () => {
         closedCandleReceived = true;
       });
+      processor.on("error", () => {}); // Handle errors silently
 
       // Process invalid candle first (should not crash)
       processor.processMessage(invalidCandle);
@@ -820,6 +823,7 @@ describe("CandleProcessor", () => {
         },
       ];
 
+      processor.on("error", () => {}); // Handle errors silently
       invalidCandles.forEach((candle) => processor.processMessage(candle));
 
       const stats = processor.getStats();
@@ -848,8 +852,8 @@ describe("CandleProcessor", () => {
 
       processor.on("candle_update", () => updateCount++);
       processor.on("candle_closed", () => closedCount++);
+      processor.on("error", () => {}); // Handle errors silently
 
-      // This will fail - processBatch method doesn't exist yet
       processor.processBatch(messages);
 
       expect(updateCount).toBe(2); // Two open candles
@@ -952,6 +956,9 @@ describe("CandleProcessor", () => {
   describe("Performance and Memory Management", () => {
     it("should not accumulate memory when processing many messages", () => {
       const initialMemory = process.memoryUsage().heapUsed;
+
+      // Add error handler to prevent unhandled errors
+      processor.on("error", () => {}); // Handle errors silently
 
       // Process many messages
       for (let i = 0; i < 10000; i++) {

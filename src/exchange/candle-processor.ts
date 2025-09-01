@@ -137,7 +137,7 @@ export class CandleProcessor extends EventEmitter {
     const high = parseFloat(k.h);
     const low = parseFloat(k.l);
     if (high < low) {
-      throw new Error(`Invalid price range: high (${high}) < low (${low})`);
+      throw new Error("Invalid data: high price is less than low price");
     }
 
     // Validate open/close within high/low range
@@ -145,11 +145,11 @@ export class CandleProcessor extends EventEmitter {
     const close = parseFloat(k.c);
 
     if (open > high || open < low) {
-      throw new Error(`Open price (${open}) outside high/low range`);
+      throw new Error("Invalid data: open price outside high/low range");
     }
 
     if (close > high || close < low) {
-      throw new Error(`Close price (${close}) outside high/low range`);
+      throw new Error("Invalid data: close price outside high/low range");
     }
   }
 
@@ -279,7 +279,7 @@ export class CandleProcessor extends EventEmitter {
     };
 
     // Log the error
-    console.error(`CandleProcessor error: ${error.message}`);
+    console.error("Failed to process candle", error);
 
     // Emit error event
     this.emit("error", processorError);
@@ -294,7 +294,10 @@ export class CandleProcessor extends EventEmitter {
     if (error.message.includes("zero volume")) {
       return "ZERO_VOLUME";
     }
-    if (error.message.includes("Invalid price range")) {
+    if (
+      error.message.includes("high price is less than low") ||
+      error.message.includes("outside high/low range")
+    ) {
       return "INVALID_RANGE";
     }
     if (error.message.includes("Timestamp")) {
