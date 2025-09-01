@@ -421,7 +421,7 @@ export class ConnectionManager extends EventEmitter {
         execute: operation as (
           client: SupabaseClient<Database>,
         ) => Promise<unknown>,
-        resolve,
+        resolve: resolve as (value: unknown) => void,
         reject,
         priority: options?.priority || "normal",
         timestamp: new Date(),
