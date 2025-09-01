@@ -74,9 +74,23 @@ fi
 echo -e "${GREEN}✅ Unit tests passed (100%)${NC}"
 echo ""
 
-# 5. Skip E2E tests (not needed for this project)
-echo -e "${BLUE}Step 5/10: E2E tests (skipped - not configured)...${NC}"
-echo -e "${GREEN}✅ E2E tests not required${NC}"
+# 5. E2E tests
+echo -e "${RED}Step 5/10: Running E2E tests (ALL MUST PASS - NO EXCEPTIONS)...${NC}"
+echo -e "${YELLOW}Every single E2E test MUST pass. Size and complexity are irrelevant.${NC}"
+if ! pnpm test:e2e:chromium; then
+    echo ""
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}E2E TESTS FAILED - THIS IS UNACCEPTABLE${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${RED}DIRECT ORDER: Fix ALL failing E2E tests. No exceptions.${NC}"
+    echo -e "${RED}Do NOT skip tests because they're 'not related to your task'.${NC}"
+    echo -e "${RED}Do NOT leave them for later.${NC}"
+    echo -e "${RED}Implement FULL functionality to make them pass.${NC}"
+    echo ""
+    fail_validation "5" "E2E tests failed - FIX ALL OF THEM"
+fi
+echo -e "${GREEN}✅ E2E tests passed (100%)${NC}"
 echo ""
 
 # 6. Check for stub implementations

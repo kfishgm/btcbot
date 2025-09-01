@@ -25,6 +25,11 @@ export interface Config {
     secretsManagerRegion: string;
     secretsManagerSecretName: string;
   };
+  binance: {
+    apiKey: string;
+    apiSecret: string;
+    testnet: boolean;
+  };
 }
 
 // Cache for configuration
@@ -179,6 +184,12 @@ export function getConfig(): Config {
         process.env.AWS_SECRETS_MANAGER_REGION || "us-east-1",
       secretsManagerSecretName:
         process.env.AWS_SECRETS_MANAGER_SECRET_NAME || "btcbot/config",
+    },
+    binance: {
+      apiKey: process.env.BINANCE_API_KEY || "",
+      apiSecret: process.env.BINANCE_API_SECRET || "",
+      testnet:
+        process.env.BINANCE_TESTNET === "true" || nodeEnv !== "production",
     },
   };
 

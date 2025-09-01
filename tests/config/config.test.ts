@@ -47,6 +47,11 @@ describe("Configuration Module", () => {
           secretsManagerRegion: "us-east-1",
           secretsManagerSecretName: "btcbot/config",
         },
+        binance: {
+          apiKey: "",
+          apiSecret: "",
+          testnet: true,
+        },
       };
 
       expect(config).toBeDefined();
