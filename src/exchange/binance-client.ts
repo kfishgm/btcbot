@@ -24,20 +24,25 @@ export class BinanceClient {
   private weightLimit: number = 1200;
   private lastResetTime: number = Date.now();
   private orderTimestamps: number[] = [];
+  private isAuthenticated: boolean = false;
 
   constructor(config: BinanceConfig) {
-    if (!config.apiKey) {
-      throw new Error("API key is required");
-    }
-    if (!config.apiSecret) {
-      throw new Error("API secret is required");
-    }
+    // Validate API credentials
+    this.validateCredentials(config);
 
+    // Store config with defaults
     this.config = {
       ...config,
       recvWindow: config.recvWindow || 5000,
       timeout: config.timeout || 30000,
     };
+
+    // Warn if using test credentials in production
+    if (!config.testnet && this.looksLikeTestCredentials(config)) {
+      console.warn(
+        "WARNING: API credentials appear to be test/demo credentials but testnet is disabled",
+      );
+    }
 
     if (config.testnet) {
       this.baseUrl = "https://testnet.binance.vision";
@@ -46,6 +51,79 @@ export class BinanceClient {
       this.baseUrl = "https://api.binance.com";
       this.wsUrl = "wss://stream.binance.com:9443";
     }
+  }
+
+  private validateCredentials(config: BinanceConfig): void {
+    // Check API key
+    if (!config.apiKey || typeof config.apiKey !== "string") {
+      throw new Error("API key is required and must be a string");
+    }
+
+    if (config.apiKey.length < 20 || config.apiKey.length > 100) {
+      throw new Error("API key length is invalid (expected 20-100 characters)");
+    }
+
+    if (!/^[A-Za-z0-9]+$/.test(config.apiKey)) {
+      throw new Error("API key contains invalid characters");
+    }
+
+    // Check API secret
+    if (!config.apiSecret || typeof config.apiSecret !== "string") {
+      throw new Error("API secret is required and must be a string");
+    }
+
+    if (config.apiSecret.length < 20 || config.apiSecret.length > 100) {
+      throw new Error(
+        "API secret length is invalid (expected 20-100 characters)",
+      );
+    }
+
+    if (!/^[A-Za-z0-9]+$/.test(config.apiSecret)) {
+      throw new Error("API secret contains invalid characters");
+    }
+  }
+
+  private looksLikeTestCredentials(config: BinanceConfig): boolean {
+    const testPatterns = [
+      /test/i,
+      /demo/i,
+      /sandbox/i,
+      /example/i,
+      /xxx+/i,
+      /123456/,
+      /abcdef/i,
+    ];
+
+    return testPatterns.some(
+      (pattern) =>
+        pattern.test(config.apiKey) || pattern.test(config.apiSecret),
+    );
+  }
+
+  async testAuthentication(): Promise<boolean> {
+    try {
+      // Try to get account info with minimal weight
+      await this.getAccountInfo();
+      this.isAuthenticated = true;
+      return true;
+    } catch (error) {
+      this.isAuthenticated = false;
+      const message = error instanceof Error ? error.message : String(error);
+
+      // Check for specific auth errors
+      if (
+        message.includes("Invalid API-key") ||
+        message.includes("Signature")
+      ) {
+        throw new Error(`Authentication failed: ${message}`);
+      }
+
+      throw error;
+    }
+  }
+
+  isAuthenticationTested(): boolean {
+    return this.isAuthenticated;
   }
 
   getBaseUrl(): string {
@@ -199,6 +277,7 @@ export class BinanceClient {
         if (!response.ok) {
           const error = (await response.json()) as BinanceError;
 
+          // Handle rate limiting
           if (response.status === 429) {
             const retryAfter = response.headers.get("retry-after");
             const waitTime = retryAfter
@@ -208,12 +287,17 @@ export class BinanceClient {
             continue;
           }
 
+          // Handle timestamp errors with automatic resync
           if (error.code === -1021 && attempt === 0) {
             await this.syncTime();
             continue;
           }
 
-          throw new Error(error.msg || "Request failed");
+          // Create detailed error with Binance error code
+          const errorMessage = `Binance API Error [${error.code}]: ${error.msg || "Request failed"}`;
+          const apiError = new Error(errorMessage) as Error & { code?: number };
+          apiError.code = error.code;
+          throw apiError;
         }
 
         return (await response.json()) as T;
@@ -337,9 +421,29 @@ export class BinanceClient {
     if (!params.symbol) {
       throw new Error("Symbol is required");
     }
+
+    // Validate USDT pair requirement
+    if (!params.symbol.endsWith("USDT")) {
+      throw new Error(
+        `Invalid trading pair: ${params.symbol}. Only USDT pairs are supported (e.g., BTCUSDT)`,
+      );
+    }
+
     if (params.quantity <= 0) {
       throw new Error("Quantity must be greater than 0");
     }
+
+    // Add minimum order size validation (Binance minimum is typically $10)
+    // This should be configurable per asset, but we'll use a safe default
+    if (
+      params.type === "MARKET" &&
+      params.quantity * (params.price || 0) < 10
+    ) {
+      console.warn(
+        "Order value may be below Binance minimum. Minimum order is typically $10 USDT",
+      );
+    }
+
     if (params.type === "LIMIT" && !params.price) {
       throw new Error("Price is required for LIMIT orders");
     }
