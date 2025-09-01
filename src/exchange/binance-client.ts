@@ -268,7 +268,7 @@ export class BinanceClient {
         }
 
         // Only use AbortController if available (for Node 16+)
-        let response: Response;
+        let response: Response | undefined;
         if (typeof AbortController !== "undefined") {
           const controller = new AbortController();
           const timeoutId = setTimeout(
@@ -283,9 +283,11 @@ export class BinanceClient {
               body,
               signal: controller.signal,
             });
-          } finally {
+          } catch (fetchError) {
             clearTimeout(timeoutId);
+            throw fetchError;
           }
+          clearTimeout(timeoutId);
         } else {
           // Fallback for older environments
           response = await fetch(url, {
@@ -300,7 +302,11 @@ export class BinanceClient {
           this.updateRateLimits(response.headers);
         }
 
-        if (response && !response.ok) {
+        if (!response) {
+          throw new Error("No response received from server");
+        }
+
+        if (!response.ok) {
           const error = (await response.json()) as BinanceError;
 
           // Handle rate limiting
@@ -334,10 +340,6 @@ export class BinanceClient {
           }
 
           throw apiError;
-        }
-
-        if (!response) {
-          throw new Error("No response received from server");
         }
 
         return (await response.json()) as T;

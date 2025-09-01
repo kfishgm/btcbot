@@ -17,10 +17,8 @@ import type {
   BinanceListenKey,
 } from "../../src/exchange/types";
 
-// Mock the global fetch
-if (!global.fetch) {
-  global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
-}
+// Always mock the global fetch for testing
+global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
 
 // Helper to create mock responses
 const createMockResponse = (
@@ -34,6 +32,10 @@ const createMockResponse = (
   status: ok ? 200 : 400,
 });
 
+// Valid test credentials that pass length validation
+const TEST_API_KEY = "testApiKey1234567890123456789012"; // 32 chars
+const TEST_API_SECRET = "testApiSecret1234567890123456789012"; // 35 chars
+
 describe("BinanceClient", () => {
   let client: BinanceClient;
   let mockFetch: jest.MockedFunction<typeof fetch>;
@@ -41,23 +43,17 @@ describe("BinanceClient", () => {
   beforeEach(() => {
     // Clear all mocks before each test
     jest.clearAllMocks();
-    // Don't use fake timers by default - only enable in specific tests
 
-    // Ensure fetch is mocked
-    if (!jest.isMockFunction(global.fetch)) {
-      global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
-    }
-
+    // Always ensure fetch is mocked
+    global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
     mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
-    // Reset the mock implementation
-    mockFetch.mockReset();
   });
 
   describe("Client Initialization", () => {
     it("should initialize with production URLs by default", () => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
 
@@ -68,8 +64,8 @@ describe("BinanceClient", () => {
 
     it("should initialize with testnet URLs when specified", () => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: true,
       };
 
@@ -81,7 +77,7 @@ describe("BinanceClient", () => {
     it("should throw error if API key is missing", () => {
       const config = {
         apiKey: "",
-        apiSecret: "test-api-secret",
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       } as BinanceConfig;
 
@@ -90,7 +86,7 @@ describe("BinanceClient", () => {
 
     it("should throw error if API secret is missing", () => {
       const config = {
-        apiKey: "test-api-key",
+        apiKey: TEST_API_KEY,
         apiSecret: "",
         testnet: false,
       } as BinanceConfig;
@@ -100,8 +96,8 @@ describe("BinanceClient", () => {
 
     it("should set proper headers for authenticated requests", async () => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
 
@@ -131,15 +127,15 @@ describe("BinanceClient", () => {
       // Check that API key header was set
       const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
       const headers = lastCall![1]?.headers as Headers;
-      expect(headers.get("X-MBX-APIKEY")).toBe("test-api-key");
+      expect(headers.get("X-MBX-APIKEY")).toBe(TEST_API_KEY);
     }, 10000);
   });
 
   describe("Signature Generation", () => {
     beforeEach(() => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
       client = new BinanceClient(config);
@@ -223,8 +219,8 @@ describe("BinanceClient", () => {
   describe("Timestamp Synchronization", () => {
     beforeEach(() => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
       client = new BinanceClient(config);
@@ -273,7 +269,7 @@ describe("BinanceClient", () => {
           code: -1021,
           msg: "Timestamp for this request is outside of the recvWindow.",
         }),
-      } as unknown as Response);
+      } as Response);
 
       await expect(client.getAccountInfo()).rejects.toThrow(
         "Timestamp for this request is outside of the recvWindow",
@@ -315,8 +311,8 @@ describe("BinanceClient", () => {
   describe("Rate Limiting", () => {
     beforeEach(() => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
       client = new BinanceClient(config);
@@ -479,8 +475,8 @@ describe("BinanceClient", () => {
   describe("Public API Methods", () => {
     beforeEach(() => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
       client = new BinanceClient(config);
@@ -590,8 +586,8 @@ describe("BinanceClient", () => {
   describe("Private API Methods", () => {
     beforeEach(async () => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
       client = new BinanceClient(config);
@@ -784,8 +780,8 @@ describe("BinanceClient", () => {
   describe("Order Management", () => {
     beforeEach(async () => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
       client = new BinanceClient(config);
@@ -1094,8 +1090,8 @@ describe("BinanceClient", () => {
   describe("Error Handling", () => {
     beforeEach(() => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
       client = new BinanceClient(config);
@@ -1211,8 +1207,8 @@ describe("BinanceClient", () => {
   describe("WebSocket Support", () => {
     beforeEach(async () => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: false,
       };
       client = new BinanceClient(config);
@@ -1291,8 +1287,8 @@ describe("BinanceClient", () => {
 
     it("should build testnet WebSocket URLs correctly", () => {
       const config: BinanceConfig = {
-        apiKey: "test-api-key",
-        apiSecret: "test-api-secret",
+        apiKey: TEST_API_KEY,
+        apiSecret: TEST_API_SECRET,
         testnet: true,
       };
       const testnetClient = new BinanceClient(config);
