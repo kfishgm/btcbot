@@ -11,9 +11,11 @@ import {
 jest.mock("../../src/exchange/binance-client");
 
 // Import everything
-import { HistoricalCandleManager } from "../../src/exchange/historical-candle-manager";
+import {
+  HistoricalCandleManager,
+  type ExtendedKline,
+} from "../../src/exchange/historical-candle-manager";
 import { BinanceClient } from "../../src/exchange/binance-client";
-import type { BinanceKline } from "../../src/exchange/types";
 import { logger } from "../../src/utils/logger";
 
 describe("HistoricalCandleManager", () => {
@@ -28,14 +30,16 @@ describe("HistoricalCandleManager", () => {
   >;
 
   // Helper function to create mock kline data
-  const createMockKline = (overrides?: Partial<BinanceKline>): BinanceKline => {
+  const createMockKline = (
+    overrides?: Partial<ExtendedKline>,
+  ): ExtendedKline => {
     const baseTime = Date.now() - 3600000;
     const openTime = overrides?.openTime ?? baseTime;
     // Calculate closeTime based on the actual openTime being used
     const defaultCloseTime = openTime + 3599999; // 1 ms before the next hour
 
     // Build the kline with defaults, then apply overrides
-    const baseKline: BinanceKline = {
+    const baseKline: ExtendedKline = {
       openTime,
       open: overrides?.open ?? "50000.00",
       high: overrides?.high ?? "51000.00",
@@ -514,8 +518,8 @@ describe("HistoricalCandleManager", () => {
 
       // Add new closed candle with higher high
       const newHighCandle = createMockKline({
-        openTime: now,
-        closeTime: now + 3599999,
+        openTime: now - 1800000, // 30 minutes ago
+        closeTime: now - 1, // Just closed
         high: "50000.00",
         isClosed: true,
       });
@@ -532,8 +536,8 @@ describe("HistoricalCandleManager", () => {
       // Add candle with lower high - should NOT emit event
       eventListener.mockClear();
       const lowerCandle = createMockKline({
-        openTime: now + 3600000,
-        closeTime: now + 7199999,
+        openTime: now - 900000, // 15 minutes ago
+        closeTime: now - 2, // Just closed
         high: "45000.00",
         isClosed: true,
       });
@@ -570,8 +574,8 @@ describe("HistoricalCandleManager", () => {
       // Add 10 more candles - should maintain only last 20
       for (let i = 0; i < 10; i++) {
         const newCandle = createMockKline({
-          openTime: now + (i + 1) * 3600000,
-          closeTime: now + (i + 1) * 3600000 + 3599999,
+          openTime: now - (10 - i) * 1800000, // Past times
+          closeTime: now - (10 - i) * 1800000 + 1799999, // Closed in the past
           high: `${52000 + i * 100}.00`,
           isClosed: true,
         });
@@ -707,11 +711,15 @@ describe("HistoricalCandleManager", () => {
       expect(manager.calculateATH()).toBe(70000);
 
       // Add 11 new candles to push the high-value candle out of the window
+      // Initial candles are from (now - 21h) to (now - 1h)
+      // The 70000 candle is at index 10, which is at (now - 11h)
+      // To push it out, we need 11 more recent candles
       for (let i = 0; i < 11; i++) {
+        const candleTime = now - 3600000 - (10 - i) * 300000; // Recent past times
         manager.addCandle(
           createMockKline({
-            openTime: now + (i + 1) * 3600000,
-            closeTime: now + (i + 1) * 3600000 + 3599999,
+            openTime: candleTime,
+            closeTime: candleTime + 299999, // 5 minute candles, closed
             high: "60000.00",
             isClosed: true,
           }),
@@ -775,8 +783,8 @@ describe("HistoricalCandleManager", () => {
       // Add new candle to invalidate cache
       manager.addCandle(
         createMockKline({
-          openTime: now + 3600000,
-          closeTime: now + 7199999,
+          openTime: now - 600000, // 10 minutes ago
+          closeTime: now - 1, // Just closed
           high: "55000.00",
           isClosed: true,
         }),
@@ -1258,7 +1266,9 @@ describe("HistoricalCandleManager Integration Tests", () => {
     typeof BinanceClient.prototype.getKlines
   >;
 
-  const createMockKline = (overrides?: Partial<BinanceKline>): BinanceKline => {
+  const createMockKline = (
+    overrides?: Partial<ExtendedKline>,
+  ): ExtendedKline => {
     const baseTime = Date.now() - 3600000;
     return {
       openTime: baseTime,
