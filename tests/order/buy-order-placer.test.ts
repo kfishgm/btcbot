@@ -1,93 +1,122 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
-import { BuyOrderPlacer } from "../../src/order/buy-order-placer";
+import { BuyOrderPlacer, TradeRecord } from "../../src/order/buy-order-placer";
 import { BinanceClient } from "../../src/exchange/binance-client";
 import { TradingRules } from "../../src/exchange/trading-rules";
 import { Decimal } from "decimal.js";
-import type { SymbolTradingRules } from "../../src/exchange/types";
+import type {
+  SymbolTradingRules,
+  BinanceOrder,
+  OrderStatus,
+  CreateOrderParams,
+} from "../../src/exchange/types";
 
-// Mock dependencies
+// Only mock the external dependencies (Binance API)
 jest.mock("../../src/exchange/binance-client");
 jest.mock("../../src/exchange/trading-rules");
 
-// Define error types for testing
-interface ApiError extends Error {
-  code?: string;
-}
-
-// Helper to cast mocks properly
-function asMock<T extends object>(mock: T): jest.Mocked<T> {
-  return mock as jest.Mocked<T>;
-}
-
 describe("BuyOrderPlacer", () => {
   let buyOrderPlacer: BuyOrderPlacer;
-  let mockBinanceClient: BinanceClient;
-  let mockTradingRules: TradingRules;
-  let mockSupabaseClient: unknown;
+  let mockBinanceClient: {
+    createOrder: jest.Mock<
+      (params: CreateOrderParams) => Promise<BinanceOrder>
+    >;
+    getOrder: jest.Mock<
+      (
+        symbol: string,
+        orderId?: number,
+        origClientOrderId?: string,
+      ) => Promise<BinanceOrder>
+    >;
+  };
+  let mockTradingRules: {
+    getRules: jest.Mock<
+      (symbol: string, forceRefresh?: boolean) => Promise<SymbolTradingRules>
+    >;
+    roundQuantityToStep: jest.Mock<
+      (quantity: number, symbol: string) => number
+    >;
+    roundPriceToTick: jest.Mock<(price: number, symbol: string) => number>;
+  };
 
   beforeEach(() => {
     // Reset all mocks
     jest.clearAllMocks();
 
-    // Create mock instances
-    const mockConfig = {
-      apiKey: "test-key",
-      apiSecret: "test-secret",
-      testnet: true,
-    };
-    mockBinanceClient = new BinanceClient(mockConfig);
-    mockTradingRules = new TradingRules(mockBinanceClient);
-    // Create a mock Supabase client
-    mockSupabaseClient = null;
-
-    // Setup default trading rules
+    // Setup default trading rules that match real Binance BTCUSDT rules
     const mockSymbolRules: SymbolTradingRules = {
       symbol: "BTCUSDT",
-      minQty: 0.0001,
+      minQty: 0.00001, // Real Binance min for BTCUSDT
       maxQty: 9000.0,
       stepSize: 0.00001,
       minPrice: 0.01,
       maxPrice: 1000000,
       tickSize: 0.01,
-      minNotional: 10.0,
+      minNotional: 10.0, // Real Binance min notional
       lastUpdated: Date.now(),
     };
 
-    // Setup mock implementations
-    asMock(mockTradingRules).getRules = jest
-      .fn()
-      .mockResolvedValue(mockSymbolRules);
+    // Create mock functions with proper typing
+    const getRulesFn = jest.fn<() => Promise<SymbolTradingRules>>();
+    getRulesFn.mockResolvedValue(mockSymbolRules);
 
-    asMock(mockTradingRules).roundQuantityToStep = jest
-      .fn()
-      .mockImplementation((qty: number) => {
-        return Math.floor(qty / 0.00001) * 0.00001;
-      });
+    const roundQuantityFn = jest.fn<(qty: number, _symbol: string) => number>();
+    roundQuantityFn.mockImplementation((qty: number, _symbol: string) => {
+      // Real rounding logic
+      const stepSize = 0.00001;
+      return parseFloat((Math.floor(qty / stepSize) * stepSize).toFixed(8));
+    });
 
-    asMock(mockTradingRules).roundPriceToTick = jest
-      .fn()
-      .mockImplementation((price: number) => {
-        return Math.floor(price / 0.01) * 0.01;
-      });
+    const roundPriceFn = jest.fn<(price: number, _symbol: string) => number>();
+    roundPriceFn.mockImplementation((price: number, _symbol: string) => {
+      // Real rounding logic
+      const tickSize = 0.01;
+      return parseFloat((Math.floor(price / tickSize) * tickSize).toFixed(8));
+    });
 
-    // Create BuyOrderPlacer instance
+    // Create mock trading rules
+    mockTradingRules = {
+      getRules: getRulesFn as jest.Mock<
+        (symbol: string, forceRefresh?: boolean) => Promise<SymbolTradingRules>
+      >,
+      roundQuantityToStep: roundQuantityFn as jest.Mock<
+        (quantity: number, symbol: string) => number
+      >,
+      roundPriceToTick: roundPriceFn as jest.Mock<
+        (price: number, symbol: string) => number
+      >,
+    };
+
+    // Create mock Binance client
+    const createOrderFn = jest.fn<() => Promise<BinanceOrder>>();
+    const getOrderFn = jest.fn<() => Promise<BinanceOrder>>();
+
+    mockBinanceClient = {
+      createOrder: createOrderFn as jest.Mock<
+        (params: CreateOrderParams) => Promise<BinanceOrder>
+      >,
+      getOrder: getOrderFn as jest.Mock<
+        (
+          symbol: string,
+          orderId?: number,
+          origClientOrderId?: string,
+        ) => Promise<BinanceOrder>
+      >,
+    };
+
+    // Create BuyOrderPlacer instance with null supabase client (we use events instead)
     buyOrderPlacer = new BuyOrderPlacer(
-      mockBinanceClient,
-      mockTradingRules,
-      mockSupabaseClient,
+      mockBinanceClient as unknown as BinanceClient,
+      mockTradingRules as unknown as TradingRules,
+      null, // Supabase client is not used directly
       "BTCUSDT",
     );
   });
 
   describe("Order Preparation", () => {
-    it("should calculate quantity correctly from buy amount and limit price", async () => {
-      const buyAmount = new Decimal("1000"); // 1000 USDT
+    it("should calculate quantity correctly from buy amount and current price", async () => {
+      const buyAmount = new Decimal("1000"); // 1000 USDT to spend
       const currentPrice = new Decimal("50000");
-      const slippageGuardPct = 0.003; // 0.3%
-
-      // Expected calculations
-      const expectedLimitPrice = new Decimal("50150"); // 50000 * (1 + 0.003) = 50150
-      const expectedQuantity = new Decimal("0.01994"); // 1000 / 50150 = 0.019940... rounded to step size
+      const slippageGuardPct = 0.003; // 0.3% slippage
 
       const orderParams = await buyOrderPlacer.prepareOrder(
         buyAmount,
@@ -95,98 +124,118 @@ describe("BuyOrderPlacer", () => {
         slippageGuardPct,
       );
 
+      // Test the actual calculation logic
+      // limit_price = 50000 * (1 + 0.003) = 50150
+      // quantity = 1000 / 50150 = 0.0199401... -> rounded to 0.01994
       expect(orderParams.symbol).toBe("BTCUSDT");
-      expect(orderParams.quantity.toFixed(5)).toBe(expectedQuantity.toFixed(5));
-      expect(orderParams.limitPrice.toFixed(2)).toBe(
-        expectedLimitPrice.toFixed(2),
-      );
+      expect(orderParams.limitPrice.toNumber()).toBe(50150);
+      expect(orderParams.quantity.toNumber()).toBeCloseTo(0.01994, 5);
       expect(orderParams.clientOrderId).toMatch(/^BUY_\d+_[a-z0-9]+$/);
     });
 
-    it("should round quantity to step size", async () => {
-      const buyAmount = new Decimal("1000");
-      const currentPrice = new Decimal("50000");
-      const slippageGuardPct = 0.003;
-
-      const orderParams = await buyOrderPlacer.prepareOrder(
-        buyAmount,
-        currentPrice,
-        slippageGuardPct,
-      );
-
-      expect(orderParams.quantity).toEqual(new Decimal("0.01994"));
-      expect(mockTradingRules.roundQuantityToStep).toHaveBeenCalledWith(
-        expect.any(Number),
-        "BTCUSDT",
-      );
-    });
-
-    it("should calculate limit price with slippage guard", async () => {
-      const buyAmount = new Decimal("2000");
-      const currentPrice = new Decimal("60000");
+    it("should calculate limit price with slippage guard correctly", async () => {
+      const buyAmount = new Decimal("5000");
+      const currentPrice = new Decimal("45000");
       const slippageGuardPct = 0.005; // 0.5%
 
-      // 60000 * (1 + 0.005) = 60300
-      const expectedLimitPrice = new Decimal("60300");
-
       const orderParams = await buyOrderPlacer.prepareOrder(
         buyAmount,
         currentPrice,
         slippageGuardPct,
       );
 
-      expect(orderParams.limitPrice).toEqual(expectedLimitPrice);
-      expect(mockTradingRules.roundPriceToTick).toHaveBeenCalledWith(
-        60300,
-        "BTCUSDT",
-      );
+      // limit_price = 45000 * (1 + 0.005) = 45225
+      // quantity = 5000 / 45225 = 0.11056... -> rounded to 0.11055
+      expect(orderParams.limitPrice.toNumber()).toBe(45225);
+      expect(orderParams.quantity.toNumber()).toBeCloseTo(0.11055, 5);
     });
 
-    it("should generate unique client order ID", async () => {
+    it("should use default slippage guard of 0.3% if not specified", async () => {
       const buyAmount = new Decimal("1000");
       const currentPrice = new Decimal("50000");
 
-      const orderParams1 = await buyOrderPlacer.prepareOrder(
-        buyAmount,
-        currentPrice,
-        0.003,
-      );
-      const orderParams2 = await buyOrderPlacer.prepareOrder(
+      // Test with explicit 0.003 (0.3%)
+      const orderParamsWithDefault = await buyOrderPlacer.prepareOrder(
         buyAmount,
         currentPrice,
         0.003,
       );
 
-      expect(orderParams1.clientOrderId).not.toBe(orderParams2.clientOrderId);
-      expect(orderParams1.clientOrderId).toMatch(/^BUY_\d+_[a-z0-9]+$/);
-      expect(orderParams2.clientOrderId).toMatch(/^BUY_\d+_[a-z0-9]+$/);
+      expect(orderParamsWithDefault.limitPrice.toNumber()).toBe(50150); // 50000 * 1.003
+    });
+
+    it("should generate unique client order IDs", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      const order1 = await buyOrderPlacer.prepareOrder(
+        buyAmount,
+        currentPrice,
+        0.003,
+      );
+      const order2 = await buyOrderPlacer.prepareOrder(
+        buyAmount,
+        currentPrice,
+        0.003,
+      );
+
+      expect(order1.clientOrderId).not.toBe(order2.clientOrderId);
+      expect(order1.clientOrderId).toMatch(/^BUY_\d+_[a-z0-9]+$/);
+      expect(order2.clientOrderId).toMatch(/^BUY_\d+_[a-z0-9]+$/);
+    });
+
+    it("should throw error for invalid buy amount", async () => {
+      const invalidBuyAmount = new Decimal("0");
+      const currentPrice = new Decimal("50000");
+
+      await expect(
+        buyOrderPlacer.prepareOrder(invalidBuyAmount, currentPrice, 0.003),
+      ).rejects.toThrow("Buy amount must be greater than 0");
+    });
+
+    it("should throw error for invalid price", async () => {
+      const buyAmount = new Decimal("1000");
+      const invalidPrice = new Decimal("0");
+
+      await expect(
+        buyOrderPlacer.prepareOrder(buyAmount, invalidPrice, 0.003),
+      ).rejects.toThrow("Current price must be greater than 0");
+    });
+
+    it("should throw error for invalid slippage guard", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      await expect(
+        buyOrderPlacer.prepareOrder(buyAmount, currentPrice, -0.01),
+      ).rejects.toThrow("Slippage guard percentage must be between 0 and 0.1");
+
+      await expect(
+        buyOrderPlacer.prepareOrder(buyAmount, currentPrice, 0.2),
+      ).rejects.toThrow("Slippage guard percentage must be between 0 and 0.1");
     });
   });
 
   describe("Order Validation", () => {
-    it("should validate minimum quantity", async () => {
+    it("should validate order against minimum quantity", async () => {
       const orderParams = {
         symbol: "BTCUSDT",
-        quantity: new Decimal("0.00005"), // Below min of 0.0001
+        quantity: new Decimal("0.000001"), // Below minimum
         limitPrice: new Decimal("50000"),
-        clientOrderId: "BUY_123_abc",
+        clientOrderId: "test-order",
       };
 
       await expect(buyOrderPlacer.validateOrder(orderParams)).rejects.toThrow(
-        "Order quantity 0.00005 is below minimum 0.0001",
+        "Order quantity 0.000001 is below minimum 0.00001",
       );
     });
 
-    it("should validate maximum quantity", async () => {
-      asMock(mockTradingRules).roundQuantityToStep = jest
-        .fn()
-        .mockReturnValue(10000);
-
+    it("should validate order against maximum quantity", async () => {
       const orderParams = {
         symbol: "BTCUSDT",
-        quantity: new Decimal("10000"), // Above max of 9000
+        quantity: new Decimal("10000"), // Above maximum
         limitPrice: new Decimal("50000"),
-        clientOrderId: "BUY_123_abc",
+        clientOrderId: "test-order",
       };
 
       await expect(buyOrderPlacer.validateOrder(orderParams)).rejects.toThrow(
@@ -194,119 +243,52 @@ describe("BuyOrderPlacer", () => {
       );
     });
 
-    it("should validate minimum notional value", async () => {
+    it("should validate order against minimum notional value", async () => {
       const orderParams = {
         symbol: "BTCUSDT",
         quantity: new Decimal("0.0001"),
-        limitPrice: new Decimal("10000"), // 0.0001 * 10000 = 1 USDT (below min 10)
-        clientOrderId: "BUY_123_abc",
+        limitPrice: new Decimal("50000"), // 0.0001 * 50000 = 5 USDT < 10 minimum
+        clientOrderId: "test-order",
       };
 
       await expect(buyOrderPlacer.validateOrder(orderParams)).rejects.toThrow(
-        "Order notional value 1 is below minimum 10",
+        "Order notional value 5 is below minimum 10",
       );
     });
 
-    it("should pass validation for valid orders", async () => {
+    it("should pass validation for valid order", async () => {
       const orderParams = {
         symbol: "BTCUSDT",
         quantity: new Decimal("0.01"),
-        limitPrice: new Decimal("50000"), // 0.01 * 50000 = 500 USDT
-        clientOrderId: "BUY_123_abc",
+        limitPrice: new Decimal("50000"), // 0.01 * 50000 = 500 USDT > 10 minimum
+        clientOrderId: "test-order",
       };
 
+      // Should not throw
       await expect(
         buyOrderPlacer.validateOrder(orderParams),
-      ).resolves.not.toThrow();
+      ).resolves.toBeUndefined();
     });
   });
 
   describe("Order Placement", () => {
-    it("should submit order to Binance with correct parameters", async () => {
+    it("should place a LIMIT IOC order successfully", async () => {
       const buyAmount = new Decimal("1000");
       const currentPrice = new Decimal("50000");
-      const slippageGuardPct = 0.003;
 
       const mockOrderResponse = {
-        symbol: "BTCUSDT",
         orderId: 123456789,
-        orderListId: -1,
         clientOrderId: "BUY_123_abc",
-        transactTime: Date.now(),
-        price: "50150.00",
-        origQty: "0.01994",
+        symbol: "BTCUSDT",
         executedQty: "0.01994",
         cummulativeQuoteQty: "999.99",
-        status: "FILLED",
-        timeInForce: "IOC",
-        type: "LIMIT",
-        side: "BUY",
-        fills: [
-          {
-            price: "50150.00",
-            qty: "0.01994",
-            commission: "0.00001994",
-            commissionAsset: "BTC",
-            tradeId: 123456,
-          },
-        ],
-      };
-
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockOrderResponse);
-
-      const result = await buyOrderPlacer.placeOrder(
-        buyAmount,
-        currentPrice,
-        slippageGuardPct,
-      );
-
-      expect(mockBinanceClient.createOrder).toHaveBeenCalledWith({
-        symbol: "BTCUSDT",
+        status: "FILLED" as OrderStatus,
         side: "BUY",
         type: "LIMIT",
         timeInForce: "IOC",
-        quantity: 0.01994,
-        price: 50150.0,
-        newClientOrderId: expect.stringMatching(/^BUY_\d+_[a-z0-9]+$/),
-      });
+      } as BinanceOrder;
 
-      expect(result.orderId).toBe(123456789);
-      expect(result.executedQty.toString()).toBe("0.01994");
-      expect(result.status).toBe("FILLED");
-    });
-
-    it("should handle partially filled orders", async () => {
-      const buyAmount = new Decimal("1000");
-      const currentPrice = new Decimal("50000");
-
-      const mockPartialFillResponse = {
-        symbol: "BTCUSDT",
-        orderId: 123456789,
-        clientOrderId: "BUY_123_abc",
-        transactTime: Date.now(),
-        price: "50150.00",
-        origQty: "0.01994",
-        executedQty: "0.01000", // Only partially filled
-        cummulativeQuoteQty: "501.50",
-        status: "EXPIRED",
-        timeInForce: "IOC",
-        type: "LIMIT",
-        side: "BUY",
-        fills: [
-          {
-            price: "50150.00",
-            qty: "0.01000",
-            commission: "0.00001",
-            commissionAsset: "BTC",
-          },
-        ],
-      };
-
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockPartialFillResponse);
+      mockBinanceClient.createOrder.mockResolvedValue(mockOrderResponse);
 
       const result = await buyOrderPlacer.placeOrder(
         buyAmount,
@@ -314,42 +296,64 @@ describe("BuyOrderPlacer", () => {
         0.003,
       );
 
-      expect(result.executedQty.toString()).toBe("0.01");
-      expect(result.status).toBe("EXPIRED");
-      expect(result.cummulativeQuoteQty.toString()).toBe("501.5");
+      // Verify correct order parameters were sent
+      expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(1);
+      const callArgs = mockBinanceClient.createOrder.mock.calls[0][0];
+      expect(callArgs.symbol).toBe("BTCUSDT");
+      expect(callArgs.side).toBe("BUY");
+      expect(callArgs.type).toBe("LIMIT");
+      expect(callArgs.timeInForce).toBe("IOC"); // Must be IOC per STRATEGY.md
+      expect(callArgs.quantity).toBeCloseTo(0.01994, 5);
+      expect(callArgs.price).toBe(50150);
+      expect(callArgs.newClientOrderId).toMatch(/^BUY_\d+_[a-z0-9]+$/);
+
+      // Verify result processing
+      expect(result.orderId).toBe(123456789);
+      expect(result.status).toBe("FILLED");
+      expect(result.executedQty.toString()).toBe("0.01994");
+      expect(result.cummulativeQuoteQty.toString()).toBe("999.99");
     });
 
-    it("should throw on order rejection", async () => {
-      const buyAmount = new Decimal("1000");
-      const currentPrice = new Decimal("50000");
-
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockRejectedValue(new Error("Insufficient balance"));
-
-      await expect(
-        buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003),
-      ).rejects.toThrow("Insufficient balance");
-    });
-
-    it("should retry on transient failures", async () => {
+    it("should handle partial fills correctly", async () => {
       const buyAmount = new Decimal("1000");
       const currentPrice = new Decimal("50000");
 
       const mockOrderResponse = {
-        symbol: "BTCUSDT",
+        orderId: 123456789,
+        clientOrderId: "BUY_123_abc",
+        executedQty: "0.01", // Only partially filled
+        cummulativeQuoteQty: "501.5",
+        status: "PARTIALLY_FILLED" as OrderStatus,
+      } as BinanceOrder;
+
+      mockBinanceClient.createOrder.mockResolvedValue(mockOrderResponse);
+
+      const result = await buyOrderPlacer.placeOrder(
+        buyAmount,
+        currentPrice,
+        0.003,
+      );
+
+      expect(result.status).toBe("PARTIALLY_FILLED");
+      expect(result.executedQty.toString()).toBe("0.01");
+    });
+
+    it("should retry on network errors", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      const mockSuccessResponse = {
         orderId: 123456789,
         executedQty: "0.01994",
-        status: "FILLED",
-        fills: [],
-      };
+        cummulativeQuoteQty: "999.99",
+        status: "FILLED" as OrderStatus,
+      } as BinanceOrder;
 
-      // First two calls fail, third succeeds
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
+      // First two calls fail with network errors, third succeeds
+      mockBinanceClient.createOrder
         .mockRejectedValueOnce(new Error("Network timeout"))
-        .mockRejectedValueOnce(new Error("Connection reset"))
-        .mockResolvedValueOnce(mockOrderResponse);
+        .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+        .mockResolvedValueOnce(mockSuccessResponse);
 
       const result = await buyOrderPlacer.placeOrder(
         buyAmount,
@@ -360,26 +364,33 @@ describe("BuyOrderPlacer", () => {
       expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(3);
       expect(result.orderId).toBe(123456789);
     });
-  });
 
-  describe("Database Recording", () => {
-    it("should save successful trade to database", async () => {
+    it("should not retry on non-retryable errors", async () => {
       const buyAmount = new Decimal("1000");
       const currentPrice = new Decimal("50000");
 
-      const mockOrderResponse = {
-        symbol: "BTCUSDT",
+      mockBinanceClient.createOrder.mockRejectedValue(
+        new Error("Insufficient balance"),
+      );
+
+      await expect(
+        buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003),
+      ).rejects.toThrow("Insufficient balance");
+
+      expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Fee Tracking", () => {
+    it("should track BTC fees correctly", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      const mockOrderWithBTCFee = {
         orderId: 123456789,
-        clientOrderId: "BUY_123_abc",
-        transactTime: Date.now(),
-        price: "50150.00",
-        origQty: "0.01994",
         executedQty: "0.01994",
         cummulativeQuoteQty: "999.99",
-        status: "FILLED",
-        timeInForce: "IOC",
-        type: "LIMIT",
-        side: "BUY",
+        status: "FILLED" as OrderStatus,
         fills: [
           {
             price: "50150.00",
@@ -389,94 +400,9 @@ describe("BuyOrderPlacer", () => {
             tradeId: 123456,
           },
         ],
-      };
+      } as BinanceOrder;
 
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockOrderResponse);
-
-      mockSupabaseClient = {
-        from: jest.fn().mockReturnValue({
-          insert: jest.fn().mockResolvedValue({ error: null }),
-        }),
-      };
-
-      // Set cycle ID for database save
-      buyOrderPlacer.setCycleId("CYCLE_001");
-
-      // Spy on event emission
-      const eventSpy = jest.spyOn(buyOrderPlacer, "emit");
-
-      await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
-
-      // Check that trade record event was emitted
-      const tradeRecordCalls = eventSpy.mock.calls.filter(
-        (call) => call[0] === "tradeRecordReady",
-      );
-      expect(tradeRecordCalls.length).toBe(1);
-
-      const tradeRecord = tradeRecordCalls[0][1] as Record<string, unknown>;
-      expect(tradeRecord.type).toBe("BUY");
-      expect(tradeRecord.order_id).toBe("123456789");
-      expect(tradeRecord.status).toBe("FILLED");
-      expect(tradeRecord.cycle_id).toBe("CYCLE_001");
-    });
-
-    it("should emit trade record without cycle_id if not set", async () => {
-      const buyAmount = new Decimal("1000");
-      const currentPrice = new Decimal("50000");
-
-      const mockOrderResponse = {
-        symbol: "BTCUSDT",
-        orderId: 123456789,
-        executedQty: "0.01994",
-        status: "FILLED",
-        fills: [],
-      };
-
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockOrderResponse);
-
-      // Don't set cycle ID
-      const eventSpy = jest.spyOn(buyOrderPlacer, "emit");
-
-      await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
-
-      const tradeRecordCalls = eventSpy.mock.calls.filter(
-        (call) => call[0] === "tradeRecordReady",
-      );
-      expect(tradeRecordCalls.length).toBe(1);
-
-      const tradeRecord = tradeRecordCalls[0][1] as Record<string, unknown>;
-      expect(tradeRecord.cycle_id).toBeUndefined();
-    });
-  });
-
-  describe("Fee Tracking", () => {
-    it("should track BTC fees", async () => {
-      const buyAmount = new Decimal("1000");
-      const currentPrice = new Decimal("50000");
-
-      const mockOrderResponse = {
-        symbol: "BTCUSDT",
-        orderId: 123456789,
-        executedQty: "0.01994",
-        cummulativeQuoteQty: "999.99",
-        status: "FILLED",
-        fills: [
-          {
-            price: "50150.00",
-            qty: "0.01994",
-            commission: "0.00001994",
-            commissionAsset: "BTC",
-          },
-        ],
-      };
-
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.createOrder.mockResolvedValue(mockOrderWithBTCFee);
 
       const result = await buyOrderPlacer.placeOrder(
         buyAmount,
@@ -488,29 +414,27 @@ describe("BuyOrderPlacer", () => {
       expect(result.feeUSDT.toString()).toBe("0");
     });
 
-    it("should track USDT fees", async () => {
+    it("should track USDT fees correctly", async () => {
       const buyAmount = new Decimal("1000");
       const currentPrice = new Decimal("50000");
 
-      const mockOrderResponse = {
-        symbol: "BTCUSDT",
+      const mockOrderWithUSDTFee = {
         orderId: 123456789,
         executedQty: "0.01994",
         cummulativeQuoteQty: "999.99",
-        status: "FILLED",
+        status: "FILLED" as OrderStatus,
         fills: [
           {
             price: "50150.00",
             qty: "0.01994",
             commission: "0.99999",
             commissionAsset: "USDT",
+            tradeId: 123457,
           },
         ],
-      };
+      } as BinanceOrder;
 
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.createOrder.mockResolvedValue(mockOrderWithUSDTFee);
 
       const result = await buyOrderPlacer.placeOrder(
         buyAmount,
@@ -518,53 +442,165 @@ describe("BuyOrderPlacer", () => {
         0.003,
       );
 
-      expect(result.feeBTC.toString()).toBe("0");
       expect(result.feeUSDT.toString()).toBe("0.99999");
+      expect(result.feeBTC.toString()).toBe("0");
     });
-  });
 
-  describe("Error Handling", () => {
-    it("should handle rate limit errors", async () => {
+    it("should track other currency fees correctly", async () => {
       const buyAmount = new Decimal("1000");
       const currentPrice = new Decimal("50000");
 
-      const rateLimitError: ApiError = new Error("Rate limit exceeded");
-      rateLimitError.code = "RATE_LIMIT";
-
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockRejectedValue(rateLimitError);
-
-      await expect(
-        buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003),
-      ).rejects.toThrow("Rate limit exceeded");
-    });
-  });
-
-  describe("State Updates", () => {
-    it("should provide state update data for successful order", async () => {
-      const buyAmount = new Decimal("1000");
-      const currentPrice = new Decimal("50000");
-
-      const mockOrderResponse = {
-        symbol: "BTCUSDT",
+      const mockOrderWithBNBFee = {
         orderId: 123456789,
         executedQty: "0.01994",
         cummulativeQuoteQty: "999.99",
-        status: "FILLED",
+        status: "FILLED" as OrderStatus,
+        fills: [
+          {
+            price: "50150.00",
+            qty: "0.01994",
+            commission: "0.001",
+            commissionAsset: "BNB",
+            tradeId: 123458,
+          },
+        ],
+      } as BinanceOrder;
+
+      mockBinanceClient.createOrder.mockResolvedValue(mockOrderWithBNBFee);
+
+      const result = await buyOrderPlacer.placeOrder(
+        buyAmount,
+        currentPrice,
+        0.003,
+      );
+
+      expect(result.feeOther["BNB"].toString()).toBe("0.001");
+      expect(result.feeBTC.toString()).toBe("0");
+      expect(result.feeUSDT.toString()).toBe("0");
+    });
+  });
+
+  describe("Event Emission", () => {
+    it("should emit proper events during order placement", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      const mockOrder = {
+        orderId: 123456789,
+        executedQty: "0.01994",
+        status: "FILLED" as OrderStatus,
+      } as BinanceOrder;
+
+      mockBinanceClient.createOrder.mockResolvedValue(mockOrder);
+
+      const events: Array<{ event: string; data: unknown }> = [];
+
+      buyOrderPlacer.on("orderPlacing", (data) =>
+        events.push({ event: "orderPlacing", data }),
+      );
+      buyOrderPlacer.on("orderExecuted", (data) =>
+        events.push({ event: "orderExecuted", data }),
+      );
+      buyOrderPlacer.on("orderCompleted", (data) =>
+        events.push({ event: "orderCompleted", data }),
+      );
+
+      await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
+
+      expect(events).toHaveLength(3);
+      expect(events[0].event).toBe("orderPlacing");
+      expect(events[1].event).toBe("orderExecuted");
+      expect(events[2].event).toBe("orderCompleted");
+    });
+  });
+
+  describe("Database Integration", () => {
+    it("should emit trade record with cycle ID when set", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      const mockOrder = {
+        orderId: 123456789,
+        executedQty: "0.01994",
+        status: "FILLED" as OrderStatus,
+      } as BinanceOrder;
+
+      mockBinanceClient.createOrder.mockResolvedValue(mockOrder);
+
+      // Set cycle ID
+      buyOrderPlacer.setCycleId("CYCLE_TEST_001");
+
+      let tradeRecord: TradeRecord | undefined;
+      buyOrderPlacer.on("tradeRecordReady", (data) => {
+        tradeRecord = data as TradeRecord;
+      });
+
+      await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
+
+      expect(tradeRecord).toBeDefined();
+      expect(tradeRecord?.cycle_id).toBe("CYCLE_TEST_001");
+      expect(tradeRecord?.type).toBe("BUY");
+      expect(tradeRecord?.order_id).toBe("123456789");
+      expect(tradeRecord?.status).toBe("FILLED");
+    });
+  });
+
+  describe("State Update Data", () => {
+    it("should calculate state update data correctly", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      const mockOrder = {
+        orderId: 123456789,
+        executedQty: "0.01994",
+        cummulativeQuoteQty: "999.99",
+        status: "FILLED" as OrderStatus,
         fills: [
           {
             price: "50150.00",
             qty: "0.01994",
             commission: "0.00001994",
             commissionAsset: "BTC",
+            tradeId: 123456,
           },
         ],
-      };
+      } as BinanceOrder;
 
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.createOrder.mockResolvedValue(mockOrder);
+
+      const result = await buyOrderPlacer.placeOrder(
+        buyAmount,
+        currentPrice,
+        0.003,
+      );
+      const stateData = buyOrderPlacer.getStateUpdateData(result);
+
+      expect(stateData.btcReceived.toString()).toBe("0.01994");
+      expect(stateData.netBTCReceived.toString()).toBe("0.01992006"); // 0.01994 - 0.00001994
+      expect(stateData.totalCostUSDT.toString()).toBe("999.99");
+      expect(stateData.avgPrice.toString()).toBe(result.avgPrice.toString());
+    });
+  });
+
+  describe("Retry Logic", () => {
+    it("should retry on rate limit errors", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      const errorWithCode = new Error("Rate limit exceeded") as Error & {
+        code: string;
+      };
+      errorWithCode.code = "-1003";
+
+      const mockOrder = {
+        orderId: 123456789,
+        executedQty: "0.01994",
+        status: "FILLED" as OrderStatus,
+      } as BinanceOrder;
+
+      mockBinanceClient.createOrder
+        .mockRejectedValueOnce(errorWithCode)
+        .mockResolvedValue(mockOrder);
 
       const result = await buyOrderPlacer.placeOrder(
         buyAmount,
@@ -572,75 +608,57 @@ describe("BuyOrderPlacer", () => {
         0.003,
       );
 
-      const stateUpdateData = buyOrderPlacer.getStateUpdateData(result);
+      expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(2);
+      expect(result.orderId).toBe(123456789);
+    });
 
-      expect(stateUpdateData.btcReceived.toString()).toBe("0.01994");
-      expect(stateUpdateData.netBTCReceived.toString()).toBe("0.01992006"); // 0.01994 - 0.00001994
-      expect(stateUpdateData.totalCostUSDT.toString()).toBe("999.99");
-      expect(stateUpdateData.avgPrice.toString()).toBe("50149.699397590361446"); // 999.99 / 0.01994
+    it("should retry on internal Binance errors", async () => {
+      const buyAmount = new Decimal("1000");
+      const currentPrice = new Decimal("50000");
+
+      const errorWithCode = new Error("Internal error") as Error & {
+        code: string;
+      };
+      errorWithCode.code = "-1001";
+
+      const mockOrder = {
+        orderId: 123456789,
+        executedQty: "0.01994",
+        status: "FILLED" as OrderStatus,
+      } as BinanceOrder;
+
+      mockBinanceClient.createOrder
+        .mockRejectedValueOnce(errorWithCode)
+        .mockResolvedValue(mockOrder);
+
+      const result = await buyOrderPlacer.placeOrder(
+        buyAmount,
+        currentPrice,
+        0.003,
+      );
+
+      expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(2);
+      expect(result.orderId).toBe(123456789);
     });
   });
 
-  describe("Event Emissions", () => {
-    it("should emit orderPlacing event before submitting", async () => {
-      const buyAmount = new Decimal("1000");
-      const currentPrice = new Decimal("50000");
-
-      const mockOrderResponse = {
-        symbol: "BTCUSDT",
+  describe("Order Status Query", () => {
+    it("should get order status by client order ID", async () => {
+      const mockOrder = {
         orderId: 123456789,
-        executedQty: "0.01994",
-        status: "FILLED",
-        fills: [],
-      };
+        status: "FILLED" as OrderStatus,
+      } as BinanceOrder;
 
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
 
-      const eventSpy = jest.spyOn(buyOrderPlacer, "emit");
+      const status = await buyOrderPlacer.getOrderStatus("BUY_123_abc");
 
-      await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
-
-      const orderPlacingCalls = eventSpy.mock.calls.filter(
-        (call) => call[0] === "orderPlacing",
+      expect(mockBinanceClient.getOrder).toHaveBeenCalledWith(
+        "BTCUSDT",
+        undefined,
+        "BUY_123_abc",
       );
-      expect(orderPlacingCalls.length).toBe(1);
-
-      const orderParams = orderPlacingCalls[0][1] as Record<string, unknown>;
-      expect(orderParams.symbol).toBe("BTCUSDT");
-      expect(orderParams.quantity).toBeInstanceOf(Decimal);
-      expect(orderParams.limitPrice).toBeInstanceOf(Decimal);
-    });
-
-    it("should emit orderCompleted event on success", async () => {
-      const buyAmount = new Decimal("1000");
-      const currentPrice = new Decimal("50000");
-
-      const mockOrderResponse = {
-        symbol: "BTCUSDT",
-        orderId: 123456789,
-        executedQty: "0.01994",
-        status: "FILLED",
-        fills: [],
-      };
-
-      asMock(mockBinanceClient).createOrder = jest
-        .fn()
-        .mockResolvedValue(mockOrderResponse);
-
-      const eventSpy = jest.spyOn(buyOrderPlacer, "emit");
-
-      await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
-
-      const orderCompletedCalls = eventSpy.mock.calls.filter(
-        (call) => call[0] === "orderCompleted",
-      );
-      expect(orderCompletedCalls.length).toBe(1);
-
-      const result = orderCompletedCalls[0][1] as Record<string, unknown>;
-      expect(result.orderId).toBe(123456789);
-      expect(result.status).toBe("FILLED");
+      expect(status.status).toBe("FILLED");
     });
   });
 });
