@@ -550,6 +550,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockPrice,
       } as unknown as Response);
 
@@ -573,6 +574,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockOrderBook,
       } as unknown as Response);
 
@@ -601,6 +603,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () =>
           mockKlines.map((k) => [
             k.openTime,
@@ -685,6 +688,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockAccountInfo,
       } as unknown as Response);
 
@@ -722,6 +726,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockAccountInfo,
       } as unknown as Response);
 
@@ -748,6 +753,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockAccountInfo,
       } as unknown as Response);
 
@@ -778,6 +784,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockTrades,
       } as unknown as Response);
 
@@ -809,6 +816,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockAccountInfo,
       } as unknown as Response);
 
@@ -866,6 +874,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockOrder,
       } as unknown as Response);
 
@@ -911,6 +920,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockOrder,
       } as unknown as Response);
 
@@ -947,6 +957,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockOrder,
       } as unknown as Response);
 
@@ -984,6 +995,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockCancelResponse,
       } as unknown as Response);
 
@@ -1016,6 +1028,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockOrder,
       } as unknown as Response);
 
@@ -1070,6 +1083,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockOrders,
       } as unknown as Response);
 
@@ -1156,6 +1170,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        headers: new Headers(),
         status: 400,
         json: async () => errorResponse,
       } as unknown as Response);
@@ -1280,6 +1295,7 @@ describe("BinanceClient", () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: new Headers(),
         json: async () => mockListenKey,
       } as unknown as Response);
 
