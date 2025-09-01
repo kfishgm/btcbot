@@ -25,7 +25,21 @@ import type {
 } from "../../src/exchange/types";
 
 // Mock the global fetch
-global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+if (!global.fetch) {
+  global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+}
+
+// Helper to create mock responses
+const createMockResponse = (
+  ok: boolean,
+  json: unknown,
+  headers?: Record<string, string>,
+): Partial<Response> => ({
+  ok,
+  headers: new Headers(headers || {}),
+  json: async () => json,
+  status: ok ? 200 : 400,
+});
 
 describe("BinanceClient", () => {
   let client: BinanceClient;
@@ -34,13 +48,20 @@ describe("BinanceClient", () => {
   beforeEach(() => {
     // Clear all mocks before each test
     jest.clearAllMocks();
-    jest.useFakeTimers();
+    // Don't use fake timers by default - only enable in specific tests
+
+    // Ensure fetch is mocked
+    if (!jest.isMockFunction(global.fetch)) {
+      global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+    }
+
     mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
     // Reset the mock implementation
     mockFetch.mockReset();
   });
 
   afterEach(() => {
+    // Always restore timers to ensure clean state
     jest.useRealTimers();
   });
 
@@ -167,17 +188,15 @@ describe("BinanceClient", () => {
     });
 
     it("should add timestamp automatically to signed requests", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ serverTime: Date.now() }),
-      } as unknown as Response);
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse(true, { serverTime: Date.now() }) as Response,
+      );
 
       await client.syncTime();
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ balances: [] }),
-      } as unknown as Response);
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse(true, { balances: [] }) as Response,
+      );
 
       await client.getAccountInfo();
 
@@ -215,6 +234,7 @@ describe("BinanceClient", () => {
 
   describe("Timestamp Synchronization", () => {
     beforeEach(() => {
+      jest.useFakeTimers();
       const config: BinanceConfig = {
         apiKey: "test-api-key",
         apiSecret: "test-api-secret",
@@ -223,12 +243,17 @@ describe("BinanceClient", () => {
       client = new BinanceClient(config);
     });
 
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     it("should sync with server time", async () => {
       const serverTime = 1234567890123;
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ serverTime }) as BinanceServerTime,
-      } as unknown as Response);
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse(true, {
+          serverTime,
+        } as BinanceServerTime) as Response,
+      );
 
       await client.syncTime();
       expect(client.getTimeDiff()).toBeDefined();
@@ -243,11 +268,11 @@ describe("BinanceClient", () => {
     });
 
     it("should validate timestamp within recvWindow", async () => {
+      jest.setSystemTime(new Date("2024-01-01T00:00:00Z"));
       const serverTime = Date.now();
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ serverTime }),
-      } as unknown as Response);
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse(true, { serverTime }) as Response,
+      );
 
       await client.syncTime();
 
@@ -257,11 +282,13 @@ describe("BinanceClient", () => {
     });
 
     it("should detect expired timestamps", async () => {
+      // Set initial time
+      jest.setSystemTime(new Date("2024-01-01T00:00:00Z"));
       const serverTime = Date.now();
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ serverTime }),
-      } as unknown as Response);
+
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse(true, { serverTime }) as Response,
+      );
 
       await client.syncTime();
 
@@ -271,6 +298,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 400,
+        headers: new Headers(),
         json: async () => ({
           code: -1021,
           msg: "Timestamp for this request is outside of the recvWindow.",
@@ -283,13 +311,13 @@ describe("BinanceClient", () => {
     });
 
     it("should automatically resync time on timestamp errors", async () => {
+      jest.setSystemTime(new Date("2024-01-01T00:00:00Z"));
       const serverTime = Date.now();
 
       // Initial sync
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ serverTime }),
-      } as unknown as Response);
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse(true, { serverTime }) as Response,
+      );
       await client.syncTime();
 
       // Advance time
@@ -299,6 +327,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 400,
+        headers: new Headers(),
         json: async () => ({
           code: -1021,
           msg: "Timestamp for this request is outside of the recvWindow.",
@@ -324,12 +353,17 @@ describe("BinanceClient", () => {
 
   describe("Rate Limiting", () => {
     beforeEach(() => {
+      jest.useFakeTimers();
       const config: BinanceConfig = {
         apiKey: "test-api-key",
         apiSecret: "test-api-secret",
         testnet: false,
       };
       client = new BinanceClient(config);
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
     });
 
     it("should track request weight", () => {
@@ -1101,12 +1135,17 @@ describe("BinanceClient", () => {
 
   describe("Error Handling", () => {
     beforeEach(() => {
+      jest.useFakeTimers();
       const config: BinanceConfig = {
         apiKey: "test-api-key",
         apiSecret: "test-api-secret",
         testnet: false,
       };
       client = new BinanceClient(config);
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
     });
 
     it("should handle Binance API errors with error codes", async () => {
