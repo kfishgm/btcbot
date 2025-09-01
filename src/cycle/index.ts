@@ -27,3 +27,9 @@ export type {
   BalanceInfo,
   BuyTriggerResult,
 } from "./buy-trigger-detector.js";
+
+export { BuyOrderStateUpdater } from "./buy-order-state-updater.js";
+export type {
+  StateUpdateResult,
+  StateUpdateData,
+} from "./buy-order-state-updater.js";
