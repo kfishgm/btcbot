@@ -49,8 +49,14 @@ export interface PurchaseDecision {
   isLastPurchase: boolean;
 }
 
+/**
+ * Calculator for determining appropriate buy amounts in trading cycles
+ */
 export class BuyAmountCalculator {
+  // Constants from STRATEGY.md
   private static readonly USDT_PRECISION_DECIMALS = 8;
+
+  // Instance configuration
   private config: BuyAmountConfig | null = null;
   private exchangeMinNotional = 0;
 
@@ -141,12 +147,24 @@ export class BuyAmountCalculator {
       throw new Error("No purchases remaining");
     }
 
-    // Last purchase: use ALL remaining capital
+    // Determine which amount to use based on STRATEGY.md rules
+    const amountToUse = this.determineAmountToUse(state);
+
+    return BuyAmountCalculator.floorToPrecision(
+      amountToUse,
+      BuyAmountCalculator.USDT_PRECISION_DECIMALS,
+    );
+  }
+
+  /**
+   * Determine which amount to use based on state
+   * @param state Current cycle state
+   * @returns Amount to use for purchase
+   */
+  private determineAmountToUse(state: CycleState): number {
+    // Last purchase: use ALL remaining capital (from STRATEGY.md)
     if (state.purchases_remaining === 1) {
-      return BuyAmountCalculator.floorToPrecision(
-        state.capital_available,
-        BuyAmountCalculator.USDT_PRECISION_DECIMALS,
-      );
+      return state.capital_available;
     }
 
     // Regular purchase: use pre-calculated buy_amount
@@ -154,10 +172,7 @@ export class BuyAmountCalculator {
       throw new Error("Buy amount not initialized");
     }
 
-    return BuyAmountCalculator.floorToPrecision(
-      state.buy_amount,
-      BuyAmountCalculator.USDT_PRECISION_DECIMALS,
-    );
+    return state.buy_amount;
   }
 
   /**
@@ -176,6 +191,7 @@ export class BuyAmountCalculator {
 
   /**
    * Get complete purchase decision with amount and skip logic
+   * Provides comprehensive information for trading decisions
    * @param state Current cycle state
    * @param validationConfig Validation configuration
    * @returns Purchase decision with amount and skip status
@@ -195,14 +211,24 @@ export class BuyAmountCalculator {
     };
 
     if (shouldSkip) {
-      const minimumRequired = Math.max(
-        validationConfig.minBuyUSDT,
-        validationConfig.exchangeMinNotional,
-      );
-      decision.skipReason = `Amount ${amount} is below minimum required ${minimumRequired}`;
+      decision.skipReason = this.generateSkipReason(amount, validationConfig);
     }
 
     return decision;
+  }
+
+  /**
+   * Generate skip reason message
+   * @param amount Amount being validated
+   * @param config Validation configuration
+   * @returns Skip reason message
+   */
+  private generateSkipReason(amount: number, config: ValidationConfig): string {
+    const minimumRequired = Math.max(
+      config.minBuyUSDT,
+      config.exchangeMinNotional,
+    );
+    return `Amount ${amount} is below minimum required ${minimumRequired}`;
   }
 
   /**
@@ -243,6 +269,7 @@ export class BuyAmountCalculator {
 
   /**
    * Extract minimum notional from exchange symbol info
+   * Parses exchange-specific trading rules
    * @param symbolInfo Exchange symbol information
    * @returns Minimum notional value or 0 if not found
    */
@@ -253,7 +280,7 @@ export class BuyAmountCalculator {
 
     if (minNotionalFilter?.minNotional) {
       const value = parseFloat(minNotionalFilter.minNotional);
-      return isNaN(value) ? 0 : value;
+      return isNaN(value) ? 0 : Math.max(0, value); // Ensure non-negative
     }
 
     return 0;
@@ -294,6 +321,7 @@ export class BuyAmountCalculator {
 
   /**
    * Validate buy amount against minimums
+   * Ensures compliance with both platform and exchange requirements
    * @param amount Amount to validate
    * @param minBuyUSDT Minimum buy amount in USDT
    * @param exchangeMinNotional Exchange minimum notional
