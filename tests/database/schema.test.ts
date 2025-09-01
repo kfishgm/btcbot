@@ -285,7 +285,7 @@ describe("Database Schema", () => {
       const { data: updated } = await supabase
         .from("strategy_config")
         .update({ is_active: true })
-        .eq("id", inserted!.id)
+        .eq("id", (inserted as { id: string }).id)
         .select()
         .single();
 
@@ -839,7 +839,7 @@ describe("Database Schema", () => {
       const { data: trade } = await supabase
         .from("trades")
         .insert({
-          cycle_id: cycle!.id,
+          cycle_id: (cycle as { id: string }).id,
           type: "BUY",
           order_id: "REF_TEST",
           status: "FILLED",
@@ -855,14 +855,20 @@ describe("Database Schema", () => {
       const { error } = await supabase
         .from("cycle_state")
         .delete()
-        .eq("id", cycle!.id);
+        .eq("id", (cycle as { id: string }).id);
 
       expect(error).toBeDefined();
       expect(error?.message).toContain("foreign key");
 
       // Clean up
-      await supabase.from("trades").delete().eq("id", trade!.id);
-      await supabase.from("cycle_state").delete().eq("id", cycle!.id);
+      await supabase
+        .from("trades")
+        .delete()
+        .eq("id", (trade as { id: string }).id);
+      await supabase
+        .from("cycle_state")
+        .delete()
+        .eq("id", (cycle as { id: string }).id);
     });
 
     it("should handle decimal precision correctly", async () => {
@@ -907,12 +913,12 @@ describe("Database Schema", () => {
       const update1 = supabase
         .from("cycle_state")
         .update({ capital_available: 900.0 })
-        .eq("id", cycle!.id);
+        .eq("id", (cycle as { id: string }).id);
 
       const update2 = supabase
         .from("cycle_state")
         .update({ purchases_remaining: 9 })
-        .eq("id", cycle!.id);
+        .eq("id", (cycle as { id: string }).id);
 
       const [result1, result2] = await Promise.all([update1, update2]);
 
@@ -923,7 +929,7 @@ describe("Database Schema", () => {
       const { data: final } = await supabase
         .from("cycle_state")
         .select()
-        .eq("id", cycle!.id)
+        .eq("id", (cycle as { id: string }).id)
         .single();
 
       // One of the updates should have won

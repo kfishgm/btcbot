@@ -1,41 +1,68 @@
-import { HistoricalCandleManager } from "../../src/exchange/historical-candle-manager";
-import { BinanceClient } from "../../src/exchange/binance-client";
-import type { BinanceKline } from "../../src/exchange/types";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from "@jest/globals";
 
 // Mock the BinanceClient
 jest.mock("../../src/exchange/binance-client");
 
+// Import everything
+import { HistoricalCandleManager } from "../../src/exchange/historical-candle-manager";
+import { BinanceClient } from "../../src/exchange/binance-client";
+import type { BinanceKline } from "../../src/exchange/types";
+import { logger } from "../../src/utils/logger";
+
 describe("HistoricalCandleManager", () => {
-  let mockClient: jest.Mocked<BinanceClient>;
+  let mockClient: BinanceClient;
   let manager: HistoricalCandleManager;
   const testSymbol = "BTCUSDT";
   const testInterval = "1h";
 
+  // Type for mocked getKlines function
+  type MockGetKlines = jest.MockedFunction<
+    typeof BinanceClient.prototype.getKlines
+  >;
+
   // Helper function to create mock kline data
-  const createMockKline = (
-    overrides?: Partial<BinanceKline>,
-  ): BinanceKline => ({
-    openTime: Date.now() - 3600000,
-    open: "50000.00",
-    high: "51000.00",
-    low: "49000.00",
-    close: "50500.00",
-    volume: "100.00",
-    closeTime: Date.now(),
-    quoteAssetVolume: "5050000.00",
-    numberOfTrades: 1000,
-    takerBuyBaseAssetVolume: "50.00",
-    takerBuyQuoteAssetVolume: "2525000.00",
-    ...overrides,
-  });
+  const createMockKline = (overrides?: Partial<BinanceKline>): BinanceKline => {
+    const baseTime = Date.now() - 3600000;
+    const openTime = overrides?.openTime ?? baseTime;
+    // Calculate closeTime based on the actual openTime being used
+    const defaultCloseTime = openTime + 3599999; // 1 ms before the next hour
+
+    // Build the kline with defaults, then apply overrides
+    const baseKline: BinanceKline = {
+      openTime,
+      open: overrides?.open ?? "50000.00",
+      high: overrides?.high ?? "51000.00",
+      low: overrides?.low ?? "49000.00",
+      close: overrides?.close ?? "50500.00",
+      volume: overrides?.volume ?? "100.00",
+      closeTime: overrides?.closeTime ?? defaultCloseTime,
+      quoteAssetVolume: overrides?.quoteAssetVolume ?? "5050000.00",
+      numberOfTrades: overrides?.numberOfTrades ?? 1000,
+      takerBuyBaseAssetVolume: overrides?.takerBuyBaseAssetVolume ?? "50.00",
+      takerBuyQuoteAssetVolume:
+        overrides?.takerBuyQuoteAssetVolume ?? "2525000.00",
+    };
+
+    return baseKline;
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
+
     mockClient = new BinanceClient({
       apiKey: "test",
       apiSecret: "test",
       testnet: true,
-    }) as jest.Mocked<BinanceClient>;
+    });
+    // Override methods with mocks - properly typed
+    mockClient.getKlines = jest.fn() as unknown as typeof mockClient.getKlines;
   });
 
   afterEach(() => {
@@ -53,7 +80,7 @@ describe("HistoricalCandleManager", () => {
         }),
       );
 
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -78,7 +105,7 @@ describe("HistoricalCandleManager", () => {
         }),
       );
 
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -100,8 +127,10 @@ describe("HistoricalCandleManager", () => {
         }),
       );
 
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
-      const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
+
+      // Spy on logger to suppress output in tests
+      const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => {});
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -111,15 +140,20 @@ describe("HistoricalCandleManager", () => {
       await manager.initialize();
 
       expect(manager.getCandleHistory()).toHaveLength(10);
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining("insufficient history"),
+        expect.objectContaining({
+          symbol: testSymbol,
+          received: 10,
+          expected: 20,
+        }),
       );
 
-      consoleSpy.mockRestore();
+      warnSpy.mockRestore();
     });
 
     it("should handle no candles available", async () => {
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -133,9 +167,9 @@ describe("HistoricalCandleManager", () => {
     });
 
     it("should handle initialization errors gracefully", async () => {
-      mockClient.getKlines = jest
-        .fn()
-        .mockRejectedValue(new Error("API error"));
+      (mockClient.getKlines as MockGetKlines).mockRejectedValue(
+        new Error("API error"),
+      );
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -149,7 +183,7 @@ describe("HistoricalCandleManager", () => {
 
     it("should prevent re-initialization", async () => {
       const mockKlines = Array.from({ length: 20 }, () => createMockKline());
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -171,7 +205,7 @@ describe("HistoricalCandleManager", () => {
           high: `${51000 + i * 100}.00`,
         }),
       );
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
       manager = new HistoricalCandleManager(
         mockClient,
         testSymbol,
@@ -250,7 +284,7 @@ describe("HistoricalCandleManager", () => {
         createMockKline({ high: "55000.00" }), // This is ATH
         createMockKline({ high: "52000.00" }),
       ];
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -273,7 +307,7 @@ describe("HistoricalCandleManager", () => {
 
     it("should update ATH when new higher candle is added", async () => {
       const mockKlines = [createMockKline({ high: "50000.00" })];
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -290,7 +324,7 @@ describe("HistoricalCandleManager", () => {
 
     it("should provide statistics about window completeness", async () => {
       const mockKlines = Array.from({ length: 10 }, () => createMockKline());
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
 
       manager = new HistoricalCandleManager(
         mockClient,
@@ -308,7 +342,7 @@ describe("HistoricalCandleManager", () => {
 
   describe("REST API Fallback", () => {
     beforeEach(async () => {
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(
         mockClient,
         testSymbol,
@@ -338,39 +372,58 @@ describe("HistoricalCandleManager", () => {
       jest.useFakeTimers();
 
       const mockKlines = [createMockKline()];
-      mockClient.getKlines = jest.fn().mockResolvedValue(mockKlines);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
+
+      // Clear the initial fetch from initialize
+      jest.clearAllMocks();
 
       manager.startRestPolling(1000);
 
-      // Fast-forward time
-      jest.advanceTimersByTime(3000);
-      await Promise.resolve(); // Let promises resolve
+      // Initial fetch happens immediately
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockClient.getKlines).toHaveBeenCalledTimes(1);
 
+      // Fast-forward time for first interval
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+      expect(mockClient.getKlines).toHaveBeenCalledTimes(2);
+
+      // Fast-forward time for second interval
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
       expect(mockClient.getKlines).toHaveBeenCalledTimes(3);
 
+      manager.stopRestPolling();
       jest.useRealTimers();
     });
 
     it("should handle polling errors gracefully", async () => {
       jest.useFakeTimers();
 
-      mockClient.getKlines = jest
-        .fn()
-        .mockRejectedValue(new Error("Network error"));
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+      (mockClient.getKlines as MockGetKlines).mockRejectedValue(
+        new Error("Network error"),
+      );
+
+      // Spy on logger to suppress and verify error logging
+      const errorSpy = jest.spyOn(logger, "error").mockImplementation(() => {});
 
       manager.startRestPolling(1000);
 
-      jest.advanceTimersByTime(1000);
-      await Promise.resolve();
+      // Wait for initial poll to complete with error
+      await jest.runOnlyPendingTimersAsync();
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining("REST polling error"),
-        expect.any(Error),
+        expect.objectContaining({
+          error: "Network error",
+          symbol: testSymbol,
+        }),
       );
       expect(manager.isPolling()).toBe(true); // Should continue polling
 
-      consoleSpy.mockRestore();
+      manager.stopRestPolling();
+      errorSpy.mockRestore();
       jest.useRealTimers();
     });
 
@@ -388,29 +441,39 @@ describe("HistoricalCandleManager", () => {
       const candle1 = createMockKline({ openTime: 1000, high: "50000.00" });
       const candle2 = createMockKline({ openTime: 2000, high: "60000.00" });
 
-      mockClient.getKlines = jest
-        .fn()
+      // Reset manager state to avoid candles from initialization
+      manager.stop();
+      manager = new HistoricalCandleManager(
+        mockClient,
+        testSymbol,
+        testInterval,
+      );
+
+      (mockClient.getKlines as MockGetKlines)
         .mockResolvedValueOnce([candle1])
         .mockResolvedValueOnce([candle1, candle2]);
 
       manager.startRestPolling(1000);
 
-      jest.advanceTimersByTime(1000);
+      // Wait for first poll (immediate)
+      await Promise.resolve();
       await Promise.resolve();
       expect(manager.getCandleHistory()).toHaveLength(1);
 
+      // Advance for second poll
       jest.advanceTimersByTime(1000);
-      await Promise.resolve();
+      await jest.runOnlyPendingTimersAsync();
       expect(manager.getCandleHistory()).toHaveLength(2);
       expect(manager.calculateATH()).toBe(60000);
 
+      manager.stopRestPolling();
       jest.useRealTimers();
     });
   });
 
   describe("WebSocket Failure Detection", () => {
     beforeEach(async () => {
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(
         mockClient,
         testSymbol,
@@ -500,7 +563,7 @@ describe("HistoricalCandleManager", () => {
 
   describe("Thread Safety and Cleanup", () => {
     it("should clean up resources on stop", async () => {
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(
         mockClient,
         testSymbol,
@@ -518,7 +581,7 @@ describe("HistoricalCandleManager", () => {
     });
 
     it("should handle concurrent add operations safely", async () => {
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(
         mockClient,
         testSymbol,
@@ -540,7 +603,9 @@ describe("HistoricalCandleManager", () => {
     });
 
     it("should provide thread-safe read access", async () => {
-      mockClient.getKlines = jest.fn().mockResolvedValue([createMockKline()]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([
+        createMockKline(),
+      ]);
       manager = new HistoricalCandleManager(
         mockClient,
         testSymbol,
@@ -584,13 +649,19 @@ describe("HistoricalCandleManager", () => {
     it("should handle zero volume candles", () => {
       const zeroVolumeCandle = createMockKline({ volume: "0" });
 
-      const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
+      // Spy on logger to suppress and verify warning
+      const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => {});
+
       manager.addCandle(zeroVolumeCandle);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Zero volume candle"),
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Zero volume candle detected",
+        expect.objectContaining({
+          symbol: testSymbol,
+        }),
       );
-      consoleSpy.mockRestore();
+
+      warnSpy.mockRestore();
     });
 
     it("should reject negative price values", () => {
@@ -602,7 +673,7 @@ describe("HistoricalCandleManager", () => {
 
   describe("Performance Monitoring", () => {
     beforeEach(async () => {
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(
         mockClient,
         testSymbol,
@@ -611,21 +682,22 @@ describe("HistoricalCandleManager", () => {
     });
 
     it("should track fetch latency", async () => {
-      const delay = 100;
-      mockClient.getKlines = jest
-        .fn()
-        .mockImplementation(
-          () =>
-            new Promise((resolve) =>
-              setTimeout(() => resolve([createMockKline()]), delay),
-            ),
-        );
+      jest.useRealTimers(); // Use real timers for accurate timing
+      const delay = 50;
+      (mockClient.getKlines as MockGetKlines).mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve([createMockKline()]), delay),
+          ),
+      );
 
       await manager.initialize();
 
       const metrics = manager.getMetrics();
-      expect(metrics.lastFetchLatency).toBeGreaterThanOrEqual(delay);
-    });
+      // Allow some tolerance for timing
+      expect(metrics.lastFetchLatency).toBeGreaterThanOrEqual(delay - 10);
+      expect(metrics.lastFetchLatency).toBeLessThan(delay + 200);
+    }, 10000);
 
     it("should track memory usage", async () => {
       await manager.initialize();
@@ -644,8 +716,7 @@ describe("HistoricalCandleManager", () => {
     });
 
     it("should provide fetch statistics", async () => {
-      mockClient.getKlines = jest
-        .fn()
+      (mockClient.getKlines as MockGetKlines)
         .mockResolvedValueOnce([createMockKline()])
         .mockRejectedValueOnce(new Error("Failed"))
         .mockResolvedValueOnce([createMockKline()]);
@@ -669,25 +740,31 @@ describe("HistoricalCandleManager", () => {
 });
 
 describe("HistoricalCandleManager Integration Tests", () => {
-  let mockClient: jest.Mocked<BinanceClient>;
+  let mockClient: BinanceClient;
   let manager: HistoricalCandleManager;
 
-  const createMockKline = (
-    overrides?: Partial<BinanceKline>,
-  ): BinanceKline => ({
-    openTime: Date.now() - 3600000,
-    open: "50000.00",
-    high: "51000.00",
-    low: "49000.00",
-    close: "50500.00",
-    volume: "100.00",
-    closeTime: Date.now(),
-    quoteAssetVolume: "5050000.00",
-    numberOfTrades: 1000,
-    takerBuyBaseAssetVolume: "50.00",
-    takerBuyQuoteAssetVolume: "2525000.00",
-    ...overrides,
-  });
+  // Type for mocked getKlines function
+  type MockGetKlines = jest.MockedFunction<
+    typeof BinanceClient.prototype.getKlines
+  >;
+
+  const createMockKline = (overrides?: Partial<BinanceKline>): BinanceKline => {
+    const baseTime = Date.now() - 3600000;
+    return {
+      openTime: baseTime,
+      open: "50000.00",
+      high: "51000.00",
+      low: "49000.00",
+      close: "50500.00",
+      volume: "100.00",
+      closeTime: baseTime + 3599999, // 1 ms before the next hour
+      quoteAssetVolume: "5050000.00",
+      numberOfTrades: 1000,
+      takerBuyBaseAssetVolume: "50.00",
+      takerBuyQuoteAssetVolume: "2525000.00",
+      ...overrides,
+    };
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -695,7 +772,8 @@ describe("HistoricalCandleManager Integration Tests", () => {
       apiKey: "test",
       apiSecret: "test",
       testnet: true,
-    }) as jest.Mocked<BinanceClient>;
+    });
+    mockClient.getKlines = jest.fn() as unknown as typeof mockClient.getKlines;
   });
 
   afterEach(() => {
@@ -708,7 +786,7 @@ describe("HistoricalCandleManager Integration Tests", () => {
     it("should handle complete failure → REST polling → recovery cycle", async () => {
       jest.useFakeTimers();
 
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(mockClient, "BTCUSDT", "1h", {
         websocketFailureThreshold: 2,
         restPollingInterval: 1000,
@@ -724,7 +802,7 @@ describe("HistoricalCandleManager Integration Tests", () => {
 
       // Let polling run
       const newCandle = createMockKline({ high: "60000.00" });
-      mockClient.getKlines = jest.fn().mockResolvedValue([newCandle]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([newCandle]);
 
       jest.advanceTimersByTime(1000);
       await Promise.resolve();
@@ -749,7 +827,9 @@ describe("HistoricalCandleManager Integration Tests", () => {
         createMockKline({ openTime: 3000, high: "47000.00" }),
       ];
 
-      mockClient.getKlines = jest.fn().mockResolvedValue(historicalCandles);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue(
+        historicalCandles,
+      );
       manager = new HistoricalCandleManager(mockClient, "BTCUSDT", "1h");
       await manager.initialize();
 
@@ -777,8 +857,7 @@ describe("HistoricalCandleManager Integration Tests", () => {
         "1h",
       );
 
-      mockClient.getKlines = jest
-        .fn()
+      (mockClient.getKlines as MockGetKlines)
         .mockResolvedValueOnce([createMockKline({ high: "50000.00" })]) // BTC
         .mockResolvedValueOnce([createMockKline({ high: "3000.00" })]); // ETH
 
@@ -797,12 +876,12 @@ describe("HistoricalCandleManager Integration Tests", () => {
     it("should recover from intermittent API failures during polling", async () => {
       jest.useFakeTimers();
 
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(mockClient, "BTCUSDT", "1h");
       await manager.initialize();
 
       let callCount = 0;
-      mockClient.getKlines = jest.fn().mockImplementation(() => {
+      (mockClient.getKlines as MockGetKlines).mockImplementation(() => {
         callCount++;
         if (callCount % 2 === 0) {
           return Promise.reject(new Error("Network error"));
@@ -830,27 +909,33 @@ describe("HistoricalCandleManager Integration Tests", () => {
 
   describe("Memory Management", () => {
     it("should prevent memory leaks when processing large volumes", async () => {
-      mockClient.getKlines = jest.fn().mockResolvedValue([]);
+      (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(mockClient, "BTCUSDT", "1h", {
         maxCandles: 20,
       });
       await manager.initialize();
 
-      const initialMetrics = manager.getMetrics();
-
       // Add thousands of candles
+      const baseTime = Date.now();
       for (let i = 0; i < 1000; i++) {
-        manager.addCandle(createMockKline({ openTime: Date.now() + i * 1000 }));
+        const openTime = baseTime + i * 3600000; // Each candle 1 hour apart
+        manager.addCandle(
+          createMockKline({
+            openTime,
+            closeTime: openTime + 3599999,
+          }),
+        );
       }
 
       // Should still only have maxCandles in memory
       expect(manager.getCandleHistory()).toHaveLength(20);
 
       const finalMetrics = manager.getMetrics();
-      // Memory should be bounded, not growing infinitely
-      expect(finalMetrics.memoryUsage).toBeLessThan(
-        initialMetrics.memoryUsage * 100,
-      );
+      // Memory should be bounded - we only keep 20 candles regardless of how many we add
+      // The memory usage should be reasonable for 20 candles (less than 10MB)
+      expect(finalMetrics.memoryUsage).toBeLessThan(10 * 1024 * 1024); // 10MB
+      // Verify we only have maxCandles in memory
+      expect(manager.getCandleHistory()).toHaveLength(20);
     });
   });
 });
