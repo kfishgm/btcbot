@@ -36,11 +36,11 @@ describe("Logger Module", () => {
 
     // Spy on console methods
     consoleSpy = {
-      log: jest.spyOn(console, "log").mockImplementation(),
-      error: jest.spyOn(console, "error").mockImplementation(),
-      warn: jest.spyOn(console, "warn").mockImplementation(),
-      info: jest.spyOn(console, "info").mockImplementation(),
-      debug: jest.spyOn(console, "debug").mockImplementation(),
+      log: jest.spyOn(console, "log").mockImplementation(() => {}),
+      error: jest.spyOn(console, "error").mockImplementation(() => {}),
+      warn: jest.spyOn(console, "warn").mockImplementation(() => {}),
+      info: jest.spyOn(console, "info").mockImplementation(() => {}),
+      debug: jest.spyOn(console, "debug").mockImplementation(() => {}),
     };
   });
 
@@ -396,7 +396,9 @@ describe("Logger Module", () => {
       const parsed = JSON.parse(consoleSpy.info.mock.calls[0][0]);
 
       expect(parsed.type).toBe("METRICS");
-      expect(parsed.metrics).toMatchObject(metrics);
+      expect(parsed.metrics).toMatchObject(
+        metrics as unknown as Record<string, unknown>,
+      );
       expect(parsed.metrics.duration).toBe(125.5);
     });
 
@@ -542,10 +544,12 @@ describe("Logger Module", () => {
         logger.info("End async operation");
       });
 
-      const logCalls = consoleSpy.info.mock.calls.map((c) => JSON.parse(c[0]));
+      const logCalls = consoleSpy.info.mock.calls.map((c: unknown[]) =>
+        JSON.parse(c[0] as string),
+      );
 
       expect(logCalls).toHaveLength(5);
-      logCalls.forEach((log) => {
+      logCalls.forEach((log: { requestId?: string }) => {
         expect(log.requestId).toBe(requestId);
       });
     });
@@ -896,14 +900,18 @@ describe("Logger Module", () => {
 
       await Promise.all(promises);
 
-      const logs = consoleSpy.info.mock.calls.map((c) => JSON.parse(c[0]));
+      const logs = consoleSpy.info.mock.calls.map((c: unknown[]) =>
+        JSON.parse(c[0] as string),
+      );
 
       // Should have 2 logs per request
       expect(logs).toHaveLength(requestCount * 2);
 
       // Each request should have consistent request ID
       for (let i = 0; i < requestCount; i++) {
-        const requestLogs = logs.filter((l) => l.requestId === `req-${i}`);
+        const requestLogs = logs.filter(
+          (l: { requestId?: string }) => l.requestId === `req-${i}`,
+        );
         expect(requestLogs).toHaveLength(2);
       }
     });
