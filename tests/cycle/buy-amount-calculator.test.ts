@@ -541,32 +541,32 @@ describe("BuyAmountCalculator", () => {
       const initialBuyAmount = calculator.calculateInitialBuyAmount(config);
       expect(initialBuyAmount).toBe(333.33333333); // floor to 8 decimals
 
-      // Simulate purchases
-      let state: CycleState = {
+      // First purchase
+      const state1: CycleState = {
         buy_amount: initialBuyAmount,
         capital_available: 1000,
         purchases_remaining: 3,
       };
-
-      // First purchase
-      let amount = calculator.getPurchaseAmount(state);
-      expect(amount).toBe(333.33333333);
-
-      // After first purchase
-      state.capital_available = 666.66666667;
-      state.purchases_remaining = 2;
+      const amount1 = calculator.getPurchaseAmount(state1);
+      expect(amount1).toBe(333.33333333);
 
       // Second purchase
-      amount = calculator.getPurchaseAmount(state);
-      expect(amount).toBe(333.33333333);
-
-      // After second purchase - rounding accumulation
-      state.capital_available = 333.33333334;
-      state.purchases_remaining = 1;
+      const state2: CycleState = {
+        buy_amount: initialBuyAmount,
+        capital_available: 666.66666667,
+        purchases_remaining: 2,
+      };
+      const amount2 = calculator.getPurchaseAmount(state2);
+      expect(amount2).toBe(333.33333333);
 
       // Last purchase - use ALL remaining (including rounding difference)
-      amount = calculator.getPurchaseAmount(state);
-      expect(amount).toBe(333.33333334);
+      const state3: CycleState = {
+        buy_amount: initialBuyAmount,
+        capital_available: 333.33333334,
+        purchases_remaining: 1,
+      };
+      const amount3 = calculator.getPurchaseAmount(state3);
+      expect(amount3).toBe(333.33333334);
     });
   });
 
