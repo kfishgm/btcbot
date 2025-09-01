@@ -1,15 +1,16 @@
 import { test, expect } from "@playwright/test";
-import { WebSocket } from "ws";
+import WebSocket from "ws";
+import { WebSocketServer } from "ws";
 
 // Mock WebSocket server for testing
 class MockBinanceServer {
-  private wss: WebSocket.Server | null = null;
+  private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
 
   async start(port: number): Promise<void> {
-    this.wss = new WebSocket.Server({ port });
+    this.wss = new WebSocketServer({ port });
 
-    this.wss.on("connection", (ws) => {
+    this.wss.on("connection", (ws: WebSocket) => {
       this.clients.add(ws);
 
       ws.on("close", () => {
