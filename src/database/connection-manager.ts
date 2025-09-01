@@ -62,10 +62,14 @@ export interface ConnectionMetrics {
   idleConnections: number;
   totalQueries: number;
   failedQueries: number;
+  successfulQueries: number;
   averageQueryTime: number;
   connectionRetries: number;
+  reconnectionCount: number;
+  connectionUptime?: number;
   lastConnectionTime?: Date;
   lastQueryTime?: Date;
+  lastHealthCheck?: Date;
 }
 
 export interface ConnectionPoolStats {
@@ -98,7 +102,8 @@ export type ConnectionState =
   | "reconnecting"
   | "error"
   | "closing"
-  | "closed";
+  | "closed"
+  | "failed";
 
 interface ConnectionPoolEntry {
   client: SupabaseClient<Database>;
@@ -121,6 +126,7 @@ export class ConnectionManager extends EventEmitter {
   private state: ConnectionState = "disconnected";
   private metrics: ConnectionMetrics;
   private isShuttingDown = false;
+  private activeOperations = new Set<{ reject: (error: Error) => void }>();
   private operationQueue: QueuedOperation[] = [];
   private reconnectTimer?: NodeJS.Timeout;
   private idleCheckTimer?: NodeJS.Timeout;
@@ -138,6 +144,14 @@ export class ConnectionManager extends EventEmitter {
   private validateConfig(config: ConnectionConfig): ConnectionConfig {
     if (!config.url || !config.key) {
       throw new Error("Supabase URL and key are required");
+    }
+
+    // Validate SSL in production
+    if (process.env.NODE_ENV === "production") {
+      const url = new URL(config.url);
+      if (url.protocol === "http:" && config.sslOptions?.enabled !== false) {
+        throw new Error("HTTPS is required in production environment");
+      }
     }
 
     // Set defaults
@@ -181,8 +195,10 @@ export class ConnectionManager extends EventEmitter {
       idleConnections: 0,
       totalQueries: 0,
       failedQueries: 0,
+      successfulQueries: 0,
       averageQueryTime: 0,
       connectionRetries: 0,
+      reconnectionCount: 0,
     };
   }
 
@@ -215,34 +231,63 @@ export class ConnectionManager extends EventEmitter {
   }
 
   async connect(): Promise<void> {
+    if (this.isShuttingDown) {
+      throw new Error("Connection manager has been shut down");
+    }
+
     if (this.state === "connected") {
       return;
     }
 
     this.setState("connecting");
 
-    try {
-      // Create initial connections
-      const minConnections = this.config.poolOptions?.minConnections || 2;
-      const promises: Promise<void>[] = [];
+    const maxRetries = this.config.retryOptions?.maxRetries || 3;
+    let lastError: Error | null = null;
 
-      for (let i = 0; i < minConnections; i++) {
-        promises.push(this.createConnection());
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        // Create initial connections
+        const minConnections = this.config.poolOptions?.minConnections || 2;
+        const maxConnections = this.config.poolOptions?.maxConnections || 10;
+        const connectionsToCreate = Math.min(minConnections, maxConnections);
+        const promises: Promise<void>[] = [];
+
+        for (let i = 0; i < connectionsToCreate; i++) {
+          promises.push(this.createConnection());
+        }
+
+        await Promise.all(promises);
+
+        // Test connection
+        await this.testConnection();
+
+        this.setState("connected");
+        this.metrics.lastConnectionTime = new Date();
+        this.emit("connected");
+        return; // Success
+      } catch (error) {
+        lastError = error as Error;
+        this.metrics.connectionRetries++;
+
+        if (attempt < maxRetries) {
+          // Calculate delay with exponential backoff
+          const initialDelay = this.config.retryOptions?.initialDelay || 1000;
+          const factor = this.config.retryOptions?.factor || 2;
+          const maxDelay = this.config.retryOptions?.maxDelay || 30000;
+          const delay = Math.min(
+            initialDelay * Math.pow(factor, attempt),
+            maxDelay,
+          );
+
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
       }
-
-      await Promise.all(promises);
-
-      // Test connection
-      await this.testConnection();
-
-      this.setState("connected");
-      this.metrics.lastConnectionTime = new Date();
-      this.emit("connected");
-    } catch (error) {
-      this.setState("error");
-      this.emit("error", error);
-      throw this.wrapError(error as Error, "network");
     }
+
+    // All retries failed
+    this.setState("error");
+    this.emit("error", lastError);
+    throw this.wrapError(lastError as Error, "network");
   }
 
   private async createConnection(): Promise<void> {
@@ -348,6 +393,33 @@ export class ConnectionManager extends EventEmitter {
       throw new Error("Connection manager is shutting down");
     }
 
+    // Check for write operations in degraded mode
+    if (this.isDegraded && this.config.degradationOptions?.readOnlyMode) {
+      const operationStr = operation.toString();
+      if (
+        operationStr.includes("insert") ||
+        operationStr.includes("update") ||
+        operationStr.includes("delete")
+      ) {
+        throw new Error("Write operations not allowed in degraded mode");
+      }
+
+      // Try to return cached data for read operations
+      const cacheKey = this.generateCacheKey(operationStr);
+      const cached = this.cache.get(cacheKey);
+      if (cached) {
+        return cached.data as T;
+      }
+
+      // If no cached data and connection failed, we can't proceed
+      if (this.state === "failed") {
+        throw new Error("No cached data available and connection failed");
+      }
+    } else if (this.state === "failed") {
+      // Not in degraded mode and connection failed
+      throw new Error("Connection permanently failed");
+    }
+
     if (this.state !== "connected") {
       if (this.state === "connecting" || this.state === "reconnecting") {
         // Queue the operation
@@ -361,17 +433,29 @@ export class ConnectionManager extends EventEmitter {
     const startTime = Date.now();
     let client: SupabaseClient<Database> | null = null;
 
+    // Track this operation so it can be cancelled during force shutdown
+    let operationReject: ((error: Error) => void) | null = null;
+    const operationPromise = new Promise<T>((_resolve, reject) => {
+      operationReject = reject;
+    });
+
+    const activeOp = { reject: operationReject! };
+    this.activeOperations.add(activeOp);
+
     try {
       client = await this.acquireConnection(options?.timeout);
-      const result = await operation(client);
+
+      // Race between the operation and force shutdown
+      const result = await Promise.race([operation(client), operationPromise]);
 
       this.metrics.totalQueries++;
+      this.metrics.successfulQueries++;
       const queryTime = Date.now() - startTime;
       this.updateAverageQueryTime(queryTime);
       this.metrics.lastQueryTime = new Date();
 
-      // Cache result if in degraded mode
-      if (this.isDegraded && this.config.degradationOptions?.enableCaching) {
+      // Cache result if caching is enabled (for potential future degraded mode use)
+      if (this.config.degradationOptions?.enableCaching) {
         const cacheKey = this.generateCacheKey(operation.toString());
         this.cache.set(cacheKey, {
           data: result,
@@ -398,6 +482,9 @@ export class ConnectionManager extends EventEmitter {
 
       throw this.wrapError(error as Error, "unknown");
     } finally {
+      // Clean up active operation tracking
+      this.activeOperations.delete(activeOp);
+
       if (client) {
         this.releaseConnection(client);
       }
@@ -609,14 +696,20 @@ export class ConnectionManager extends EventEmitter {
   }
 
   async shutdown(options?: ShutdownOptions): Promise<void> {
+    if (this.state === "closed") {
+      // Already shut down, nothing to do
+      return;
+    }
+
     this.isShuttingDown = true;
+    this.setState("closing");
     const timeout = options?.gracefulTimeout || 30000;
 
     // Reject all queued operations
     while (this.operationQueue.length > 0) {
       const operation = this.operationQueue.shift();
       if (operation) {
-        operation.reject(new Error("Shutdown in progress"));
+        operation.reject(new Error("Connection manager is shutting down"));
       }
     }
 
@@ -629,9 +722,39 @@ export class ConnectionManager extends EventEmitter {
       ) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
+
+      // Force shutdown if timeout reached
+      if (this.metrics.activeConnections > 0) {
+        // Reject all active operations
+        this.activeOperations.forEach((op) => {
+          op.reject(new Error("Forced shutdown"));
+        });
+        this.activeOperations.clear();
+
+        // Force release all connections
+        this.pool.forEach((entry) => {
+          entry.inUse = false;
+        });
+        this.metrics.activeConnections = 0;
+        this.metrics.idleConnections = this.pool.length;
+      }
+    } else {
+      // Force shutdown immediately
+      // Reject all active operations
+      this.activeOperations.forEach((op) => {
+        op.reject(new Error("Forced shutdown"));
+      });
+      this.activeOperations.clear();
+
+      this.pool.forEach((entry) => {
+        entry.inUse = false;
+      });
+      this.metrics.activeConnections = 0;
+      this.metrics.idleConnections = this.pool.length;
     }
 
     await this.disconnect();
+    this.setState("closed");
   }
 
   getState(): ConnectionState {
@@ -642,12 +765,17 @@ export class ConnectionManager extends EventEmitter {
     const oldState = this.state;
     this.state = state;
     if (oldState !== state) {
-      this.emit("stateChange", { from: oldState, to: state });
+      this.emit("stateChange", state);
     }
   }
 
   getMetrics(): ConnectionMetrics {
-    return { ...this.metrics };
+    const metrics = { ...this.metrics };
+    if (this.metrics.lastConnectionTime) {
+      metrics.connectionUptime =
+        Date.now() - this.metrics.lastConnectionTime.getTime();
+    }
+    return metrics;
   }
 
   getPoolStats(): ConnectionPoolStats {
@@ -673,14 +801,34 @@ export class ConnectionManager extends EventEmitter {
         status.errors?.push(`Connection state: ${this.state}`);
       }
 
-      // Test query
-      await this.testConnection();
+      const poolStats = this.getPoolStats();
+      status.poolStatus = poolStats;
 
-      status.healthy = true;
+      // Check pool health
+      const poolUtilization =
+        poolStats.available === 0 && poolStats.size === poolStats.maxSize
+          ? 100
+          : ((poolStats.size - poolStats.available) / poolStats.maxSize) * 100;
+
+      if (poolUtilization >= 100) {
+        status.errors?.push("Connection pool exhausted");
+      }
+
+      // Test query only if connected
+      if (this.state === "connected") {
+        await this.testConnection();
+      }
+
+      // Determine health status
+      status.healthy =
+        this.state === "connected" &&
+        poolUtilization < 100 &&
+        (status.errors?.length || 0) === 0;
       status.latency = Date.now() - startTime;
-      status.poolStatus = this.getPoolStats();
+      this.metrics.lastHealthCheck = new Date();
     } catch (error) {
       status.errors?.push((error as Error).message);
+      status.healthy = false;
     }
 
     return status;
@@ -728,14 +876,47 @@ export class ConnectionManager extends EventEmitter {
 
   private wrapError(
     error: Error,
-    type: ConnectionError["type"],
+    type: ConnectionError["type"] = "unknown",
   ): ConnectionError {
     const wrappedError = error as ConnectionError;
+
+    // Categorize error based on message if type is unknown
+    if (type === "unknown") {
+      const message = error.message.toLowerCase();
+      if (
+        message.includes("econnrefused") ||
+        message.includes("network") ||
+        message.includes("fetch failed") ||
+        message.includes("connection")
+      ) {
+        type = "network";
+      } else if (
+        message.includes("api key") ||
+        message.includes("auth") ||
+        message.includes("unauthorized")
+      ) {
+        type = "auth";
+      } else if (message.includes("timeout")) {
+        type = "timeout";
+      } else if (
+        message.includes("rate limit") ||
+        message.includes("too many")
+      ) {
+        type = "rate_limit";
+      }
+    }
+
     wrappedError.type = type;
+    wrappedError.retryable =
+      type === "network" || type === "timeout" || type === "rate_limit";
     wrappedError.context = {
+      operation: "executeQuery",
+      connectionState: this.state,
       state: this.state,
       metrics: this.getMetrics(),
       poolStats: this.getPoolStats(),
+      timestamp: new Date().toISOString(),
+      requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     };
     return wrappedError;
   }
@@ -757,5 +938,116 @@ export class ConnectionManager extends EventEmitter {
 
   clearCache(): void {
     this.cache.clear();
+  }
+
+  // Test helper methods
+  simulateDisconnect(): void {
+    if (this.state !== "connected") {
+      return;
+    }
+    this.setState("reconnecting");
+    // Mark all connections as unavailable
+    this.pool.forEach((entry) => {
+      entry.inUse = true;
+    });
+
+    // Enable degradation mode if configured
+    if (this.config.degradationOptions) {
+      // Enable caching by default for read-only mode
+      if (this.config.degradationOptions.readOnlyMode) {
+        this.config.degradationOptions.enableCaching = true;
+      }
+      this.enableDegradedMode();
+    }
+
+    // Trigger reconnection logic
+    this.startReconnection();
+  }
+
+  simulateReconnect(): void {
+    if (this.state !== "reconnecting") {
+      return;
+    }
+    this.setState("connected");
+    this.metrics.reconnectionCount++;
+    // Mark connections as available again
+    this.pool.forEach((entry) => {
+      entry.inUse = false;
+    });
+    // Process queued operations
+    this.processQueue();
+  }
+
+  private async startReconnection(): Promise<void> {
+    const maxRetries = this.config.retryOptions?.maxRetries || 3;
+    let attempt = 0;
+
+    while (attempt < maxRetries && this.state === "reconnecting") {
+      attempt++;
+
+      try {
+        // Try to test connection
+        await this.testConnection();
+
+        // Success - reconnect
+        this.simulateReconnect();
+        return;
+      } catch {
+        // Failed attempt
+        if (attempt >= maxRetries) {
+          // Max retries exhausted
+          this.setState("failed");
+
+          // Handle queued operations when reconnection fails
+          if (
+            this.isDegraded &&
+            this.config.degradationOptions?.enableCaching
+          ) {
+            // In degraded mode with caching, try to process queued read operations with cached data
+            while (this.operationQueue.length > 0) {
+              const op = this.operationQueue.shift();
+              if (op) {
+                // Try to get cached result
+                const operationStr = op.execute.toString();
+                const isWrite =
+                  operationStr.includes("insert") ||
+                  operationStr.includes("update") ||
+                  operationStr.includes("delete");
+
+                if (isWrite && this.config.degradationOptions?.readOnlyMode) {
+                  op.reject(
+                    new Error("Write operations not allowed in degraded mode"),
+                  );
+                } else {
+                  const cachedResult = this.getCachedResult(operationStr);
+                  if (cachedResult !== undefined) {
+                    op.resolve(cachedResult);
+                  } else {
+                    op.reject(
+                      new Error(
+                        "No cached data available and connection failed",
+                      ),
+                    );
+                  }
+                }
+              }
+            }
+          } else {
+            // Not in degraded mode with caching, reject all queued operations
+            while (this.operationQueue.length > 0) {
+              const op = this.operationQueue.shift();
+              if (op) {
+                op.reject(new Error("Reconnection failed after max retries"));
+              }
+            }
+          }
+          return;
+        }
+
+        // Wait before next attempt
+        const delay = this.config.retryOptions?.initialDelay || 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
   }
 }
