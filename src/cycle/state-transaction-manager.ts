@@ -81,7 +81,6 @@ export class TransactionRollbackError extends Error {
 
 export class StateTransactionManager {
   private supabase: SupabaseClient<Database>;
-  private config: StateTransactionManagerConfig;
   private defaultRetryOptions: RetryOptions = {
     maxRetries: 3,
     delayMs: 100,
@@ -93,11 +92,7 @@ export class StateTransactionManager {
     _config: StateTransactionManagerConfig = {},
   ) {
     this.supabase = supabase;
-    this.config = {
-      maxRetries: _config.maxRetries ?? 3,
-      retryDelayMs: _config.retryDelayMs ?? 100,
-      transactionTimeoutMs: _config.transactionTimeoutMs ?? 30000,
-    };
+    // Config can be used to override defaults in the future if needed
   }
 
   /**
