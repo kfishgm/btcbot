@@ -56,6 +56,7 @@ If a test expects it, BUILD IT. Tests are your specification. Make them pass.
 ### 🔴 ABSOLUTE TEST REQUIREMENT - DIRECT ORDER 🔴
 
 **THIS IS A DIRECT ORDER: ALL TESTS MUST PASS. NO EXCEPTIONS. EVER.**
+**THIS IS A DIRECT ORDER: FULLY IMPLEMENT PRODUCTION READY CODE INSTEAD OF SIMPLIFYING TESTS**
 
 - **100% of tests MUST pass** - NOT 99%, NOT "most", ALL OF THEM
 - **You CANNOT skip tests** because they're "not related to your task"
