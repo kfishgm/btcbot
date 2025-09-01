@@ -293,7 +293,7 @@ describe("StrategyPauseMechanism Integration", () => {
 
       // Step 3: Attempt resume with validation
       // First attempt - simulate drift still exists (should fail)
-      const failedResume = await pauseMechanism.resume({
+      await pauseMechanism.resume({
         force: false,
         validatorId: "admin-123",
         reason: "Attempting to resume after balance correction",

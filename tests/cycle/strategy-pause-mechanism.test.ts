@@ -51,7 +51,7 @@ describe("StrategyPauseMechanism", () => {
       mockDriftDetector,
       mockDiscordNotifier,
     );
-  );
+  });
 
   describe("Initialization", () => {
     it("should initialize with all required dependencies", () => {
@@ -87,7 +87,7 @@ describe("StrategyPauseMechanism", () => {
       expect(pauseMechanism.isPausedStatus()).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("DRIFT_DETECTED");
     );
-  );
+  });
 
   describe("Drift Detection Pausing", () => {
     it("should pause strategy when USDT drift exceeds threshold", async () => {
@@ -118,10 +118,10 @@ describe("StrategyPauseMechanism", () => {
       );
 
       const result = await pauseMechanism.checkDriftAndPause(
-        1010,  // usdtSpotBalance
-        1000,  // capitalAvailable
-        0.01,  // btcSpotBalance
-        0.01,  // btcAccumulated
+        1010,
+        1000,
+        0.01,
+        0.01,
       );
 
       expect(result).toBe(true);
@@ -189,10 +189,10 @@ describe("StrategyPauseMechanism", () => {
       );
 
       const result = await pauseMechanism.checkDriftAndPause(
-        500,  // usdtSpotBalance
-        500,  // capitalAvailable
-        0.01008,  // btcSpotBalance
-        0.01,  // btcAccumulated
+        500,
+        500,
+        0.01008,
+        0.01,
       );
 
       expect(result).toBe(true);
@@ -225,10 +225,10 @@ describe("StrategyPauseMechanism", () => {
       );
 
       const result = await pauseMechanism.checkDriftAndPause(
-        1001,  // usdtSpotBalance
-        1000,  // capitalAvailable
-        0.01002,  // btcSpotBalance
-        0.01,  // btcAccumulated
+        1001,
+        1000,
+        0.01002,
+        0.01,
       );
 
       expect(result).toBe(false);
@@ -247,10 +247,10 @@ describe("StrategyPauseMechanism", () => {
       };
 
       const result = await pauseMechanism.checkDriftAndPause(
-        1010,  // usdtSpotBalance
-        1000,  // capitalAvailable
-        0.01,  // btcSpotBalance
-        0.01,  // btcAccumulated
+        1010,
+        1000,
+        0.01,
+        0.01,
       );
 
       // Should not re-pause or send another notification
@@ -258,7 +258,7 @@ describe("StrategyPauseMechanism", () => {
       expect(pauseMechanism.getPauseReason()).toBe("CRITICAL_ERROR"); // Original reason
       expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
     );
-  );
+  });
 
   describe("Critical Error Pausing", () => {
     it("should pause on critical trading error", async () => {
@@ -269,7 +269,7 @@ describe("StrategyPauseMechanism", () => {
         availableBalance: 50,
       };
 
-      const result = await pauseMechanism.pauseOnCriticalError(error, context);
+      const result = await pauseMechanism.pauseOnError(error, context);
 
       expect(result).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("CRITICAL_ERROR");
@@ -314,7 +314,7 @@ describe("StrategyPauseMechanism", () => {
         retryCount: 3,
       };
 
-      const result = await pauseMechanism.pauseOnCriticalError(error, context);
+      const result = await pauseMechanism.pauseOnError(error, context);
 
       expect(result).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("CRITICAL_ERROR");
@@ -338,7 +338,7 @@ describe("StrategyPauseMechanism", () => {
         ],
       };
 
-      const result = await pauseMechanism.pauseOnCriticalError(error, context);
+      const result = await pauseMechanism.pauseOnError(error, context);
 
       expect(result).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("CRITICAL_ERROR");
@@ -358,7 +358,7 @@ describe("StrategyPauseMechanism", () => {
 
     it("should not double-pause on multiple critical errors", async () => {
       // First error
-      await pauseMechanism.pauseOnCriticalError(new Error("First error"), {
+      await pauseMechanism.pauseOnError(new Error("First error"), {
         operation: "OP1",
       );
 
@@ -366,7 +366,7 @@ describe("StrategyPauseMechanism", () => {
       jest.clearAllMocks();
 
       // Second error while already paused
-      const result = await pauseMechanism.pauseOnCriticalError(
+      const result = await pauseMechanism.pauseOnError(
         new Error("Second error"),
         { operation: "OP2" },
       );
@@ -383,7 +383,7 @@ describe("StrategyPauseMechanism", () => {
         }),
       );
     );
-  );
+  });
 
   describe("Manual Resume", () => {
     beforeEach(async () => {
@@ -590,8 +590,8 @@ describe("StrategyPauseMechanism", () => {
       pauseMechanism["recalculateStrategyValues"] = jest
         .fn()
         .mockResolvedValue({
-          1000,  // capitalAvailable
-          0.01,  // btcAccumulated
+          1000,
+          0.01,
           referencePrice: 50000,
           buyAmount: 100,
         );
@@ -629,7 +629,7 @@ describe("StrategyPauseMechanism", () => {
       expect(result.error).toBe("Strategy is not currently paused");
       expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
     );
-  );
+  });
 
   describe("State Persistence", () => {
     it("should persist pause state to database", async () => {
@@ -672,7 +672,7 @@ describe("StrategyPauseMechanism", () => {
       expect(mockSupabase.from).toHaveBeenCalledWith("strategy_pause_state");
       expect(mockSupabase.delete).toHaveBeenCalled();
     );
-  );
+  });
 
   describe("Integration with CycleStateManager", () => {
     it("should update cycle state status when pausing", async () => {
@@ -688,10 +688,10 @@ describe("StrategyPauseMechanism", () => {
       );
 
       await pauseMechanism.checkDriftAndPause(
-        1010,  // usdtSpotBalance
-        1000,  // capitalAvailable
-        0.01,  // btcSpotBalance
-        0.01,  // btcAccumulated
+        1010,
+        1000,
+        0.01,
+        0.01,
       );
 
       // Verify cycle state was updated to PAUSED
@@ -731,7 +731,7 @@ describe("StrategyPauseMechanism", () => {
         status: "READY",
       );
     );
-  );
+  });
 
   describe("Edge Cases and Error Handling", () => {
     it("should handle database errors gracefully when pausing", async () => {
@@ -743,7 +743,7 @@ describe("StrategyPauseMechanism", () => {
         }),
       );
 
-      const result = await pauseMechanism.pauseOnCriticalError(
+      const result = await pauseMechanism.pauseOnError(
         new Error("Test error"),
         {},
       );
@@ -764,7 +764,7 @@ describe("StrategyPauseMechanism", () => {
         .fn()
         .mockRejectedValue(new Error("Discord webhook failed"));
 
-      const result = await pauseMechanism.pauseOnCriticalError(
+      const result = await pauseMechanism.pauseOnError(
         new Error("Test error"),
         {},
       );
@@ -781,10 +781,10 @@ describe("StrategyPauseMechanism", () => {
 
     it("should handle concurrent pause requests", async () => {
       // Simulate concurrent pause requests
-      const pause1 = pauseMechanism.pauseOnCriticalError(new Error("Error 1"), {
+      const pause1 = pauseMechanism.pauseOnError(new Error("Error 1"), {
         operation: "OP1",
       );
-      const pause2 = pauseMechanism.pauseOnCriticalError(new Error("Error 2"), {
+      const pause2 = pauseMechanism.pauseOnError(new Error("Error 2"), {
         operation: "OP2",
       );
 
@@ -798,14 +798,14 @@ describe("StrategyPauseMechanism", () => {
 
     it("should maintain pause state through instance recreation", async () => {
       // First instance pauses
-      await pauseMechanism.pauseOnCriticalError(new Error("Test"), {);
+      await pauseMechanism.pauseOnError(new Error("Test"), {);
 
       // Create new instance (simulating restart)
-      const newPauseMechanism = new StrategyPauseMechanism({
-        supabase: mockSupabase,
-        driftDetector: mockDriftDetector,
-        cycleStateManager: mockCycleStateManager,
-        discordNotifier: mockDiscordNotifier,
+      const newPauseMechanism = new StrategyPauseMechanism(
+        mockSupabase,
+        mockDriftDetector,
+        mockCycleStateManager,
+        mockDiscordNotifier,
       );
 
       // Mock database returns paused state
@@ -826,20 +826,20 @@ describe("StrategyPauseMechanism", () => {
 
       await newPauseMechanism.initialize();
 
-      expect(newPauseMechanism.isPaused()).toBe(true);
+      expect(newPauseMechanism.isPausedStatus()).toBe(true);
       expect(newPauseMechanism.getPauseReason()).toBe("CRITICAL_ERROR");
     );
-  );
+  });
 
   describe("Pause Reason Details", () => {
     it("should track detailed pause metadata", async () => {
       const metadata = {
         usdtDrift: 0.015,
         btcDrift: 0.003,
-        1015,  // usdtSpotBalance
-        1000,  // capitalAvailable
-        0.01003,  // btcSpotBalance
-        0.01,  // btcAccumulated
+        1015,
+        1000,
+        0.01003,
+        0.01,
       };
 
       mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
@@ -873,5 +873,5 @@ describe("StrategyPauseMechanism", () => {
         EXCHANGE_ERROR: "Exchange connectivity or API error",
       );
     );
-  );
+  });
 );

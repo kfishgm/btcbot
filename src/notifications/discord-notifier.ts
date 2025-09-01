@@ -206,7 +206,7 @@ export class DiscordNotifier {
     type: "buy" | "sell",
     price: number,
     quantity: number,
-    metadata?: Record<string, unknown>,
+    _metadata?: Record<string, unknown>,
   ): Promise<void> {
     const emoji = type === "buy" ? "📈" : "📉";
     const color = type === "buy" ? 0x00ff00 : 0xff0000;
