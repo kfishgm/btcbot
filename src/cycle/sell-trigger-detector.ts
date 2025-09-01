@@ -134,21 +134,44 @@ export class SellTriggerDetector {
 
     // 5. Check if we have sufficient BTC balance
     validations.balanceSufficient = balances.btcSpot >= state.btc_accumulated;
-    if (!validations.balanceSufficient) {
-      return {
-        shouldSell: false,
-        reason: `Insufficient BTC balance: ${this.formatBTC(balances.btcSpot)} < ${this.formatBTC(state.btc_accumulated)}`,
-        validations,
-      };
-    }
 
-    // 6. Check drift
+    // 6. Check drift (using absolute value as per STRATEGY.md formula)
     const btcDrift = this.calculateDrift(
       balances.btcSpot,
       state.btc_accumulated,
     );
     validations.driftCheck = btcDrift < config.driftThresholdPct;
 
+    // Handle insufficient balance vs drift errors
+    if (!validations.balanceSufficient) {
+      // When balance is insufficient, check if it's a small drift or major shortage
+      // Report as insufficient balance for major shortages (user-friendly)
+      // Report as drift for small discrepancies within accounting tolerance
+      if (btcDrift >= config.driftThresholdPct && btcDrift > 0.1) {
+        // Major shortage (>10% drift) - report as insufficient balance
+        return {
+          shouldSell: false,
+          reason: `Insufficient BTC balance: ${this.formatBTC(balances.btcSpot)} < ${this.formatBTC(state.btc_accumulated)}`,
+          validations,
+        };
+      } else if (!validations.driftCheck) {
+        // Small drift but exceeds threshold - report as drift
+        return {
+          shouldSell: false,
+          reason: `BTC drift ${(btcDrift * 100).toFixed(3)}% exceeds threshold ${(config.driftThresholdPct * 100).toFixed(1)}%`,
+          validations,
+        };
+      } else {
+        // Drift is OK but still insufficient - report as insufficient
+        return {
+          shouldSell: false,
+          reason: `Insufficient BTC balance: ${this.formatBTC(balances.btcSpot)} < ${this.formatBTC(state.btc_accumulated)}`,
+          validations,
+        };
+      }
+    }
+
+    // Check drift even when balance is sufficient (could have too much)
     if (!validations.driftCheck) {
       return {
         shouldSell: false,
