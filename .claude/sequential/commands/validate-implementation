@@ -74,8 +74,13 @@ fi
 echo -e "${GREEN}✅ Unit tests passed (100%)${NC}"
 echo ""
 
-# 5. Check for stub implementations
-echo -e "${BLUE}Step 5/9: Checking for stub implementations...${NC}"
+# 5. Skip E2E tests (backend trading bot - no E2E tests)
+echo -e "${BLUE}Step 5/10: E2E tests check...${NC}"
+echo -e "${YELLOW}Skipping E2E tests - this is a backend trading bot without browser UI${NC}"
+echo ""
+
+# 6. Check for stub implementations
+echo -e "${BLUE}Step 6/10: Checking for stub implementations...${NC}"
 if ! node .claude/hooks/check-stub-implementations.js; then
     fail_validation "6" "Stub implementations detected"
 fi
@@ -83,46 +88,34 @@ echo -e "${GREEN}✅ No stub implementations found${NC}"
 echo ""
 
 # 7. Check for TODOs and FIXMEs
-echo -e "${BLUE}Step 6/9: Checking for TODOs/FIXMEs...${NC}"
-TODO_COUNT=$(grep -r "TODO\|FIXME\|HACK\|XXX" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" app/ components/ lib/ 2>/dev/null | wc -l || echo "0")
+echo -e "${BLUE}Step 7/10: Checking for TODOs/FIXMEs...${NC}"
+TODO_COUNT=$(grep -r "TODO\|FIXME\|HACK\|XXX" --include="*.ts" --include="*.js" src/ 2>/dev/null | wc -l || echo "0")
 if [ "$TODO_COUNT" -ne 0 ]; then
     echo -e "${RED}Found $TODO_COUNT TODOs/FIXMEs:${NC}"
-    grep -r "TODO\|FIXME\|HACK\|XXX" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" app/ components/ lib/ 2>/dev/null | head -5
+    grep -r "TODO\|FIXME\|HACK\|XXX" --include="*.ts" --include="*.js" src/ 2>/dev/null | head -5
     fail_validation "7" "Found $TODO_COUNT TODOs/FIXMEs - complete all implementations"
 fi
 echo -e "${GREEN}✅ No TODOs or FIXMEs found${NC}"
 echo ""
 
-# 8. Check for hardcoded colors
-echo -e "${BLUE}Step 7/9: Checking for hardcoded colors...${NC}"
-HARDCODED_COLORS=$(grep -r "bg-\(blue\|green\|red\|gray\|yellow\|purple\|pink\|indigo\)-[0-9]\|text-\(blue\|green\|red\|gray\|yellow\|purple\|pink\|indigo\|white\|black\)-[0-9]" --include="*.tsx" --include="*.ts" app/ components/ 2>/dev/null | wc -l || echo "0")
-if [ "$HARDCODED_COLORS" -ne 0 ]; then
-    echo -e "${RED}Found $HARDCODED_COLORS hardcoded colors:${NC}"
-    grep -r "bg-\(blue\|green\|red\|gray\|yellow\|purple\|pink\|indigo\)-[0-9]\|text-\(blue\|green\|red\|gray\|yellow\|purple\|pink\|indigo\|white\|black\)-[0-9]" --include="*.tsx" --include="*.ts" app/ components/ 2>/dev/null | head -3
-    echo -e "${YELLOW}Use semantic tokens: bg-primary, text-secondary, etc.${NC}"
-    fail_validation "8" "Found $HARDCODED_COLORS hardcoded colors - use semantic tokens"
-fi
-echo -e "${GREEN}✅ No hardcoded colors found${NC}"
+# 8. Skip hardcoded colors check (backend project - no UI)
+echo -e "${BLUE}Step 8/10: Hardcoded colors check...${NC}"
+echo -e "${YELLOW}Skipping hardcoded colors check - backend trading bot without UI${NC}"
 echo ""
 
-# 9. Check shadcn/ui usage (warning only)
-echo -e "${BLUE}Step 8/9: Verifying shadcn/ui component usage...${NC}"
-SHADCN_IMPORTS=$(grep -r "@/components/ui/" --include="*.tsx" --include="*.ts" app/ components/ 2>/dev/null | wc -l || echo "0")
-if [ "$SHADCN_IMPORTS" -gt 0 ]; then
-    echo -e "${GREEN}✅ Using shadcn/ui components ($SHADCN_IMPORTS imports found)${NC}"
-else
-    echo -e "${YELLOW}⚠️  No shadcn/ui components detected - verify if this is intentional${NC}"
-fi
+# 9. Skip shadcn/ui check (backend project - no UI)
+echo -e "${BLUE}Step 9/10: shadcn/ui component check...${NC}"
+echo -e "${YELLOW}Skipping shadcn/ui check - backend trading bot without UI${NC}"
 echo ""
 
 # 10. Check for console.log statements (warning only)
-echo -e "${BLUE}Step 9/9: Checking for console.log statements...${NC}"
-CONSOLE_LOGS=$(grep -r "console\.\(log\|error\|warn\|debug\)" --include="*.ts" --include="*.tsx" app/ components/ lib/ 2>/dev/null | grep -v "// eslint-disable" | wc -l || echo "0")
+echo -e "${BLUE}Step 10/10: Checking for console.log statements...${NC}"
+CONSOLE_LOGS=$(grep -r "console\.\(log\|error\|warn\|debug\)" --include="*.ts" --include="*.js" src/ 2>/dev/null | grep -v "// eslint-disable" | grep -v "logger.ts" | wc -l || echo "0")
 if [ "$CONSOLE_LOGS" -eq 0 ]; then
     echo -e "${GREEN}✅ No console.log statements found${NC}"
 else
-    echo -e "${YELLOW}⚠️  Found $CONSOLE_LOGS console statements - consider removing for production${NC}"
-    grep -r "console\.\(log\|error\|warn\|debug\)" --include="*.ts" --include="*.tsx" app/ components/ lib/ 2>/dev/null | grep -v "// eslint-disable" | head -3
+    echo -e "${YELLOW}⚠️  Found $CONSOLE_LOGS console statements - consider using logger instead${NC}"
+    grep -r "console\.\(log\|error\|warn\|debug\)" --include="*.ts" --include="*.js" src/ 2>/dev/null | grep -v "// eslint-disable" | grep -v "logger.ts" | head -3
 fi
 echo ""
 
