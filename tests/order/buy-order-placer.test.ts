@@ -216,7 +216,7 @@ describe("BuyOrderPlacer", () => {
 
       try {
         await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
-      } catch (e) {
+      } catch {
         // Expected to fail since implementation doesn't exist
       }
 
@@ -840,7 +840,7 @@ describe("BuyOrderPlacer", () => {
 
       try {
         await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
-      } catch (e) {
+      } catch {
         // Expected to fail since implementation doesn't exist
       }
 
@@ -874,7 +874,7 @@ describe("BuyOrderPlacer", () => {
 
       try {
         await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
-      } catch (e) {
+      } catch {
         // Expected to fail since implementation doesn't exist
       }
 
