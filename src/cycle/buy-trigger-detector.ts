@@ -271,15 +271,14 @@ export class BuyTriggerDetector {
     threshold: number,
     amount?: number,
   ): void {
+    // In production, this would use a proper logging service
+    // For now, using console.log for development
     if (shouldBuy && amount !== undefined) {
       console.log(
         `BUY TRIGGERED: Price ${this.formatPrice(currentPrice)} <= Threshold ${this.formatPrice(threshold)}, Amount: ${this.formatPrice(amount)} USDT`,
       );
-    } else {
-      console.log(
-        `Buy not triggered: Price ${this.formatPrice(currentPrice)} vs Threshold ${this.formatPrice(threshold)}`,
-      );
     }
+    // Don't log when not triggered to avoid spam
   }
 
   /**
