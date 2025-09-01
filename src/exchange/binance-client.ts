@@ -25,6 +25,7 @@ export class BinanceClient {
   private lastResetTime: number = Date.now();
   private orderTimestamps: number[] = [];
   private isAuthenticated: boolean = false;
+  private warnings: string[] = [];
 
   constructor(config: BinanceConfig) {
     // Validate API credentials
@@ -37,10 +38,10 @@ export class BinanceClient {
       timeout: config.timeout || 30000,
     };
 
-    // Warn if using test credentials in production
+    // Store warning for later retrieval instead of console.warn
     if (!config.testnet && this.looksLikeTestCredentials(config)) {
-      console.warn(
-        "WARNING: API credentials appear to be test/demo credentials but testnet is disabled",
+      this.warnings.push(
+        "API credentials appear to be test/demo credentials but testnet is disabled",
       );
     }
 
@@ -59,27 +60,45 @@ export class BinanceClient {
       throw new Error("API key is required and must be a string");
     }
 
-    if (config.apiKey.length < 20 || config.apiKey.length > 100) {
-      throw new Error("API key length is invalid (expected 20-100 characters)");
-    }
-
-    if (!/^[A-Za-z0-9]+$/.test(config.apiKey)) {
-      throw new Error("API key contains invalid characters");
-    }
-
     // Check API secret
     if (!config.apiSecret || typeof config.apiSecret !== "string") {
       throw new Error("API secret is required and must be a string");
     }
 
-    if (config.apiSecret.length < 20 || config.apiSecret.length > 100) {
-      throw new Error(
-        "API secret length is invalid (expected 20-100 characters)",
-      );
-    }
+    // Be lenient only for testnet mode or when explicitly in test env with testnet
+    // For production mode (!testnet), always apply strict validation
+    const isTestEnvironment = config.testnet;
 
-    if (!/^[A-Za-z0-9]+$/.test(config.apiSecret)) {
-      throw new Error("API secret contains invalid characters");
+    if (!isTestEnvironment) {
+      // Strict validation for production
+      if (config.apiKey.length < 20 || config.apiKey.length > 100) {
+        throw new Error(
+          "API key length is invalid (expected 20-100 characters)",
+        );
+      }
+
+      if (!/^[A-Za-z0-9]+$/.test(config.apiKey)) {
+        throw new Error("API key contains invalid characters");
+      }
+
+      if (config.apiSecret.length < 20 || config.apiSecret.length > 100) {
+        throw new Error(
+          "API secret length is invalid (expected 20-100 characters)",
+        );
+      }
+
+      if (!/^[A-Za-z0-9]+$/.test(config.apiSecret)) {
+        throw new Error("API secret contains invalid characters");
+      }
+    } else {
+      // Basic validation for test/development
+      if (config.apiKey.length === 0) {
+        throw new Error("API key cannot be empty");
+      }
+
+      if (config.apiSecret.length === 0) {
+        throw new Error("API secret cannot be empty");
+      }
     }
   }
 
@@ -124,6 +143,10 @@ export class BinanceClient {
 
   isAuthenticationTested(): boolean {
     return this.isAuthenticated;
+  }
+
+  getWarnings(): string[] {
+    return [...this.warnings];
   }
 
   getBaseUrl(): string {
@@ -272,9 +295,12 @@ export class BinanceClient {
           });
         }
 
-        this.updateRateLimits(response.headers);
+        // Only update rate limits if we got a response
+        if (response && response.headers) {
+          this.updateRateLimits(response.headers);
+        }
 
-        if (!response.ok) {
+        if (response && !response.ok) {
           const error = (await response.json()) as BinanceError;
 
           // Handle rate limiting
@@ -297,7 +323,21 @@ export class BinanceClient {
           const errorMessage = `Binance API Error [${error.code}]: ${error.msg || "Request failed"}`;
           const apiError = new Error(errorMessage) as Error & { code?: number };
           apiError.code = error.code;
+
+          // Don't retry on client errors (4xx) except rate limiting
+          if (
+            response.status >= 400 &&
+            response.status < 500 &&
+            response.status !== 429
+          ) {
+            throw apiError;
+          }
+
           throw apiError;
+        }
+
+        if (!response) {
+          throw new Error("No response received from server");
         }
 
         return (await response.json()) as T;
@@ -439,8 +479,8 @@ export class BinanceClient {
       params.type === "MARKET" &&
       params.quantity * (params.price || 0) < 10
     ) {
-      console.warn(
-        "Order value may be below Binance minimum. Minimum order is typically $10 USDT",
+      this.warnings.push(
+        `Order value may be below Binance minimum. Order value: $${(params.quantity * (params.price || 0)).toFixed(2)} USDT (minimum is typically $10)`,
       );
     }
 

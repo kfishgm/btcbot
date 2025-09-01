@@ -2,15 +2,19 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { BinanceClient } from "../../src/exchange/binance-client";
 import type { BinanceConfig } from "../../src/exchange/types";
 
+// Create properly typed mock fetch
+const mockFetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+global.fetch = mockFetch;
+
 describe("BinanceClient Security Features", () => {
   let client: BinanceClient;
 
   describe("Credential Validation", () => {
-    it("should reject short API keys", () => {
+    it("should reject short API keys in production", () => {
       const config: BinanceConfig = {
         apiKey: "short",
         apiSecret: "validSecretKeyThatIsLongEnough",
-        testnet: true,
+        testnet: false, // Production mode
       };
 
       expect(() => new BinanceClient(config)).toThrow(
@@ -18,11 +22,11 @@ describe("BinanceClient Security Features", () => {
       );
     });
 
-    it("should reject long API keys", () => {
+    it("should reject long API keys in production", () => {
       const config: BinanceConfig = {
         apiKey: "a".repeat(101),
         apiSecret: "validSecretKeyThatIsLongEnough",
-        testnet: true,
+        testnet: false, // Production mode
       };
 
       expect(() => new BinanceClient(config)).toThrow(
@@ -30,11 +34,11 @@ describe("BinanceClient Security Features", () => {
       );
     });
 
-    it("should reject API keys with invalid characters", () => {
+    it("should reject API keys with invalid characters in production", () => {
       const config: BinanceConfig = {
         apiKey: "invalid-key-with-dashes!!!",
         apiSecret: "validSecretKeyThatIsLongEnough",
-        testnet: true,
+        testnet: false, // Production mode
       };
 
       expect(() => new BinanceClient(config)).toThrow(
@@ -42,11 +46,11 @@ describe("BinanceClient Security Features", () => {
       );
     });
 
-    it("should reject short API secrets", () => {
+    it("should reject short API secrets in production", () => {
       const config: BinanceConfig = {
         apiKey: "validApiKeyThatIsLongEnough",
         apiSecret: "short",
-        testnet: true,
+        testnet: false, // Production mode
       };
 
       expect(() => new BinanceClient(config)).toThrow(
@@ -54,11 +58,11 @@ describe("BinanceClient Security Features", () => {
       );
     });
 
-    it("should reject API secrets with invalid characters", () => {
+    it("should reject API secrets with invalid characters in production", () => {
       const config: BinanceConfig = {
         apiKey: "validApiKeyThatIsLongEnough",
         apiSecret: "invalid-secret-with-dashes",
-        testnet: true,
+        testnet: false, // Production mode
       };
 
       expect(() => new BinanceClient(config)).toThrow(
@@ -77,21 +81,18 @@ describe("BinanceClient Security Features", () => {
     });
 
     it("should warn about test credentials in production", () => {
-      const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
-
       const config: BinanceConfig = {
         apiKey: "testApiKeyForDevelopment",
         apiSecret: "testSecretKeyForDevelopment",
         testnet: false,
       };
 
-      new BinanceClient(config);
+      const client = new BinanceClient(config);
+      const warnings = client.getWarnings();
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("test/demo credentials"),
+      expect(warnings).toContain(
+        "API credentials appear to be test/demo credentials but testnet is disabled",
       );
-
-      consoleSpy.mockRestore();
     });
 
     it("should detect various test credential patterns", () => {
@@ -108,18 +109,18 @@ describe("BinanceClient Security Features", () => {
         { apiKey: "123456789012345678901", apiSecret: "abcdefghijklmnopqrstu" },
       ];
 
-      const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
-
+      let warningCount = 0;
       testPatterns.forEach((pattern) => {
-        new BinanceClient({
+        const client = new BinanceClient({
           ...pattern,
           testnet: false,
         });
+        if (client.getWarnings().length > 0) {
+          warningCount++;
+        }
       });
 
-      expect(consoleSpy).toHaveBeenCalledTimes(testPatterns.length);
-
-      consoleSpy.mockRestore();
+      expect(warningCount).toBe(testPatterns.length);
     });
   });
 
@@ -139,14 +140,14 @@ describe("BinanceClient Security Features", () => {
 
     it("should validate authentication with testAuthentication()", async () => {
       // Mock fetch for account info request
-      global.fetch = jest.fn().mockResolvedValueOnce({
+      mockFetch.mockResolvedValueOnce({
         ok: true,
         headers: new Headers(),
         json: async () => ({
           canTrade: true,
           balances: [],
         }),
-      });
+      } as Response);
 
       const result = await client.testAuthentication();
       expect(result).toBe(true);
@@ -155,7 +156,7 @@ describe("BinanceClient Security Features", () => {
 
     it("should handle authentication failures", async () => {
       // Mock fetch to return auth error
-      global.fetch = jest.fn().mockResolvedValueOnce({
+      mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 401,
         headers: new Headers(),
@@ -163,7 +164,7 @@ describe("BinanceClient Security Features", () => {
           code: -2014,
           msg: "Invalid API-key, IP, or permissions for action.",
         }),
-      });
+      } as Response);
 
       await expect(client.testAuthentication()).rejects.toThrow(
         "Authentication failed",
@@ -196,14 +197,13 @@ describe("BinanceClient Security Features", () => {
 
     it("should accept USDT trading pairs", async () => {
       // Mock successful order creation
-      global.fetch = jest
-        .fn()
+      mockFetch
         .mockResolvedValueOnce({
           // For time sync
           ok: true,
           headers: new Headers(),
           json: async () => ({ serverTime: Date.now() }),
-        })
+        } as Response)
         .mockResolvedValueOnce({
           // For order creation
           ok: true,
@@ -213,7 +213,7 @@ describe("BinanceClient Security Features", () => {
             symbol: "BTCUSDT",
             status: "NEW",
           }),
-        });
+        } as Response);
 
       await client.syncTime();
 
@@ -230,16 +230,13 @@ describe("BinanceClient Security Features", () => {
     });
 
     it("should warn about orders below minimum value", async () => {
-      const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
-
       // Mock successful order creation
-      global.fetch = jest
-        .fn()
+      mockFetch
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers(),
           json: async () => ({ serverTime: Date.now() }),
-        })
+        } as Response)
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers(),
@@ -248,7 +245,7 @@ describe("BinanceClient Security Features", () => {
             symbol: "BTCUSDT",
             status: "NEW",
           }),
-        });
+        } as Response);
 
       await client.syncTime();
 
@@ -260,11 +257,11 @@ describe("BinanceClient Security Features", () => {
         price: 40000, // 0.0001 * 40000 = $4 (below $10 minimum)
       });
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("below Binance minimum"),
+      const warnings = client.getWarnings();
+      expect(warnings.some((w) => w.includes("below Binance minimum"))).toBe(
+        true,
       );
-
-      consoleSpy.mockRestore();
+      expect(warnings.some((w) => w.includes("$4.00"))).toBe(true);
     });
   });
 
@@ -280,7 +277,7 @@ describe("BinanceClient Security Features", () => {
 
     it("should preserve Binance error codes in errors", async () => {
       // Mock fetch to return Binance error
-      global.fetch = jest.fn().mockResolvedValueOnce({
+      mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 400,
         headers: new Headers(),
@@ -288,7 +285,7 @@ describe("BinanceClient Security Features", () => {
           code: -1121,
           msg: "Invalid symbol.",
         }),
-      });
+      } as Response);
 
       try {
         await client.getPrice("INVALID");

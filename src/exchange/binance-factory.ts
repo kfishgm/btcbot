@@ -33,13 +33,9 @@ export async function createBinanceClient(options?: {
 
   // Test authentication unless explicitly skipped
   if (!options?.skipAuthTest) {
-    console.log(
-      `Testing Binance authentication on ${binanceConfig.testnet ? "TESTNET" : "PRODUCTION"}...`,
-    );
-
     try {
       await client.testAuthentication();
-      console.log("✅ Binance authentication successful");
+      // Authentication successful - warnings can be retrieved via client.getWarnings()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(
