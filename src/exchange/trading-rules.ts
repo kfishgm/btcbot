@@ -162,7 +162,9 @@ export class TradingRules {
     }
 
     const tickSize = rules.tickSize;
-    const rounded = Math.floor(price / tickSize) * tickSize;
+    // Use parseFloat and toFixed to handle precision issues
+    const tickCount = Math.floor(price / tickSize);
+    const rounded = parseFloat((tickCount * tickSize).toFixed(8));
 
     // Clamp to min/max bounds
     return Math.max(rules.minPrice, Math.min(rules.maxPrice, rounded));
@@ -177,7 +179,9 @@ export class TradingRules {
     }
 
     const stepSize = rules.stepSize;
-    const rounded = Math.floor(quantity / stepSize) * stepSize;
+    // Use parseFloat and toFixed to handle precision issues
+    const stepCount = Math.floor(quantity / stepSize);
+    const rounded = parseFloat((stepCount * stepSize).toFixed(8));
 
     // Clamp to min/max bounds
     return Math.max(rules.minQty, Math.min(rules.maxQty, rounded));
