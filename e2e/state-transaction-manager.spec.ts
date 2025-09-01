@@ -71,10 +71,10 @@ test.describe("State Transaction Manager E2E", () => {
       // State should remain unchanged
       await expect(
         page.locator('[data-testid="bot-current-price"]'),
-      ).toContainText(initialPrice!);
+      ).toContainText(initialPrice ?? "");
       await expect(
         page.locator('[data-testid="bot-position-type"]'),
-      ).toContainText(initialPosition!);
+      ).toContainText(initialPosition ?? "");
     });
   });
 
