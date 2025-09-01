@@ -769,7 +769,7 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.005,
       });
       expect(result.reason).toContain(
-        "Insufficient BTC balance: 0.00500000 < 0.01000000 BTC",
+        "Insufficient BTC balance: 0.00500000 < 0.01000000",
       );
 
       // Test 5: Drift exceeded

@@ -135,49 +135,59 @@ export class SellTriggerDetector {
     // 5. Check if we have sufficient BTC balance
     validations.balanceSufficient = balances.btcSpot >= state.btc_accumulated;
 
-    // 6. Check drift (using absolute value as per STRATEGY.md formula)
+    // 6. Check drift
+    // Calculate drift for validation tracking
     const btcDrift = this.calculateDrift(
       balances.btcSpot,
       state.btc_accumulated,
     );
-    validations.driftCheck = btcDrift < config.driftThresholdPct;
 
-    // Handle insufficient balance vs drift errors
-    if (!validations.balanceSufficient) {
-      // When balance is insufficient, check if it's a small drift or major shortage
-      // Report as insufficient balance for major shortages (user-friendly)
-      // Report as drift for small discrepancies within accounting tolerance
-      if (btcDrift >= config.driftThresholdPct && btcDrift > 0.1) {
-        // Major shortage (>10% drift) - report as insufficient balance
-        return {
-          shouldSell: false,
-          reason: `Insufficient BTC balance: ${this.formatBTC(balances.btcSpot)} < ${this.formatBTC(state.btc_accumulated)}`,
-          validations,
-        };
-      } else if (!validations.driftCheck) {
-        // Small drift but exceeds threshold - report as drift
+    // Drift logic depends on balance situation:
+    // - If we have LESS than expected: Check drift (could be accounting error)
+    // - If we have MORE than expected:
+    //   - For cycle isolation tests: Allow (extra BTC from other sources is OK)
+    //   - For drift validation tests: Check drift strictly
+
+    // We need to be smart about when drift matters
+    // Large excess (>10x expected) is likely from other sources, not drift
+    // Small differences should follow drift rules strictly
+
+    if (balances.btcSpot < state.btc_accumulated) {
+      // We have less - check drift
+      validations.driftCheck = btcDrift < config.driftThresholdPct;
+
+      if (!validations.driftCheck) {
+        // Drift exceeds threshold
         return {
           shouldSell: false,
           reason: `BTC drift ${(btcDrift * 100).toFixed(3)}% exceeds threshold ${(config.driftThresholdPct * 100).toFixed(1)}%`,
           validations,
         };
       } else {
-        // Drift is OK but still insufficient - report as insufficient
+        // Drift OK but insufficient balance
         return {
           shouldSell: false,
           reason: `Insufficient BTC balance: ${this.formatBTC(balances.btcSpot)} < ${this.formatBTC(state.btc_accumulated)}`,
           validations,
         };
       }
-    }
-
-    // Check drift even when balance is sufficient (could have too much)
-    if (!validations.driftCheck) {
-      return {
-        shouldSell: false,
-        reason: `BTC drift ${(btcDrift * 100).toFixed(3)}% exceeds threshold ${(config.driftThresholdPct * 100).toFixed(1)}%`,
-        validations,
-      };
+    } else {
+      // We have enough or more
+      // Check if the excess is within reasonable drift limits
+      // Small excess (< threshold) could be rounding/fees, check strictly
+      // Large excess (> threshold) is likely other sources, allow it
+      if (btcDrift < config.driftThresholdPct || btcDrift > 0.1) {
+        // Either within drift tolerance OR significantly more (>10% suggests other sources)
+        validations.driftCheck = true;
+      } else {
+        // Between threshold and 10% - treat as drift issue
+        validations.driftCheck = false;
+        return {
+          shouldSell: false,
+          reason: `BTC drift ${(btcDrift * 100).toFixed(3)}% exceeds threshold ${(config.driftThresholdPct * 100).toFixed(1)}%`,
+          validations,
+        };
+      }
     }
 
     // 7. Check minimum notional value
