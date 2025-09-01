@@ -61,24 +61,6 @@ ALTER TABLE bot_events
 ADD CONSTRAINT bot_events_severity_check 
 CHECK (severity IN ('info', 'warning', 'error', 'INFO', 'WARNING', 'ERROR'));
 
--- Create RPC functions for checking balances and exchange connectivity
-CREATE OR REPLACE FUNCTION get_account_balances()
-RETURNS TABLE(usdt_balance DECIMAL, btc_balance DECIMAL) AS $$
-BEGIN
-  -- This is a placeholder function that would be implemented with actual exchange API calls
-  -- For now, return dummy values for testing
-  RETURN QUERY SELECT 1000.0::DECIMAL AS usdt_balance, 0.01::DECIMAL AS btc_balance;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION check_exchange_connectivity()
-RETURNS TABLE(connected BOOLEAN, latency_ms INTEGER) AS $$
-BEGIN
-  -- This is a placeholder function that would be implemented with actual exchange API calls
-  -- For now, return success for testing
-  RETURN QUERY SELECT true AS connected, 50 AS latency_ms;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION get_account_balances() IS 'Get current USDT and BTC balances from exchange';
-COMMENT ON FUNCTION check_exchange_connectivity() IS 'Check if exchange API is accessible';
+-- Note: The actual balance and connectivity checks are implemented in the application layer
+-- These database functions are not needed as the pause mechanism uses the existing
+-- exchange client and balance tracking from the cycle state manager

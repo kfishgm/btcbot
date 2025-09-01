@@ -274,20 +274,6 @@ export type Database = {
         };
         Returns: Json;
       };
-      get_account_balances: {
-        Args: Record<string, never>;
-        Returns: {
-          usdt_balance: number;
-          btc_balance: number;
-        };
-      };
-      check_exchange_connectivity: {
-        Args: Record<string, never>;
-        Returns: {
-          connected: boolean;
-          latency_ms: number;
-        };
-      };
     };
     Enums: {
       [_ in never]: never;
