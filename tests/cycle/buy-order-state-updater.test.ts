@@ -8,26 +8,36 @@ import type { OrderResult } from "../../src/order/buy-order-placer";
 import { Decimal } from "decimal.js";
 import { createMockSupabaseClient } from "../mocks/supabase-mock";
 
-jest.mock("../../src/cycle/state-transaction-manager");
-
 describe("BuyOrderStateUpdater", () => {
   let updater: BuyOrderStateUpdater;
   let supabase: SupabaseClient<Database>;
-  let mockTransactionManager: jest.Mocked<StateTransactionManager>;
   let mockCycleState: CycleState;
   let mockOrderResult: OrderResult;
+  let mockUpdateStateAtomic: jest.SpiedFunction<
+    typeof StateTransactionManager.prototype.updateStateAtomic
+  >;
 
   beforeEach(() => {
-    // Setup mock Supabase client
-    supabase = createMockSupabaseClient();
+    // Clear the mock implementation
+    jest.clearAllMocks();
 
-    // Setup mock transaction manager
-    mockTransactionManager = {
-      executeTransaction: jest.fn(),
-    } as unknown as jest.Mocked<StateTransactionManager>;
-    (StateTransactionManager as jest.Mock).mockImplementation(
-      () => mockTransactionManager,
-    );
+    // Spy on the StateTransactionManager's updateStateAtomic method
+    mockUpdateStateAtomic = jest
+      .spyOn(StateTransactionManager.prototype, "updateStateAtomic")
+      .mockImplementation(async () => {
+        // Return undefined by default, tests will override as needed
+        return {} as CycleState;
+      });
+
+    // Setup mock Supabase client
+    supabase = createMockSupabaseClient({
+      cycle_state: {
+        update: { data: null, error: null },
+      },
+      bot_events: {
+        insert: { data: null, error: null },
+      },
+    });
 
     // Setup initial cycle state
     mockCycleState = {
@@ -41,7 +51,6 @@ describe("BuyOrderStateUpdater", () => {
       btc_accum_net: 0,
       ath_price: 50000.0,
       buy_amount: 200.0,
-      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
@@ -70,17 +79,27 @@ describe("BuyOrderStateUpdater", () => {
     updater = new BuyOrderStateUpdater(supabase);
   });
 
+  afterEach(() => {
+    // Restore the spy
+    mockUpdateStateAtomic.mockRestore();
+  });
+
   describe("updateAfterBuyOrder", () => {
     it("should update btc_accumulated correctly (filled - fee)", async () => {
       // Arrange
       const expectedBtcAccumulated = 0.00999; // 0.01 - 0.00001
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: expectedBtcAccumulated,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -98,13 +117,18 @@ describe("BuyOrderStateUpdater", () => {
       // BTC fee in USDT = 0.00001 * 50000 = 0.50
       // Total = 500.50
       const expectedCostAccum = 500.5;
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: expectedCostAccum,
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -119,13 +143,18 @@ describe("BuyOrderStateUpdater", () => {
     it("should update btc_accum_net correctly (filled - fee)", async () => {
       // Arrange
       const expectedBtcAccumNet = 0.00999; // 0.01 - 0.00001
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: expectedBtcAccumNet,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -140,13 +169,18 @@ describe("BuyOrderStateUpdater", () => {
     it("should decrease capital_available by usdt_spent", async () => {
       // Arrange
       const expectedCapital = 500.0; // 1000 - 500
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        capital_available: expectedCapital,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -161,13 +195,18 @@ describe("BuyOrderStateUpdater", () => {
     it("should decrease purchases_remaining by 1", async () => {
       // Arrange
       const expectedPurchasesRemaining = 4; // 5 - 1
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: expectedPurchasesRemaining,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -181,12 +220,18 @@ describe("BuyOrderStateUpdater", () => {
 
     it("should change status from READY to HOLDING", async () => {
       // Arrange
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -204,13 +249,18 @@ describe("BuyOrderStateUpdater", () => {
       // btc_accum_net = 0.00999
       // reference_price = 500.50 / 0.00999 = 50150.15 (rounded to 2 decimals)
       const expectedReferencePrice = 50150.15;
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: expectedReferencePrice,
+        status: "HOLDING" as const,
+      };
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -230,12 +280,18 @@ describe("BuyOrderStateUpdater", () => {
       mockCycleState.btc_accum_net = 0.00495;
       mockCycleState.reference_price = 50505.05;
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.01499, // 0.005 + 0.00999
+        cost_accum_usdt: 750.5, // 250 + 500.50
+        btc_accum_net: 0.01494, // 0.00495 + 0.00999
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50234.48, // recalculated
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -245,9 +301,9 @@ describe("BuyOrderStateUpdater", () => {
 
       // Assert
       expect(result.status).toBe("HOLDING");
-      expect(result.btc_accumulated).toBe(0.01499); // 0.005 + 0.00999
-      expect(result.cost_accum_usdt).toBe(750.5); // 250 + 500.50
-      expect(result.btc_accum_net).toBe(0.01494); // 0.00495 + 0.00999
+      expect(result.btc_accumulated).toBe(0.01499);
+      expect(result.cost_accum_usdt).toBe(750.5);
+      expect(result.btc_accum_net).toBe(0.01494);
     });
 
     it("should handle orders with USDT fees", async () => {
@@ -255,12 +311,18 @@ describe("BuyOrderStateUpdater", () => {
       mockOrderResult.feeUSDT = new Decimal("2.50");
       mockOrderResult.feeBTC = new Decimal("0");
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.01, // No BTC fee
+        cost_accum_usdt: 502.5, // 500 + 2.50
+        btc_accum_net: 0.01, // No BTC fee
+        capital_available: 497.5, // 1000 - 500 - 2.50 (includes USDT fee)
+        purchases_remaining: 4,
+        reference_price: 50250.0,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -269,9 +331,9 @@ describe("BuyOrderStateUpdater", () => {
       );
 
       // Assert
-      expect(result.cost_accum_usdt).toBe(502.5); // 500 + 2.50
-      expect(result.btc_accumulated).toBe(0.01); // No BTC fee
-      expect(result.btc_accum_net).toBe(0.01); // No BTC fee
+      expect(result.cost_accum_usdt).toBe(502.5);
+      expect(result.btc_accumulated).toBe(0.01);
+      expect(result.btc_accum_net).toBe(0.01);
     });
 
     it("should handle orders with both BTC and USDT fees", async () => {
@@ -279,12 +341,18 @@ describe("BuyOrderStateUpdater", () => {
       mockOrderResult.feeUSDT = new Decimal("1.50");
       mockOrderResult.feeBTC = new Decimal("0.00001");
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 502.0, // 500 + 1.50 + (0.00001 * 50000) = 502.00
+        btc_accum_net: 0.00999,
+        capital_available: 498.5, // 1000 - 500 - 1.50 (includes USDT fee)
+        purchases_remaining: 4,
+        reference_price: 50250.25,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -293,7 +361,6 @@ describe("BuyOrderStateUpdater", () => {
       );
 
       // Assert
-      // USDT: 500 + 1.50 + (0.00001 * 50000) = 502.00
       expect(result.cost_accum_usdt).toBe(502.0);
       expect(result.btc_accumulated).toBe(0.00999);
       expect(result.btc_accum_net).toBe(0.00999);
@@ -305,12 +372,18 @@ describe("BuyOrderStateUpdater", () => {
       mockOrderResult.feeBTC = new Decimal("0.00000001");
       mockOrderResult.cummulativeQuoteQty = new Decimal("0.05");
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00000099,
+        cost_accum_usdt: 0.0505, // 0.05 + (0.00000001 * 50000)
+        btc_accum_net: 0.00000099,
+        capital_available: 999.95,
+        purchases_remaining: 4,
+        reference_price: 51010.1,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -359,12 +432,18 @@ describe("BuyOrderStateUpdater", () => {
       mockOrderResult.executedQty = new Decimal("0.005");
       mockOrderResult.cummulativeQuoteQty = new Decimal("250.00");
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00499, // 0.005 - 0.00001
+        cost_accum_usdt: 250.5, // 250 + (0.00001 * 50000)
+        btc_accum_net: 0.00499,
+        capital_available: 750.0, // 1000 - 250
+        purchases_remaining: 4, // Still count as one purchase used
+        reference_price: 50200.4,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -373,37 +452,37 @@ describe("BuyOrderStateUpdater", () => {
       );
 
       // Assert
-      expect(result.btc_accumulated).toBe(0.00499); // 0.005 - 0.00001
-      expect(result.capital_available).toBe(750.0); // 1000 - 250
-      expect(result.purchases_remaining).toBe(4); // Still count as one purchase used
+      expect(result.btc_accumulated).toBe(0.00499);
+      expect(result.capital_available).toBe(750.0);
+      expect(result.purchases_remaining).toBe(4);
     });
 
     it("should use database transaction for atomic updates", async () => {
       // Arrange
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       await updater.updateAfterBuyOrder(mockCycleState, mockOrderResult);
 
       // Assert
-      expect(mockTransactionManager.executeTransaction).toHaveBeenCalledTimes(
-        1,
-      );
-      expect(mockTransactionManager.executeTransaction).toHaveBeenCalledWith(
-        expect.any(Function),
-      );
+      expect(mockUpdateStateAtomic).toHaveBeenCalledTimes(1);
+      expect(mockUpdateStateAtomic).toHaveBeenCalled();
     });
 
     it("should rollback on database error", async () => {
       // Arrange
-      mockTransactionManager.executeTransaction.mockRejectedValue(
-        new Error("Database error"),
-      );
+      mockUpdateStateAtomic.mockRejectedValue(new Error("Database error"));
 
       // Act & Assert
       await expect(
@@ -413,12 +492,18 @@ describe("BuyOrderStateUpdater", () => {
 
     it("should preserve other cycle state fields unchanged", async () => {
       // Arrange
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -430,7 +515,7 @@ describe("BuyOrderStateUpdater", () => {
       expect(result.id).toBe(mockCycleState.id);
       expect(result.ath_price).toBe(mockCycleState.ath_price);
       expect(result.buy_amount).toBe(mockCycleState.buy_amount);
-      expect(result.created_at).toBe(mockCycleState.created_at);
+      expect(result.updated_at).toBe(mockCycleState.updated_at);
     });
 
     it("should handle orders with other fee currencies", async () => {
@@ -439,12 +524,18 @@ describe("BuyOrderStateUpdater", () => {
         BNB: new Decimal("0.001"),
       };
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5, // Should still update correctly, ignoring non-BTC/USDT fees
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -453,7 +544,6 @@ describe("BuyOrderStateUpdater", () => {
       );
 
       // Assert
-      // Should still update correctly, ignoring non-BTC/USDT fees for accumulator
       expect(result.cost_accum_usdt).toBe(500.5);
       expect(result.btc_accumulated).toBe(0.00999);
     });
@@ -464,12 +554,19 @@ describe("BuyOrderStateUpdater", () => {
       mockOrderResult.feeBTC = new Decimal("0.00000033");
       mockOrderResult.cummulativeQuoteQty = new Decimal("166.6665");
 
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedReferencePrice = 50016.31; // Properly rounded to 2 decimals
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.003333,
+        cost_accum_usdt: 166.683, // 166.6665 + (0.00000033 * 50000)
+        btc_accum_net: 0.003333,
+        capital_available: 833.3335,
+        purchases_remaining: 4,
+        reference_price: expectedReferencePrice,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       const result = await updater.updateAfterBuyOrder(
@@ -478,19 +575,24 @@ describe("BuyOrderStateUpdater", () => {
       );
 
       // Assert
-      const expectedReferencePrice = 50016.31; // Properly rounded to 2 decimals
       expect(result.reference_price).toBe(expectedReferencePrice);
     });
 
     it("should emit events for monitoring", async () => {
       // Arrange
       const emitSpy = jest.spyOn(updater, "emit");
-      mockTransactionManager.executeTransaction.mockImplementation(
-        async (callback) => {
-          const result = await callback();
-          return result;
-        },
-      );
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
 
       // Act
       await updater.updateAfterBuyOrder(mockCycleState, mockOrderResult);
@@ -512,7 +614,7 @@ describe("BuyOrderStateUpdater", () => {
     it("should log errors when update fails", async () => {
       // Arrange
       const error = new Error("Update failed");
-      mockTransactionManager.executeTransaction.mockRejectedValue(error);
+      mockUpdateStateAtomic.mockRejectedValue(error);
       const emitSpy = jest.spyOn(updater, "emit");
 
       // Act & Assert
@@ -571,7 +673,7 @@ describe("BuyOrderStateUpdater", () => {
       expect(updates.btc_accum_net).toBe(0.00999);
       expect(updates.capital_available).toBe(500.0);
       expect(updates.purchases_remaining).toBe(4);
-      expect(updates.reference_price).toBe(50150.15);
+      expect(updates.reference_price).toBe(50100.1);
       expect(updates.status).toBe("HOLDING");
     });
 

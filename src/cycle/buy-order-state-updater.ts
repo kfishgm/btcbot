@@ -156,6 +156,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     const usdtSpent = orderResult.cummulativeQuoteQty;
     const usdtFee = orderResult.feeUSDT;
     const btcFeeInUsdt = btcFee.mul(orderResult.avgPrice);
+    // Per STRATEGY.md line 355-356: cost_accum_usdt += quote_quantity + fees_usdt + (fees_btc * avg_price)
     const totalCostUsdt = usdtSpent.add(usdtFee).add(btcFeeInUsdt);
 
     // Update accumulators
@@ -172,8 +173,9 @@ export class BuyOrderStateUpdater extends EventEmitter {
       .toNumber();
 
     // Update capital and purchases
+    // Per STRATEGY.md line 359: capital_available -= totalCostUSDT (which includes USDT fees)
     const newCapitalAvailable = new Decimal(currentState.capital_available)
-      .sub(usdtSpent)
+      .sub(usdtSpent.add(usdtFee))
       .toNumber();
 
     const newPurchasesRemaining = currentState.purchases_remaining - 1;
