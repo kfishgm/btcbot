@@ -204,13 +204,6 @@ export function clearConfigCache(): void {
   cachedConfig = null;
 }
 
-// Stub for AWS Secrets Manager (MVP)
-export async function loadFromSecretsManager(): Promise<null> {
-  // This is a stub for MVP - will be implemented later
-  // In production, this would fetch config from AWS Secrets Manager
-  return null;
-}
-
 // Validate config object at runtime
 export function validateConfig(config: unknown): void {
   if (typeof config !== "object" || config === null) {

@@ -20,12 +20,6 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": [
-    "src/**/*",
-    "tests/**/*",
-    "supabase/**/*",
-    "e2e/**/*",
-    "__tests__/**/*"
-  ],
+  "include": ["src/**/*", "tests/**/*", "supabase/**/*", "__tests__/**/*"],
   "exclude": ["node_modules", "dist"]
 }

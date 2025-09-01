@@ -30,6 +30,13 @@ export type {
 
 export { BuyOrderStateUpdater } from "./buy-order-state-updater.js";
 export type {
-  StateUpdateResult,
-  StateUpdateData,
+  StateUpdateResult as BuyStateUpdateResult,
+  StateUpdateData as BuyStateUpdateData,
 } from "./buy-order-state-updater.js";
+
+export { SellOrderStateUpdater } from "./sell-order-state-updater.js";
+export type {
+  StateUpdateResult as SellStateUpdateResult,
+  StateUpdateData as SellStateUpdateData,
+  SellOrderStateUpdaterConfig,
+} from "./sell-order-state-updater.js";

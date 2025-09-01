@@ -350,19 +350,6 @@ describe("Configuration Module", () => {
       expect(config.aws.secretsManagerSecretName).toBe("btcbot/config");
     });
 
-    it("should export loadFromSecretsManager as a stub function", async () => {
-      const { loadFromSecretsManager } = await import(
-        "../../src/config/index.js"
-      );
-
-      expect(loadFromSecretsManager).toBeDefined();
-      expect(typeof loadFromSecretsManager).toBe("function");
-
-      // Should be a stub that returns a promise
-      const result = await loadFromSecretsManager();
-      expect(result).toBeNull(); // Stub returns null for MVP
-    });
-
     it("should attempt AWS Secrets Manager in production but fall back to env vars", async () => {
       process.env.NODE_ENV = "production";
       process.env.NEXT_PUBLIC_SUPABASE_URL = "https://prod.supabase.co";
