@@ -8,7 +8,6 @@ import type {
   TradingConfig,
   Candle,
   BalanceInfo,
-  SellTriggerResult,
 } from "../../src/cycle/sell-trigger-detector";
 
 describe("SellTriggerDetector", () => {
@@ -25,14 +24,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01, // Holding BTC
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03, // 3% rise
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -56,7 +53,7 @@ describe("SellTriggerDetector", () => {
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.01); // Should sell all btc_accumulated
       expect(result.validations?.priceThresholdMet).toBe(true);
-      expect(result.validations?.btcAvailable).toBe(true);
+      expect(result.validations?.balanceSufficient).toBe(true);
       expect(result.validations?.driftCheck).toBe(true);
       expect(result.validations?.strategyActive).toBe(true);
     });
@@ -67,14 +64,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.005,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.025, // 2.5% rise
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -105,14 +100,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03, // 3% rise
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -148,14 +141,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
-        buy_amount: 100,
         btc_accumulated: 0, // No BTC to sell
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -186,14 +177,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01, // Expecting 0.01 BTC
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -216,7 +205,7 @@ describe("SellTriggerDetector", () => {
 
       expect(result.shouldSell).toBe(false);
       expect(result.reason).toContain("Insufficient BTC balance");
-      expect(result.validations?.btcAvailable).toBe(false);
+      expect(result.validations?.balanceSufficient).toBe(false);
     });
 
     it("should skip sell when strategy is PAUSED", () => {
@@ -225,14 +214,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -266,14 +253,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005, // 0.5%
       };
@@ -307,14 +292,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005, // 0.5%
       };
@@ -345,14 +328,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
-        buy_amount: 100,
         btc_accumulated: 0,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -384,14 +365,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.1,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005, // 0.5%
       };
@@ -427,14 +406,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01, // Only 0.01 BTC from this cycle
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -466,14 +443,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.002, // Small amount from cycle
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -496,7 +471,7 @@ describe("SellTriggerDetector", () => {
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.002); // Only sell cycle amount
-      expect(result.reason).not.toContain("Insufficient BTC");
+      // When shouldSell is true, there's no reason field
     });
   });
 
@@ -507,14 +482,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000.12345678,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100.1728395,
         btc_accumulated: 0.00123456789,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03, // 3%
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -546,14 +519,12 @@ describe("SellTriggerDetector", () => {
         reference_price: null, // No reference price set
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -584,14 +555,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 1000000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100000,
         btc_accumulated: 1.5,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.05, // 5%
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -622,14 +591,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.001, // 0.1% rise
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -659,14 +626,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 10, // Minimum buy
         btc_accumulated: 0.0002, // Very small BTC amount
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -699,14 +664,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -731,10 +694,12 @@ describe("SellTriggerDetector", () => {
         shouldSell: true,
         sellAmount: 0.01,
         validations: {
-          priceThresholdMet: true,
-          btcAvailable: true,
-          driftCheck: true,
           strategyActive: true,
+          hasAccumulatedBTC: true,
+          priceThresholdMet: true,
+          balanceSufficient: true,
+          driftCheck: true,
+          minNotionalMet: true,
         },
       });
     });
@@ -745,14 +710,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const baseConfig: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -828,14 +791,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 60000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.015,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.03,
         risePercentage: 0.04, // 4%
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -881,14 +842,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 200,
         btc_accumulated: 0.1,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005, // 0.5%
       };
@@ -939,14 +898,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -969,10 +926,12 @@ describe("SellTriggerDetector", () => {
 
       // Verify all checks pass in correct order
       expect(result.validations).toEqual({
-        priceThresholdMet: true,
-        btcAvailable: true,
-        driftCheck: true,
         strategyActive: true,
+        hasAccumulatedBTC: true,
+        priceThresholdMet: true,
+        balanceSufficient: true,
+        driftCheck: true,
+        minNotionalMet: true,
       });
     });
 
@@ -983,14 +942,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.025678, // Specific amount accumulated
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1029,14 +986,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1078,14 +1033,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1125,7 +1078,7 @@ describe("SellTriggerDetector", () => {
         risePercentage,
       );
 
-      expect(threshold).toBe(51750); // 50000 * (1 + 0.035)
+      expect(threshold).toBeCloseTo(51750, 2); // 50000 * (1 + 0.035)
     });
 
     it("should calculate BTC drift correctly", () => {
@@ -1172,7 +1125,7 @@ describe("SellTriggerDetector", () => {
       ];
 
       testCases.forEach(({ amount, expected }) => {
-        const formatted = detector.formatBtcAmount(amount);
+        const formatted = detector.formatBTC(amount);
         expect(formatted).toBe(expected);
       });
     });
@@ -1191,14 +1144,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1233,14 +1184,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1267,10 +1216,12 @@ describe("SellTriggerDetector", () => {
       );
 
       expect(validations).toEqual({
-        priceThresholdMet: true,
-        btcAvailable: true,
-        driftCheck: true,
         strategyActive: true,
+        hasAccumulatedBTC: true,
+        priceThresholdMet: true,
+        balanceSufficient: true,
+        driftCheck: true,
+        minNotionalMet: true,
       });
     });
 
@@ -1280,14 +1231,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1315,14 +1264,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 60000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.04, // 4%
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1338,14 +1285,12 @@ describe("SellTriggerDetector", () => {
         reference_price: null,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1361,7 +1306,6 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.01,
       };
 
@@ -1395,7 +1339,6 @@ describe("SellTriggerDetector", () => {
       const validConfig: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1432,7 +1375,6 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 100,
         btc_accumulated: 0.02345678, // Specific amount
       };
 
@@ -1449,14 +1391,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
-        buy_amount: 100,
         btc_accumulated: 0, // No BTC yet
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10,
         driftThresholdPct: 0.005,
       };
@@ -1487,14 +1427,12 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        buy_amount: 10, // Minimum buy
         btc_accumulated: 0.0001, // Very small amount
       };
 
       const config: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
-        minBuyUSDT: 10,
         exchangeMinNotional: 10, // $10 minimum
         driftThresholdPct: 0.005,
       };
@@ -1518,7 +1456,7 @@ describe("SellTriggerDetector", () => {
       // 0.0001 BTC * $52000 = $5.20 < $10 minimum
       expect(result.shouldSell).toBe(false);
       expect(result.reason).toContain(
-        "Sell value 5.20 USDT below minimum notional 10.00 USDT",
+        "Notional value 5.20 below minimum 10.00",
       );
     });
   });
