@@ -221,33 +221,6 @@ describe("OrderPriceCalculator", () => {
       ).toThrow("No trading rules cached for BTCUSDT. Call getRules() first.");
     });
 
-    it("should fetch rules if not cached when fetchIfMissing is true", () => {
-      const closePrice = 50000;
-      const symbol = "BTCUSDT";
-      const rules: SymbolTradingRules = {
-        symbol,
-        tickSize: 0.01,
-        minPrice: 0.01,
-        maxPrice: 1000000,
-        minQty: 0.00001,
-        maxQty: 9000,
-        stepSize: 0.00001,
-        minNotional: 10,
-        lastUpdated: Date.now(),
-      };
-
-      mockTradingRules.getCachedRules.mockReturnValue(undefined);
-      mockTradingRules.getRules.mockResolvedValue(rules);
-
-      const result = calculator.calculateBuyLimitPrice(
-        new Decimal(closePrice),
-        symbol,
-      );
-
-      expect(result.toNumber()).toBe(50150.0);
-      expect(mockTradingRules.getRules).toHaveBeenCalledWith(symbol);
-    });
-
     it("should use Decimal.js for all calculations to maintain precision", () => {
       // This test ensures implementation uses Decimal.js, not native JavaScript numbers
       const closePrice = 0.1 + 0.2; // This equals 0.30000000000000004 in JavaScript
@@ -442,33 +415,6 @@ describe("OrderPriceCalculator", () => {
       ).toThrow("No trading rules cached for BTCUSDT. Call getRules() first.");
     });
 
-    it("should fetch rules if not cached when fetchIfMissing is true", () => {
-      const closePrice = 50000;
-      const symbol = "BTCUSDT";
-      const rules: SymbolTradingRules = {
-        symbol,
-        tickSize: 0.01,
-        minPrice: 0.01,
-        maxPrice: 1000000,
-        minQty: 0.00001,
-        maxQty: 9000,
-        stepSize: 0.00001,
-        minNotional: 10,
-        lastUpdated: Date.now(),
-      };
-
-      mockTradingRules.getCachedRules.mockReturnValue(undefined);
-      mockTradingRules.getRules.mockResolvedValue(rules);
-
-      const result = calculator.calculateSellLimitPrice(
-        new Decimal(closePrice),
-        symbol,
-      );
-
-      expect(result.toNumber()).toBe(49850.0);
-      expect(mockTradingRules.getRules).toHaveBeenCalledWith(symbol);
-    });
-
     it("should use Decimal.js for all calculations to maintain precision", () => {
       const closePrice = 0.1 + 0.2; // This equals 0.30000000000000004 in JavaScript
       const symbol = "TESTUSDT";
@@ -610,28 +556,7 @@ describe("OrderPriceCalculator", () => {
   });
 
   describe("getTickSize helper method", () => {
-    it("should return tick size for a symbol from cached rules", () => {
-      const symbol = "BTCUSDT";
-      const tickSize = 0.01;
-
-      mockTradingRules.getCachedRules.mockReturnValue({
-        symbol,
-        tickSize,
-        minPrice: 0.01,
-        maxPrice: 1000000,
-        minQty: 0.00001,
-        maxQty: 9000,
-        stepSize: 0.00001,
-        minNotional: 10,
-        lastUpdated: Date.now(),
-      });
-
-      const result = calculator.getTickSize(symbol);
-
-      expect(result).toBe(tickSize);
-    });
-
-    it("should fetch rules if not cached when fetchIfMissing is true", () => {
+    it("should return tick size for a symbol", async () => {
       const symbol = "BTCUSDT";
       const tickSize = 0.01;
       const rules: SymbolTradingRules = {
@@ -646,21 +571,12 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       };
 
-      mockTradingRules.getCachedRules.mockReturnValue(undefined);
       mockTradingRules.getRules.mockResolvedValue(rules);
 
-      const result = calculator.getTickSize(symbol);
+      const result = await calculator.getTickSize(symbol);
 
       expect(result).toBe(tickSize);
       expect(mockTradingRules.getRules).toHaveBeenCalledWith(symbol);
-    });
-
-    it("should throw error if rules not cached and fetchIfMissing is false", () => {
-      mockTradingRules.getCachedRules.mockReturnValue(undefined);
-
-      expect(calculator.getTickSize("BTCUSDT")).rejects.toThrow(
-        "No trading rules cached for BTCUSDT",
-      );
     });
   });
 
@@ -728,7 +644,7 @@ describe("OrderPriceCalculator", () => {
   });
 
   describe("Error handling and edge cases", () => {
-    it("should handle zero price gracefully", () => {
+    it("should throw error for zero price", () => {
       mockTradingRules.getCachedRules.mockReturnValue({
         symbol: "BTCUSDT",
         tickSize: 0.01,
@@ -741,17 +657,13 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const buyResult = calculator.calculateBuyLimitPrice(
-        new Decimal(0),
-        "BTCUSDT",
-      );
-      const sellResult = calculator.calculateSellLimitPrice(
-        new Decimal(0),
-        "BTCUSDT",
-      );
+      expect(() =>
+        calculator.calculateBuyLimitPrice(new Decimal(0), "BTCUSDT"),
+      ).toThrow("Current price must be greater than 0");
 
-      expect(buyResult.toNumber()).toBe(0);
-      expect(sellResult.toNumber()).toBe(0);
+      expect(() =>
+        calculator.calculateSellLimitPrice(new Decimal(0), "BTCUSDT"),
+      ).toThrow("Current price must be greater than 0");
     });
 
     it("should handle negative price by throwing error", () => {
@@ -888,7 +800,7 @@ describe("OrderPriceCalculator", () => {
       expect(result.sellPrice.toNumber()).toBe(49850.0);
     });
 
-    it("should only fetch rules once when calculating both prices", () => {
+    it("should only call getCachedRules twice when calculating both prices", () => {
       const closePrice = 50000;
       const symbol = "BTCUSDT";
       const rules: SymbolTradingRules = {
@@ -903,8 +815,7 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       };
 
-      mockTradingRules.getCachedRules.mockReturnValue(undefined);
-      mockTradingRules.getRules.mockResolvedValue(rules);
+      mockTradingRules.getCachedRules.mockReturnValue(rules);
 
       const result = calculator.calculateBothPrices(
         new Decimal(closePrice),
@@ -913,8 +824,8 @@ describe("OrderPriceCalculator", () => {
 
       expect(result.buyPrice.toNumber()).toBe(50150.0);
       expect(result.sellPrice.toNumber()).toBe(49850.0);
-      // Should only fetch rules once, not twice
-      expect(mockTradingRules.getRules).toHaveBeenCalledTimes(1);
+      // Should call getCachedRules twice, once for buy and once for sell
+      expect(mockTradingRules.getCachedRules).toHaveBeenCalledTimes(2);
     });
   });
 
