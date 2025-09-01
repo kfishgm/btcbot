@@ -64,6 +64,7 @@ michi-template-*/
 
 # Logs
 logs/
+test-logs/
 *.log
 
 # Agent-specific files that should never be committed
