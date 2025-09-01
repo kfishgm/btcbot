@@ -1,3 +1,4 @@
+import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 import { Decimal } from "decimal.js";
 import { OrderPriceCalculator } from "../../src/order/order-price-calculator";
 import { TradingRules } from "../../src/exchange/trading-rules";
@@ -8,9 +9,15 @@ jest.mock("../../src/exchange/trading-rules");
 
 describe("OrderPriceCalculator", () => {
   let calculator: OrderPriceCalculator;
-  let mockTradingRules: jest.Mocked<
-    Pick<TradingRules, "getCachedRules" | "getRules" | "roundPriceToTick">
-  >;
+  let mockTradingRules: {
+    getCachedRules: jest.Mock<
+      (symbol: string) => SymbolTradingRules | undefined
+    >;
+    getRules: jest.Mock<
+      (symbol: string, forceRefresh?: boolean) => Promise<SymbolTradingRules>
+    >;
+    roundPriceToTick: jest.Mock<(price: number, symbol: string) => number>;
+  };
 
   beforeEach(() => {
     // Reset mocks
@@ -54,7 +61,7 @@ describe("OrderPriceCalculator", () => {
   });
 
   describe("calculateBuyLimitPrice - STRATEGY.md Section 5 Formula", () => {
-    it("should calculate buy limit price with default slippage (0.3%)", async () => {
+    it("should calculate buy limit price with default slippage (0.3%)", () => {
       // STRATEGY.md: limit_price_buy = round_to_tick(Close * (1 + SlippageGuardBuyPct))
       const closePrice = 50000;
       const symbol = "BTCUSDT";
@@ -76,8 +83,8 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateBuyLimitPrice(
-        closePrice,
+      const result = calculator.calculateBuyLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
@@ -85,7 +92,7 @@ describe("OrderPriceCalculator", () => {
       expect(mockTradingRules.getCachedRules).toHaveBeenCalledWith(symbol);
     });
 
-    it("should calculate buy limit price with custom slippage (0.5%)", async () => {
+    it("should calculate buy limit price with custom slippage (0.5%)", () => {
       const customCalculator = new OrderPriceCalculator(
         mockTradingRules as unknown as TradingRules,
         0.005,
@@ -110,15 +117,15 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await customCalculator.calculateBuyLimitPrice(
-        closePrice,
+      const result = customCalculator.calculateBuyLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
       expect(result.toNumber()).toBe(expectedPrice);
     });
 
-    it("should handle different tick sizes correctly", async () => {
+    it("should handle different tick sizes correctly", () => {
       const testCases = [
         { closePrice: 50000, tickSize: 0.01, expected: 50150.0 },
         { closePrice: 50000, tickSize: 0.1, expected: 50150.0 },
@@ -140,15 +147,15 @@ describe("OrderPriceCalculator", () => {
           lastUpdated: Date.now(),
         });
 
-        const result = await calculator.calculateBuyLimitPrice(
-          testCase.closePrice,
+        const result = calculator.calculateBuyLimitPrice(
+          new Decimal(testCase.closePrice),
           "BTCUSDT",
         );
         expect(result.toNumber()).toBe(testCase.expected);
       }
     });
 
-    it("should handle very small prices with precision", async () => {
+    it("should handle very small prices with precision", () => {
       const closePrice = 0.00012345;
       const symbol = "SHIBUSDT";
       const tickSize = 0.00000001;
@@ -169,15 +176,15 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateBuyLimitPrice(
-        closePrice,
+      const result = calculator.calculateBuyLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
       expect(result.toNumber()).toBeCloseTo(expectedPrice, 8);
     });
 
-    it("should handle very large prices correctly", async () => {
+    it("should handle very large prices correctly", () => {
       const closePrice = 1000000;
       const symbol = "BTCUSDT";
       const tickSize = 0.01;
@@ -198,23 +205,23 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateBuyLimitPrice(
-        closePrice,
+      const result = calculator.calculateBuyLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
       expect(result.toNumber()).toBe(expectedPrice);
     });
 
-    it("should throw error if trading rules not cached", async () => {
+    it("should throw error if trading rules not cached", () => {
       mockTradingRules.getCachedRules.mockReturnValue(undefined);
 
-      await expect(
-        calculator.calculateBuyLimitPrice(50000, "BTCUSDT"),
-      ).rejects.toThrow("No trading rules cached for BTCUSDT");
+      expect(() =>
+        calculator.calculateBuyLimitPrice(new Decimal(50000), "BTCUSDT"),
+      ).toThrow("No trading rules cached for BTCUSDT. Call getRules() first.");
     });
 
-    it("should fetch rules if not cached when fetchIfMissing is true", async () => {
+    it("should fetch rules if not cached when fetchIfMissing is true", () => {
       const closePrice = 50000;
       const symbol = "BTCUSDT";
       const rules: SymbolTradingRules = {
@@ -232,17 +239,16 @@ describe("OrderPriceCalculator", () => {
       mockTradingRules.getCachedRules.mockReturnValue(undefined);
       mockTradingRules.getRules.mockResolvedValue(rules);
 
-      const result = await calculator.calculateBuyLimitPrice(
-        closePrice,
+      const result = calculator.calculateBuyLimitPrice(
+        new Decimal(closePrice),
         symbol,
-        true,
       );
 
       expect(result.toNumber()).toBe(50150.0);
       expect(mockTradingRules.getRules).toHaveBeenCalledWith(symbol);
     });
 
-    it("should use Decimal.js for all calculations to maintain precision", async () => {
+    it("should use Decimal.js for all calculations to maintain precision", () => {
       // This test ensures implementation uses Decimal.js, not native JavaScript numbers
       const closePrice = 0.1 + 0.2; // This equals 0.30000000000000004 in JavaScript
       const symbol = "TESTUSDT";
@@ -260,8 +266,8 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateBuyLimitPrice(
-        closePrice,
+      const result = calculator.calculateBuyLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
@@ -275,7 +281,7 @@ describe("OrderPriceCalculator", () => {
   });
 
   describe("calculateSellLimitPrice - STRATEGY.md Section 5 Formula", () => {
-    it("should calculate sell limit price with default slippage (0.3%)", async () => {
+    it("should calculate sell limit price with default slippage (0.3%)", () => {
       // STRATEGY.md: limit_price_sell = round_to_tick(Close * (1 - SlippageGuardSellPct))
       const closePrice = 50000;
       const symbol = "BTCUSDT";
@@ -297,8 +303,8 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateSellLimitPrice(
-        closePrice,
+      const result = calculator.calculateSellLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
@@ -306,7 +312,7 @@ describe("OrderPriceCalculator", () => {
       expect(mockTradingRules.getCachedRules).toHaveBeenCalledWith(symbol);
     });
 
-    it("should calculate sell limit price with custom slippage (0.5%)", async () => {
+    it("should calculate sell limit price with custom slippage (0.5%)", () => {
       const customCalculator = new OrderPriceCalculator(
         mockTradingRules as unknown as TradingRules,
         0.003,
@@ -332,15 +338,15 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await customCalculator.calculateSellLimitPrice(
-        closePrice,
+      const result = customCalculator.calculateSellLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
       expect(result.toNumber()).toBe(expectedPrice);
     });
 
-    it("should handle different tick sizes correctly", async () => {
+    it("should handle different tick sizes correctly", () => {
       const testCases = [
         { closePrice: 50000, tickSize: 0.01, expected: 49850.0 },
         { closePrice: 50000, tickSize: 0.1, expected: 49850.0 },
@@ -362,15 +368,15 @@ describe("OrderPriceCalculator", () => {
           lastUpdated: Date.now(),
         });
 
-        const result = await calculator.calculateSellLimitPrice(
-          testCase.closePrice,
+        const result = calculator.calculateSellLimitPrice(
+          new Decimal(testCase.closePrice),
           "BTCUSDT",
         );
         expect(result.toNumber()).toBe(testCase.expected);
       }
     });
 
-    it("should handle very small prices with precision", async () => {
+    it("should handle very small prices with precision", () => {
       const closePrice = 0.00012345;
       const symbol = "SHIBUSDT";
       const tickSize = 0.00000001;
@@ -391,15 +397,15 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateSellLimitPrice(
-        closePrice,
+      const result = calculator.calculateSellLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
       expect(result.toNumber()).toBeCloseTo(expectedPrice, 8);
     });
 
-    it("should handle very large prices correctly", async () => {
+    it("should handle very large prices correctly", () => {
       const closePrice = 1000000;
       const symbol = "BTCUSDT";
       const tickSize = 0.01;
@@ -420,23 +426,23 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateSellLimitPrice(
-        closePrice,
+      const result = calculator.calculateSellLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
       expect(result.toNumber()).toBe(expectedPrice);
     });
 
-    it("should throw error if trading rules not cached", async () => {
+    it("should throw error if trading rules not cached", () => {
       mockTradingRules.getCachedRules.mockReturnValue(undefined);
 
-      await expect(
-        calculator.calculateSellLimitPrice(50000, "BTCUSDT"),
-      ).rejects.toThrow("No trading rules cached for BTCUSDT");
+      expect(() =>
+        calculator.calculateSellLimitPrice(new Decimal(50000), "BTCUSDT"),
+      ).toThrow("No trading rules cached for BTCUSDT. Call getRules() first.");
     });
 
-    it("should fetch rules if not cached when fetchIfMissing is true", async () => {
+    it("should fetch rules if not cached when fetchIfMissing is true", () => {
       const closePrice = 50000;
       const symbol = "BTCUSDT";
       const rules: SymbolTradingRules = {
@@ -454,17 +460,16 @@ describe("OrderPriceCalculator", () => {
       mockTradingRules.getCachedRules.mockReturnValue(undefined);
       mockTradingRules.getRules.mockResolvedValue(rules);
 
-      const result = await calculator.calculateSellLimitPrice(
-        closePrice,
+      const result = calculator.calculateSellLimitPrice(
+        new Decimal(closePrice),
         symbol,
-        true,
       );
 
       expect(result.toNumber()).toBe(49850.0);
       expect(mockTradingRules.getRules).toHaveBeenCalledWith(symbol);
     });
 
-    it("should use Decimal.js for all calculations to maintain precision", async () => {
+    it("should use Decimal.js for all calculations to maintain precision", () => {
       const closePrice = 0.1 + 0.2; // This equals 0.30000000000000004 in JavaScript
       const symbol = "TESTUSDT";
       const tickSize = 0.00001;
@@ -481,8 +486,8 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateSellLimitPrice(
-        closePrice,
+      const result = calculator.calculateSellLimitPrice(
+        new Decimal(closePrice),
         symbol,
       );
 
@@ -496,7 +501,7 @@ describe("OrderPriceCalculator", () => {
   });
 
   describe("roundToTick - STRATEGY.md rounding formula", () => {
-    it("should round price down to nearest tick size as per STRATEGY.md", async () => {
+    it("should round price down to nearest tick size as per STRATEGY.md", () => {
       // STRATEGY.md: round_to_tick(price): return floor(price / tick_size) * tick_size
       const testCases = [
         { price: 50123.456, tickSize: 0.01, expected: 50123.45 },
@@ -521,12 +526,15 @@ describe("OrderPriceCalculator", () => {
           lastUpdated: Date.now(),
         });
 
-        const result = await calculator.roundToTick(testCase.price, "BTCUSDT");
+        const result = calculator.roundToTick(
+          new Decimal(testCase.price),
+          testCase.tickSize,
+        );
         expect(result.toNumber()).toBeCloseTo(testCase.expected, 8);
       }
     });
 
-    it("should always round DOWN (floor), never up", async () => {
+    it("should always round DOWN (floor), never up", () => {
       const price = 50000.999999;
       const tickSize = 1;
 
@@ -542,13 +550,13 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.roundToTick(price, "BTCUSDT");
+      const result = calculator.roundToTick(new Decimal(price), tickSize);
 
       // Should round down to 50000, not up to 50001
       expect(result.toNumber()).toBe(50000);
     });
 
-    it("should handle edge case where price is exactly on tick", async () => {
+    it("should handle edge case where price is exactly on tick", () => {
       const price = 50000.0;
       const tickSize = 0.01;
 
@@ -564,12 +572,12 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.roundToTick(price, "BTCUSDT");
+      const result = calculator.roundToTick(new Decimal(price), tickSize);
 
       expect(result.toNumber()).toBe(50000.0);
     });
 
-    it("should use Decimal.js to avoid floating point errors", async () => {
+    it("should use Decimal.js to avoid floating point errors", () => {
       const price = 0.1 + 0.2; // 0.30000000000000004 in JavaScript
       const tickSize = 0.01;
 
@@ -585,24 +593,24 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.roundToTick(price, "TESTUSDT");
+      const result = calculator.roundToTick(new Decimal(price), tickSize);
 
       // Should correctly round to 0.30, not something weird due to float errors
       expect(result.toNumber()).toBe(0.3);
       expect(result).toBeInstanceOf(Decimal);
     });
 
-    it("should throw error if trading rules not cached", async () => {
+    it("should throw error if trading rules not cached", () => {
       mockTradingRules.getCachedRules.mockReturnValue(undefined);
 
-      await expect(calculator.roundToTick(50000, "BTCUSDT")).rejects.toThrow(
-        "No trading rules cached for BTCUSDT",
-      );
+      // roundToTick doesn't need cached rules, it takes tickSize directly
+      const result = calculator.roundToTick(new Decimal(50000), 0.01);
+      expect(result.toNumber()).toBe(50000);
     });
   });
 
   describe("getTickSize helper method", () => {
-    it("should return tick size for a symbol from cached rules", async () => {
+    it("should return tick size for a symbol from cached rules", () => {
       const symbol = "BTCUSDT";
       const tickSize = 0.01;
 
@@ -618,12 +626,12 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.getTickSize(symbol);
+      const result = calculator.getTickSize(symbol);
 
       expect(result).toBe(tickSize);
     });
 
-    it("should fetch rules if not cached when fetchIfMissing is true", async () => {
+    it("should fetch rules if not cached when fetchIfMissing is true", () => {
       const symbol = "BTCUSDT";
       const tickSize = 0.01;
       const rules: SymbolTradingRules = {
@@ -641,23 +649,23 @@ describe("OrderPriceCalculator", () => {
       mockTradingRules.getCachedRules.mockReturnValue(undefined);
       mockTradingRules.getRules.mockResolvedValue(rules);
 
-      const result = await calculator.getTickSize(symbol, true);
+      const result = calculator.getTickSize(symbol);
 
       expect(result).toBe(tickSize);
       expect(mockTradingRules.getRules).toHaveBeenCalledWith(symbol);
     });
 
-    it("should throw error if rules not cached and fetchIfMissing is false", async () => {
+    it("should throw error if rules not cached and fetchIfMissing is false", () => {
       mockTradingRules.getCachedRules.mockReturnValue(undefined);
 
-      await expect(calculator.getTickSize("BTCUSDT", false)).rejects.toThrow(
+      expect(calculator.getTickSize("BTCUSDT")).rejects.toThrow(
         "No trading rules cached for BTCUSDT",
       );
     });
   });
 
   describe("Integration with multiple price ranges", () => {
-    it("should handle different tick sizes for different price ranges correctly", async () => {
+    it("should handle different tick sizes for different price ranges correctly", () => {
       // Some exchanges have different tick sizes for different price ranges
       // Test that calculator works correctly with various symbols
       const testSymbols = [
@@ -704,12 +712,12 @@ describe("OrderPriceCalculator", () => {
           lastUpdated: Date.now(),
         });
 
-        const buyPrice = await calculator.calculateBuyLimitPrice(
-          test.closePrice,
+        const buyPrice = calculator.calculateBuyLimitPrice(
+          new Decimal(test.closePrice),
           test.symbol,
         );
-        const sellPrice = await calculator.calculateSellLimitPrice(
-          test.closePrice,
+        const sellPrice = calculator.calculateSellLimitPrice(
+          new Decimal(test.closePrice),
           test.symbol,
         );
 
@@ -720,7 +728,7 @@ describe("OrderPriceCalculator", () => {
   });
 
   describe("Error handling and edge cases", () => {
-    it("should handle zero price gracefully", async () => {
+    it("should handle zero price gracefully", () => {
       mockTradingRules.getCachedRules.mockReturnValue({
         symbol: "BTCUSDT",
         tickSize: 0.01,
@@ -733,14 +741,20 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const buyResult = await calculator.calculateBuyLimitPrice(0, "BTCUSDT");
-      const sellResult = await calculator.calculateSellLimitPrice(0, "BTCUSDT");
+      const buyResult = calculator.calculateBuyLimitPrice(
+        new Decimal(0),
+        "BTCUSDT",
+      );
+      const sellResult = calculator.calculateSellLimitPrice(
+        new Decimal(0),
+        "BTCUSDT",
+      );
 
       expect(buyResult.toNumber()).toBe(0);
       expect(sellResult.toNumber()).toBe(0);
     });
 
-    it("should handle negative price by throwing error", async () => {
+    it("should handle negative price by throwing error", () => {
       mockTradingRules.getCachedRules.mockReturnValue({
         symbol: "BTCUSDT",
         tickSize: 0.01,
@@ -753,13 +767,13 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      await expect(
-        calculator.calculateBuyLimitPrice(-100, "BTCUSDT"),
-      ).rejects.toThrow("Price must be non-negative");
+      expect(() =>
+        calculator.calculateBuyLimitPrice(new Decimal(-100), "BTCUSDT"),
+      ).toThrow("Current price must be greater than 0");
 
-      await expect(
-        calculator.calculateSellLimitPrice(-100, "BTCUSDT"),
-      ).rejects.toThrow("Price must be non-negative");
+      expect(() =>
+        calculator.calculateSellLimitPrice(new Decimal(-100), "BTCUSDT"),
+      ).toThrow("Current price must be greater than 0");
     });
 
     it("should handle invalid slippage values in constructor", () => {
@@ -769,7 +783,7 @@ describe("OrderPriceCalculator", () => {
             mockTradingRules as unknown as TradingRules,
             -0.01,
           ),
-      ).toThrow("Slippage must be between 0 and 1");
+      ).toThrow("Buy slippage guard must be between 0 and 0.1");
 
       expect(
         () =>
@@ -777,7 +791,7 @@ describe("OrderPriceCalculator", () => {
             mockTradingRules as unknown as TradingRules,
             1.1,
           ),
-      ).toThrow("Slippage must be between 0 and 1");
+      ).toThrow("Buy slippage guard must be between 0 and 0.1");
 
       expect(
         () =>
@@ -786,7 +800,7 @@ describe("OrderPriceCalculator", () => {
             0.003,
             -0.01,
           ),
-      ).toThrow("Slippage must be between 0 and 1");
+      ).toThrow("Sell slippage guard must be between 0 and 0.1");
 
       expect(
         () =>
@@ -795,10 +809,10 @@ describe("OrderPriceCalculator", () => {
             0.003,
             1.1,
           ),
-      ).toThrow("Slippage must be between 0 and 1");
+      ).toThrow("Sell slippage guard must be between 0 and 0.1");
     });
 
-    it("should handle NaN price input", async () => {
+    it("should handle NaN price input", () => {
       mockTradingRules.getCachedRules.mockReturnValue({
         symbol: "BTCUSDT",
         tickSize: 0.01,
@@ -811,16 +825,16 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      await expect(
-        calculator.calculateBuyLimitPrice(NaN, "BTCUSDT"),
-      ).rejects.toThrow("Invalid price");
+      expect(() =>
+        calculator.calculateBuyLimitPrice(new Decimal(NaN), "BTCUSDT"),
+      ).toThrow("Current price must be a finite number");
 
-      await expect(
-        calculator.calculateSellLimitPrice(NaN, "BTCUSDT"),
-      ).rejects.toThrow("Invalid price");
+      expect(() =>
+        calculator.calculateSellLimitPrice(new Decimal(NaN), "BTCUSDT"),
+      ).toThrow("Current price must be a finite number");
     });
 
-    it("should handle Infinity price input", async () => {
+    it("should handle Infinity price input", () => {
       mockTradingRules.getCachedRules.mockReturnValue({
         symbol: "BTCUSDT",
         tickSize: 0.01,
@@ -833,18 +847,18 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      await expect(
-        calculator.calculateBuyLimitPrice(Infinity, "BTCUSDT"),
-      ).rejects.toThrow("Invalid price");
+      expect(() =>
+        calculator.calculateBuyLimitPrice(new Decimal(Infinity), "BTCUSDT"),
+      ).toThrow("Current price must be a finite number");
 
-      await expect(
-        calculator.calculateSellLimitPrice(Infinity, "BTCUSDT"),
-      ).rejects.toThrow("Invalid price");
+      expect(() =>
+        calculator.calculateSellLimitPrice(new Decimal(Infinity), "BTCUSDT"),
+      ).toThrow("Current price must be a finite number");
     });
   });
 
   describe("calculateBothPrices convenience method", () => {
-    it("should calculate both buy and sell prices in one call", async () => {
+    it("should calculate both buy and sell prices in one call", () => {
       const closePrice = 50000;
       const symbol = "BTCUSDT";
       const tickSize = 0.01;
@@ -861,7 +875,10 @@ describe("OrderPriceCalculator", () => {
         lastUpdated: Date.now(),
       });
 
-      const result = await calculator.calculateBothPrices(closePrice, symbol);
+      const result = calculator.calculateBothPrices(
+        new Decimal(closePrice),
+        symbol,
+      );
 
       expect(result).toHaveProperty("buyPrice");
       expect(result).toHaveProperty("sellPrice");
@@ -871,7 +888,7 @@ describe("OrderPriceCalculator", () => {
       expect(result.sellPrice.toNumber()).toBe(49850.0);
     });
 
-    it("should only fetch rules once when calculating both prices", async () => {
+    it("should only fetch rules once when calculating both prices", () => {
       const closePrice = 50000;
       const symbol = "BTCUSDT";
       const rules: SymbolTradingRules = {
@@ -889,10 +906,9 @@ describe("OrderPriceCalculator", () => {
       mockTradingRules.getCachedRules.mockReturnValue(undefined);
       mockTradingRules.getRules.mockResolvedValue(rules);
 
-      const result = await calculator.calculateBothPrices(
-        closePrice,
+      const result = calculator.calculateBothPrices(
+        new Decimal(closePrice),
         symbol,
-        true,
       );
 
       expect(result.buyPrice.toNumber()).toBe(50150.0);
