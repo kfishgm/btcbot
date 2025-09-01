@@ -1,17 +1,9 @@
 import { test, expect, Page } from "@playwright/test";
-import type { BinanceConfig } from "../src/exchange/types";
-
-// Test configuration using testnet
-const TEST_CONFIG: BinanceConfig = {
-  apiKey: process.env.BINANCE_TEST_API_KEY || "test-api-key",
-  apiSecret: process.env.BINANCE_TEST_API_SECRET || "test-api-secret",
-  testnet: true,
-};
 
 test.describe("Binance Client E2E Tests", () => {
   let page: Page;
 
-  test.beforeEach(async ({ page: p }) => {
+  test.beforeEach(async ({ page: p }: { page: Page }) => {
     page = p;
     // Navigate to the trading interface
     await page.goto("/trading");
@@ -34,9 +26,9 @@ test.describe("Binance Client E2E Tests", () => {
       expect(priceText).toMatch(/^\$[\d,]+\.?\d*$/);
 
       // Price should update within 5 seconds
-      const initialPrice = await priceElement.textContent();
+      await priceElement.textContent();
       await page.waitForTimeout(5000);
-      const updatedPrice = await priceElement.textContent();
+      await priceElement.textContent();
 
       // Prices might be the same in stable market, but element should still be present
       await expect(priceElement).toBeVisible();
@@ -403,7 +395,7 @@ test.describe("Binance Client E2E Tests", () => {
       const results = await Promise.all(promises);
 
       // Some requests should be rate limited
-      const rateLimited = results.filter((status) => status === 429);
+      const rateLimited = results.filter((status: number) => status === 429);
       expect(rateLimited.length).toBeGreaterThan(0);
 
       // Check UI shows rate limit warning
@@ -434,7 +426,7 @@ test.describe("Binance Client E2E Tests", () => {
       await page.evaluate(() => {
         const button = document.querySelector(
           "[data-testid='place-order-button']",
-        ) as HTMLButtonElement;
+        ) as HTMLButtonElement | null;
         if (button) button.disabled = false;
       });
 
@@ -519,12 +511,10 @@ test.describe("Binance Client E2E Tests", () => {
       await expect(wsIndicator).toHaveAttribute("data-status", "connected");
 
       // Wait for price update (max 10 seconds)
-      let priceChanged = false;
       for (let i = 0; i < 10; i++) {
         await page.waitForTimeout(1000);
         const currentPrice = await priceElement.textContent();
         if (currentPrice !== initialPrice) {
-          priceChanged = true;
           break;
         }
       }
@@ -542,7 +532,6 @@ test.describe("Binance Client E2E Tests", () => {
       const firstBid = await bids.first().textContent();
 
       // Wait for updates (max 10 seconds)
-      let orderBookChanged = false;
       for (let i = 0; i < 10; i++) {
         await page.waitForTimeout(1000);
         const currentBidCount = await bids.count();
@@ -552,7 +541,6 @@ test.describe("Binance Client E2E Tests", () => {
           currentBidCount !== initialBidCount ||
           currentFirstBid !== firstBid
         ) {
-          orderBookChanged = true;
           break;
         }
       }

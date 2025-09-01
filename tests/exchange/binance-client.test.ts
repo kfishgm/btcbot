@@ -14,11 +14,9 @@ import type {
   TimeInForce,
   BinanceOrder,
   BinanceAccountInfo,
-  BinanceBalance,
   BinanceTickerPrice,
   BinanceOrderBook,
   BinanceKline,
-  RateLimitInfo,
   BinanceError,
   BinanceServerTime,
   OrderStatus,
@@ -101,7 +99,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime: Date.now() }),
-      } as Response);
+      } as unknown as Response);
 
       await client.syncTime();
 
@@ -109,7 +107,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ balances: [] }),
-      } as Response);
+      } as unknown as Response);
 
       await client.getAccountInfo();
 
@@ -164,14 +162,14 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime: Date.now() }),
-      } as Response);
+      } as unknown as Response);
 
       await client.syncTime();
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ balances: [] }),
-      } as Response);
+      } as unknown as Response);
 
       await client.getAccountInfo();
 
@@ -222,7 +220,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime }) as BinanceServerTime,
-      } as Response);
+      } as unknown as Response);
 
       await client.syncTime();
       expect(client.getTimeDiff()).toBeDefined();
@@ -241,7 +239,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime }),
-      } as Response);
+      } as unknown as Response);
 
       await client.syncTime();
 
@@ -255,7 +253,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime }),
-      } as Response);
+      } as unknown as Response);
 
       await client.syncTime();
 
@@ -269,7 +267,7 @@ describe("BinanceClient", () => {
           code: -1021,
           msg: "Timestamp for this request is outside of the recvWindow.",
         }),
-      } as Response);
+      } as unknown as Response);
 
       await expect(client.getAccountInfo()).rejects.toThrow(
         "Timestamp for this request is outside of the recvWindow",
@@ -283,7 +281,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime }),
-      } as Response);
+      } as unknown as Response);
       await client.syncTime();
 
       // Advance time
@@ -297,19 +295,19 @@ describe("BinanceClient", () => {
           code: -1021,
           msg: "Timestamp for this request is outside of the recvWindow.",
         }),
-      } as Response);
+      } as unknown as Response);
 
       // Auto resync
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime: serverTime + 60000 }),
-      } as Response);
+      } as unknown as Response);
 
       // Retry request succeeds
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ balances: [] }),
-      } as Response);
+      } as unknown as Response);
 
       await client.getAccountInfo();
       expect(mockFetch).toHaveBeenCalledTimes(4);
@@ -340,7 +338,7 @@ describe("BinanceClient", () => {
           "x-mbx-used-weight-1m": "10",
         }),
         json: async () => ({ price: "45000.00" }),
-      } as Response);
+      } as unknown as Response);
 
       await client.getPrice("BTCUSDT");
 
@@ -356,7 +354,7 @@ describe("BinanceClient", () => {
           "x-mbx-used-weight-1m": "10",
         }),
         json: async () => ({ price: "45000.00" }),
-      } as Response);
+      } as unknown as Response);
 
       await client.getPrice("BTCUSDT");
       expect(client.getRateLimitInfo().weightUsed).toBe(10);
@@ -371,7 +369,7 @@ describe("BinanceClient", () => {
           "x-mbx-used-weight-1m": "5",
         }),
         json: async () => ({ price: "45000.00" }),
-      } as Response);
+      } as unknown as Response);
 
       await client.getPrice("BTCUSDT");
       expect(client.getRateLimitInfo().weightUsed).toBe(5);
@@ -389,13 +387,13 @@ describe("BinanceClient", () => {
           code: -1003,
           msg: "Too many requests.",
         }),
-      } as Response);
+      } as unknown as Response);
 
       // Next request should succeed
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ price: "45000.00" }),
-      } as Response);
+      } as unknown as Response);
 
       const pricePromise = client.getPrice("BTCUSDT");
 
@@ -418,7 +416,7 @@ describe("BinanceClient", () => {
             orderId: i,
             status: "NEW",
           }),
-        } as Response);
+        } as unknown as Response);
       }
 
       // Submit 15 orders rapidly
@@ -454,7 +452,7 @@ describe("BinanceClient", () => {
           "x-mbx-used-weight-1m": "10",
         }),
         json: async () => ({ balances: [] }),
-      } as Response);
+      } as unknown as Response);
 
       await client.getAccountInfo();
       expect(client.getRateLimitInfo().weightUsed).toBe(10);
@@ -466,7 +464,7 @@ describe("BinanceClient", () => {
           "x-mbx-used-weight-1m": "60",
         }),
         json: async () => ({ bids: [], asks: [] }),
-      } as Response);
+      } as unknown as Response);
 
       await client.getOrderBook("BTCUSDT", 5000);
       expect(client.getRateLimitInfo().weightUsed).toBe(60);
@@ -484,7 +482,7 @@ describe("BinanceClient", () => {
           code: -1003,
           msg: "Too many requests.",
         }),
-      } as Response);
+      } as unknown as Response);
 
       await expect(client.getAccountInfo()).rejects.toThrow(
         "Too many requests",
@@ -511,7 +509,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockPrice,
-      } as Response);
+      } as unknown as Response);
 
       const price = await client.getPrice("BTCUSDT");
       expect(price.symbol).toBe("BTCUSDT");
@@ -534,7 +532,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockOrderBook,
-      } as Response);
+      } as unknown as Response);
 
       const orderBook = await client.getOrderBook("BTCUSDT");
       expect(orderBook.bids).toHaveLength(2);
@@ -576,7 +574,7 @@ describe("BinanceClient", () => {
             k.takerBuyQuoteAssetVolume,
             "0",
           ]),
-      } as Response);
+      } as unknown as Response);
 
       const klines = await client.getKlines("BTCUSDT", "1h", 1);
       expect(klines).toHaveLength(1);
@@ -592,7 +590,7 @@ describe("BinanceClient", () => {
           code: -1121,
           msg: "Invalid symbol.",
         }),
-      } as Response);
+      } as unknown as Response);
 
       await expect(client.getPrice("INVALID")).rejects.toThrow(
         "Invalid symbol",
@@ -613,7 +611,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime: Date.now() }),
-      } as Response);
+      } as unknown as Response);
       await client.syncTime();
     });
 
@@ -646,7 +644,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockAccountInfo,
-      } as Response);
+      } as unknown as Response);
 
       const accountInfo = await client.getAccountInfo();
       expect(accountInfo.canTrade).toBe(true);
@@ -683,7 +681,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockAccountInfo,
-      } as Response);
+      } as unknown as Response);
 
       const btcBalance = await client.getBalance("BTC");
       expect(btcBalance.asset).toBe("BTC");
@@ -709,7 +707,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockAccountInfo,
-      } as Response);
+      } as unknown as Response);
 
       const ethBalance = await client.getBalance("ETH");
       expect(ethBalance.asset).toBe("ETH");
@@ -739,7 +737,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockTrades,
-      } as Response);
+      } as unknown as Response);
 
       const trades = await client.getMyTrades("BTCUSDT");
       expect(trades).toHaveLength(1);
@@ -770,18 +768,18 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockAccountInfo,
-      } as Response);
+      } as unknown as Response);
 
       // Mock price responses
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ symbol: "BTCUSDT", price: "45000.00" }),
-      } as Response);
+      } as unknown as Response);
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ symbol: "ETHUSDT", price: "3000.00" }),
-      } as Response);
+      } as unknown as Response);
 
       const portfolioValue = await client.getPortfolioValue();
       // 0.6 BTC * 45000 + 2 ETH * 3000 + 10000 USDT = 27000 + 6000 + 10000 = 43000
@@ -802,7 +800,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime: Date.now() }),
-      } as Response);
+      } as unknown as Response);
       await client.syncTime();
     });
 
@@ -827,7 +825,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockOrder,
-      } as Response);
+      } as unknown as Response);
 
       const order = await client.createOrder({
         symbol: "BTCUSDT",
@@ -872,7 +870,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockOrder,
-      } as Response);
+      } as unknown as Response);
 
       const order = await client.createOrder({
         symbol: "BTCUSDT",
@@ -908,7 +906,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockOrder,
-      } as Response);
+      } as unknown as Response);
 
       const order = await client.createOrder({
         symbol: "BTCUSDT",
@@ -945,7 +943,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockCancelResponse,
-      } as Response);
+      } as unknown as Response);
 
       const result = await client.cancelOrder("BTCUSDT", 123456789);
       expect(result.status).toBe("CANCELED");
@@ -977,7 +975,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockOrder,
-      } as Response);
+      } as unknown as Response);
 
       const order = await client.getOrder("BTCUSDT", 123456789);
       expect(order.status).toBe("PARTIALLY_FILLED");
@@ -1031,7 +1029,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockOrders,
-      } as Response);
+      } as unknown as Response);
 
       const orders = await client.getOpenOrders();
       expect(orders).toHaveLength(2);
@@ -1079,7 +1077,7 @@ describe("BinanceClient", () => {
           code: -2010,
           msg: "Account has insufficient balance for requested action.",
         }),
-      } as Response);
+      } as unknown as Response);
 
       await expect(
         client.createOrder({
@@ -1113,7 +1111,7 @@ describe("BinanceClient", () => {
         ok: false,
         status: 400,
         json: async () => errorResponse,
-      } as Response);
+      } as unknown as Response);
 
       await expect(client.getPrice("INVALID")).rejects.toThrow(
         "Invalid symbol",
@@ -1145,7 +1143,10 @@ describe("BinanceClient", () => {
         json: async () => {
           throw new Error("Invalid JSON");
         },
-      } as Response);
+        headers: new Headers(),
+        status: 200,
+        statusText: "OK",
+      } as unknown as Response);
 
       await expect(client.getPrice("BTCUSDT")).rejects.toThrow("Invalid JSON");
     });
@@ -1159,7 +1160,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ symbol: "BTCUSDT", price: "45000.00" }),
-      } as Response);
+      } as unknown as Response);
 
       const price = await client.getPrice("BTCUSDT");
       expect(price.price).toBe("45000.00");
@@ -1177,13 +1178,13 @@ describe("BinanceClient", () => {
           code: -1003,
           msg: "Too many requests.",
         }),
-      } as Response);
+      } as unknown as Response);
 
       // Next request succeeds
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ symbol: "BTCUSDT", price: "45000.00" }),
-      } as Response);
+      } as unknown as Response);
 
       const pricePromise = client.getPrice("BTCUSDT");
 
@@ -1202,7 +1203,7 @@ describe("BinanceClient", () => {
           code: -1003,
           msg: "IP banned until 1234567890000",
         }),
-      } as Response);
+      } as unknown as Response);
 
       await expect(client.getPrice("BTCUSDT")).rejects.toThrow("IP banned");
     });
@@ -1221,7 +1222,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime: Date.now() }),
-      } as Response);
+      } as unknown as Response);
       await client.syncTime();
     });
 
@@ -1233,7 +1234,7 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => mockListenKey,
-      } as Response);
+      } as unknown as Response);
 
       const listenKey = await client.createListenKey();
       expect(listenKey).toBe("test-listen-key-123456");
@@ -1243,7 +1244,10 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({}),
-      } as Response);
+        headers: new Headers(),
+        status: 200,
+        statusText: "OK",
+      } as unknown as Response);
 
       await client.keepAliveListenKey("test-listen-key-123456");
       expect(mockFetch).toHaveBeenCalledWith(
@@ -1258,7 +1262,10 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({}),
-      } as Response);
+        headers: new Headers(),
+        status: 200,
+        statusText: "OK",
+      } as unknown as Response);
 
       await client.closeListenKey("test-listen-key-123456");
       expect(mockFetch).toHaveBeenCalledWith(
