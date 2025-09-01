@@ -325,7 +325,7 @@ export class Logger {
       const logData =
         this.config.format === "json"
           ? JSON.stringify({ timestamp, level, message, ...meta })
-          : `${timestamp} [${level}]: ${message}${Object.keys(meta).length > 0 ? " " + JSON.stringify(meta, null, 2) : ""}`;
+          : `${timestamp} [${level.toUpperCase()}]: ${message}${Object.keys(meta).length > 0 ? " " + JSON.stringify(meta, null, 2) : ""}`;
 
       // Call the appropriate console method based on level
       switch (level) {
@@ -681,7 +681,12 @@ class ChildLogger {
   constructor(
     private parent: Logger,
     private metadata: Record<string, unknown>,
-  ) {}
+  ) {
+    // Set requestId if provided in metadata
+    if (metadata.requestId && typeof metadata.requestId === "string") {
+      parent.withRequestId(metadata.requestId);
+    }
+  }
 
   private mergeMetadata(
     additionalMetadata?: Record<string, unknown>,
@@ -689,16 +694,38 @@ class ChildLogger {
     return { ...this.metadata, ...additionalMetadata };
   }
 
+  private logWithContext(
+    logFn: (message: string, metadata?: Record<string, unknown>) => void,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ): void {
+    // Temporarily set the requestId if we have one
+    const currentRequestId = this.parent.getRequestId();
+    if (
+      this.metadata.requestId &&
+      typeof this.metadata.requestId === "string"
+    ) {
+      this.parent.withRequestId(this.metadata.requestId as string);
+    }
+
+    logFn.call(this.parent, message, this.mergeMetadata(metadata));
+
+    // Restore the original requestId
+    if (currentRequestId !== this.metadata.requestId) {
+      this.parent.withRequestId(currentRequestId || undefined);
+    }
+  }
+
   public debug(message: string, metadata?: Record<string, unknown>): void {
-    this.parent.debug(message, this.mergeMetadata(metadata));
+    this.logWithContext(this.parent.debug.bind(this.parent), message, metadata);
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    this.parent.info(message, this.mergeMetadata(metadata));
+    this.logWithContext(this.parent.info.bind(this.parent), message, metadata);
   }
 
   public warn(message: string, metadata?: Record<string, unknown>): void {
-    this.parent.warn(message, this.mergeMetadata(metadata));
+    this.logWithContext(this.parent.warn.bind(this.parent), message, metadata);
   }
 
   public error(
@@ -706,7 +733,20 @@ class ChildLogger {
     error?: Error | unknown,
     metadata?: Record<string, unknown>,
   ): void {
+    // For error, we need special handling
+    const currentRequestId = this.parent.getRequestId();
+    if (
+      this.metadata.requestId &&
+      typeof this.metadata.requestId === "string"
+    ) {
+      this.parent.withRequestId(this.metadata.requestId as string);
+    }
+
     this.parent.error(message, error, this.mergeMetadata(metadata));
+
+    if (currentRequestId !== this.metadata.requestId) {
+      this.parent.withRequestId(currentRequestId || undefined);
+    }
   }
 }
 
