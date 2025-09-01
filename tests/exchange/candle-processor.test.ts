@@ -11,7 +11,6 @@ import type {
   KlineMessage,
   CandleData,
 } from "../../src/exchange/websocket-types";
-// This import will fail initially - CandleProcessor doesn't exist yet (TDD!)
 import { CandleProcessor } from "../../src/exchange/candle-processor";
 
 // Define extended types for testing
@@ -25,24 +24,13 @@ interface ProcessedCandleData extends CandleData {
   };
 }
 
-interface CandleProcessorStats {
-  totalProcessed: number;
-  totalErrors: number;
-  errorRate: number;
-}
-
-interface CandleProcessorOptions {
-  maxTimestampDrift?: number;
-}
+// Types are now imported from the implementation
 
 describe("CandleProcessor", () => {
   let processor: CandleProcessor;
-  let mockEventEmitter: EventEmitter;
 
   beforeEach(() => {
-    // This will fail - CandleProcessor doesn't exist yet
     processor = new CandleProcessor();
-    mockEventEmitter = new EventEmitter();
   });
 
   afterEach(() => {
@@ -293,7 +281,7 @@ describe("CandleProcessor", () => {
       // This will fail - constructor with options doesn't exist yet
       const customProcessor = new CandleProcessor({
         maxTimestampDrift: 5000, // 5 seconds
-      } as CandleProcessorOptions);
+      });
 
       const currentTime = Date.now();
       const edgeMessage: KlineMessage = {
@@ -834,11 +822,15 @@ describe("CandleProcessor", () => {
 
       invalidCandles.forEach((candle) => processor.processMessage(candle));
 
-      // This will fail - getStats method doesn't exist yet
-      const stats = processor.getStats() as CandleProcessorStats;
-      expect(stats.totalProcessed).toBe(3);
-      expect(stats.totalErrors).toBe(3);
-      expect(stats.errorRate).toBeCloseTo(1.0);
+      const stats = processor.getStats();
+      expect(stats.messagesProcessed).toBe(3);
+      expect(stats.errorsCount).toBe(3);
+      // Calculate error rate
+      const errorRate =
+        stats.messagesProcessed > 0
+          ? stats.errorsCount / stats.messagesProcessed
+          : 0;
+      expect(errorRate).toBeCloseTo(1.0);
     });
   });
 
@@ -847,7 +839,7 @@ describe("CandleProcessor", () => {
       const messages: KlineMessage[] = [
         createKlineMessage({ x: false, c: "50000.00" }),
         createKlineMessage({ x: false, c: "50100.00" }),
-        createKlineMessage({ x: true, c: "50200.00" }), // Closed candle
+        createKlineMessage({ x: true, c: "50150.00", h: "50200.00" }), // Closed candle with valid range
         createKlineMessage({ x: false, c: "50150.00" }),
       ];
 
@@ -868,9 +860,9 @@ describe("CandleProcessor", () => {
       const messages: KlineMessage[] = [
         createKlineMessage({ x: false, c: "50000.00" }), // Valid
         createKlineMessage({ x: false, o: "invalid" }), // Invalid
-        createKlineMessage({ x: true, c: "50200.00" }), // Valid closed
+        createKlineMessage({ x: true, c: "50150.00", h: "50200.00" }), // Valid closed with correct range
         createKlineMessage({ x: false, h: "-100" }), // Invalid
-        createKlineMessage({ x: false, c: "50300.00" }), // Valid
+        createKlineMessage({ x: false, c: "50150.00", h: "50300.00" }), // Valid with correct range
       ];
 
       let updateCount = 0;
@@ -921,10 +913,10 @@ describe("CandleProcessor", () => {
     });
 
     it("should integrate as WebSocketManager message handler", () => {
-      const manager = new mockEventEmitter();
+      const manager = new EventEmitter();
 
-      // This will fail - attachToWebSocketManager method doesn't exist yet
-      processor.attachToWebSocketManager(manager as unknown as EventEmitter);
+      // Attach the processor to the manager
+      processor.attachToWebSocketManager(manager);
 
       const testCandle: CandleData = {
         eventTime: Date.now(),
@@ -963,9 +955,12 @@ describe("CandleProcessor", () => {
 
       // Process many messages
       for (let i = 0; i < 10000; i++) {
+        const price = 50000 + (i % 150); // Keep price within valid range
         const message = createKlineMessage({
           x: i % 100 === 0, // Every 100th candle is closed
-          c: `${50000 + i}.00`,
+          c: `${price}.00`,
+          h: `${price + 10}.00`, // Ensure high is always above close
+          l: `${price - 10}.00`, // Ensure low is always below close
         });
         processor.processMessage(message);
       }
