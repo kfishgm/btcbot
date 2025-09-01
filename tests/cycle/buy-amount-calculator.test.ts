@@ -61,8 +61,8 @@ describe("BuyAmountCalculator", () => {
 
       const result = calculator.calculateInitialBuyAmount(config);
 
-      // buy_amount = floor(1000.123456789 / 3) = floor(333.374586297) = 333.37458629
-      expect(result).toBe(333.37458629);
+      // buy_amount = floor(1000.123456789 / 3) = floor(333.374585963) = 333.37448559 (8 decimals)
+      expect(result).toBe(333.37448559);
     });
 
     it("should handle capital that divides evenly", () => {
@@ -385,7 +385,7 @@ describe("BuyAmountCalculator", () => {
       };
 
       expect(() => calculator.calculateInitialBuyAmount(config)).toThrow(
-        "Calculated buy amount (0) is below minimum (10)",
+        "Invalid configuration: zero capital",
       );
     });
 
@@ -397,7 +397,7 @@ describe("BuyAmountCalculator", () => {
       };
 
       expect(() => calculator.calculateInitialBuyAmount(config)).toThrow(
-        "Invalid configuration: negative values not allowed",
+        "Invalid configuration: negative capital",
       );
     });
 
@@ -409,7 +409,7 @@ describe("BuyAmountCalculator", () => {
       };
 
       expect(() => calculator.calculateInitialBuyAmount(config)).toThrow(
-        "Invalid configuration: maxPurchases must be greater than 0",
+        "Invalid configuration: division by zero (max purchases = 0)",
       );
     });
 
@@ -421,7 +421,7 @@ describe("BuyAmountCalculator", () => {
       };
 
       expect(() => calculator.calculateInitialBuyAmount(config)).toThrow(
-        "Invalid configuration: negative values not allowed",
+        "Invalid configuration: negative max purchases",
       );
     });
 
@@ -583,7 +583,8 @@ describe("BuyAmountCalculator", () => {
         exchangeMinNotional: 8,
       };
 
-      const result = calculator.shouldSkipPurchase(state, config);
+      const amount = calculator.getPurchaseAmount(state);
+      const result = calculator.shouldSkipPurchase(amount, config);
 
       expect(result).toBe(true);
     });
@@ -600,7 +601,8 @@ describe("BuyAmountCalculator", () => {
         exchangeMinNotional: 15,
       };
 
-      const result = calculator.shouldSkipPurchase(state, config);
+      const amount = calculator.getPurchaseAmount(state);
+      const result = calculator.shouldSkipPurchase(amount, config);
 
       expect(result).toBe(false);
     });
@@ -620,10 +622,9 @@ describe("BuyAmountCalculator", () => {
       const decision = calculator.getPurchaseDecision(state, config);
 
       expect(decision).toEqual({
-        shouldPurchase: true,
+        shouldSkip: false,
         amount: 150,
         isLastPurchase: true,
-        skipReason: null,
       });
     });
 
@@ -642,10 +643,10 @@ describe("BuyAmountCalculator", () => {
       const decision = calculator.getPurchaseDecision(state, config);
 
       expect(decision).toEqual({
-        shouldPurchase: false,
+        shouldSkip: true,
         amount: 8,
         isLastPurchase: false,
-        skipReason: "Amount 8 is below minimum 10 USDT",
+        skipReason: "Amount 8 is below minimum required 10",
       });
     });
 
