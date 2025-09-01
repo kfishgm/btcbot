@@ -277,7 +277,11 @@ describe("HistoricalCandleManager", () => {
       manager.addCandle(candle);
 
       expect(manager.getCandleHistory()).toHaveLength(1);
-      expect(manager.getCandleHistory()[0]).toEqual(candle);
+      // The candle will have isClosed property added
+      expect(manager.getCandleHistory()[0]).toMatchObject({
+        ...candle,
+        isClosed: expect.any(Boolean),
+      });
     });
   });
 
@@ -1327,7 +1331,11 @@ describe("HistoricalCandleManager Integration Tests", () => {
       jest.advanceTimersByTime(1000);
       await Promise.resolve();
 
-      expect(manager.getCandleHistory()).toContainEqual(newCandle);
+      // The candle will have isClosed property added
+      expect(manager.getCandleHistory()).toContainEqual({
+        ...newCandle,
+        isClosed: expect.any(Boolean),
+      });
 
       // Simulate recovery
       manager.recordWebSocketRecovery();
