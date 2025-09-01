@@ -1,69 +1,79 @@
+import {
+  jest,
+  describe,
+  it,
+  beforeEach,
+  afterEach,
+  expect,
+} from "@jest/globals";
 import { StateTransactionManager } from "../../src/cycle/state-transaction-manager.js";
 import type { CycleState } from "../../src/cycle/cycle-state-manager.js";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/supabase.js";
 
-// Mock Supabase client
-jest.mock("@supabase/supabase-js", () => ({
-  createClient: jest.fn(),
-}));
-
-// Define mock query builder interface
-interface MockQueryBuilder {
-  from: jest.Mock;
-  select: jest.Mock;
-  insert: jest.Mock;
-  update: jest.Mock;
-  eq: jest.Mock;
-  filter: jest.Mock;
-  or: jest.Mock;
-  order: jest.Mock;
-  limit: jest.Mock;
-  single: jest.Mock;
-}
+// Type for RPC response
+type RPCResponse<T = unknown> = {
+  data: T | null;
+  error: { message: string } | null;
+};
 
 describe("StateTransactionManager", () => {
   let manager: StateTransactionManager;
-  let mockSupabase: unknown;
-  let mockQueryBuilder: MockQueryBuilder;
+  let mockSupabase: SupabaseClient<Database>;
+  let mockRpc: jest.MockedFunction<
+    (...args: unknown[]) => Promise<RPCResponse>
+  >;
+  let mockFrom: jest.Mock;
+  let mockSelect: jest.Mock;
+  let mockEq: jest.Mock;
+  let mockOr: jest.Mock;
+  let mockFilter: jest.Mock;
+  let mockOrder: jest.Mock;
+  let mockLimit: jest.Mock;
+  let mockSingle: jest.MockedFunction<() => Promise<RPCResponse>>;
 
   beforeEach(() => {
-    // Setup mock query builder
-    mockQueryBuilder = {
-      from: jest.fn(),
-      select: jest.fn(),
-      insert: jest.fn(),
-      update: jest.fn(),
-      eq: jest.fn(),
-      filter: jest.fn(),
-      or: jest.fn(),
-      order: jest.fn(),
-      limit: jest.fn(),
-      single: jest.fn().mockResolvedValue({ data: null, error: null }),
+    // Setup mock chain
+    mockSingle = jest.fn() as jest.MockedFunction<() => Promise<RPCResponse>>;
+    mockLimit = jest
+      .fn()
+      .mockReturnValue({ data: [], error: null }) as jest.Mock;
+    mockOrder = jest.fn().mockReturnThis() as jest.Mock;
+    mockFilter = jest.fn().mockReturnThis() as jest.Mock;
+    mockOr = jest.fn().mockReturnThis() as jest.Mock;
+    mockEq = jest.fn().mockReturnThis() as jest.Mock;
+    mockSelect = jest.fn().mockReturnThis() as jest.Mock;
+    mockFrom = jest.fn() as jest.Mock;
+    mockRpc = jest.fn() as jest.MockedFunction<
+      (...args: unknown[]) => Promise<RPCResponse>
+    >;
+
+    // Chain methods properly
+    const queryBuilder = {
+      select: mockSelect,
+      eq: mockEq,
+      or: mockOr,
+      filter: mockFilter,
+      order: mockOrder,
+      limit: mockLimit,
+      single: mockSingle,
     };
 
-    // Chain methods together
-    mockQueryBuilder.from.mockReturnValue(mockQueryBuilder);
-    mockQueryBuilder.select.mockReturnValue(mockQueryBuilder);
-    mockQueryBuilder.insert.mockReturnValue(mockQueryBuilder);
-    mockQueryBuilder.update.mockReturnValue(mockQueryBuilder);
-    mockQueryBuilder.eq.mockReturnValue(mockQueryBuilder);
-    mockQueryBuilder.filter.mockReturnValue(mockQueryBuilder);
-    mockQueryBuilder.or.mockReturnValue(mockQueryBuilder);
-    mockQueryBuilder.order.mockReturnValue(mockQueryBuilder);
-    mockQueryBuilder.limit.mockReturnValue(mockQueryBuilder);
+    mockSelect.mockReturnValue(queryBuilder);
+    mockEq.mockReturnValue(queryBuilder);
+    mockOr.mockReturnValue(queryBuilder);
+    mockFilter.mockReturnValue(queryBuilder);
+    mockOrder.mockReturnValue(queryBuilder);
+    mockLimit.mockReturnValue(queryBuilder);
+    mockFrom.mockReturnValue(queryBuilder);
 
     // Setup mock Supabase client
     mockSupabase = {
-      from: jest.fn().mockReturnValue(mockQueryBuilder),
-      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
-    };
+      rpc: mockRpc,
+      from: mockFrom,
+    } as unknown as SupabaseClient<Database>;
 
-    (createClient as jest.Mock).mockReturnValue(mockSupabase);
-
-    manager = new StateTransactionManager(
-      mockSupabase as SupabaseClient<Database>,
-    );
+    manager = new StateTransactionManager(mockSupabase);
   });
 
   afterEach(() => {
@@ -71,15 +81,14 @@ describe("StateTransactionManager", () => {
   });
 
   describe("Atomic Updates", () => {
-    it("should wrap state changes in a database transaction", async () => {
+    it("should update state atomically using RPC function", async () => {
       const botId = "bot-123";
       const updates: Partial<CycleState> = {
         capital_available: 50000,
         purchases_remaining: 5,
       };
 
-      // Mock successful transaction
-      const mockState = {
+      const mockState: CycleState = {
         id: botId,
         capital_available: 50000,
         purchases_remaining: 5,
@@ -93,91 +102,88 @@ describe("StateTransactionManager", () => {
         updated_at: new Date().toISOString(),
       };
 
-      mockQueryBuilder.single
-        .mockResolvedValueOnce({ data: mockState, error: null }) // select current state
-        .mockResolvedValueOnce({ data: mockState, error: null }); // update state
-
-      await manager.updateStateAtomic(botId, updates);
-
-      // Should start transaction
-      expect((mockSupabase as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith(
-        "begin_transaction",
-      );
-      // Should commit transaction
-      expect((mockSupabase as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith(
-        "commit_transaction",
-      );
-    });
-
-    it("should rollback on failure", async () => {
-      const botId = "bot-123";
-      const updates: Partial<CycleState> = {
-        capital_available: -1000, // Invalid negative value
-      };
-
-      // Mock transaction failure
-      mockQueryBuilder.single.mockResolvedValueOnce({
-        data: null,
-        error: { message: "Invalid value" },
+      mockRpc.mockResolvedValueOnce({
+        data: mockState,
+        error: null,
       });
 
-      await expect(manager.updateStateAtomic(botId, updates)).rejects.toThrow();
+      const result = await manager.updateStateAtomic(botId, updates);
 
-      // Should rollback transaction
-      expect((mockSupabase as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith(
-        "rollback_transaction",
+      expect(mockRpc).toHaveBeenCalledWith("update_state_atomic", {
+        p_bot_id: botId,
+        p_updates: updates,
+        p_expected_version: null,
+      });
+      expect(result).toEqual(mockState);
+    });
+
+    it("should throw error if RPC call fails", async () => {
+      const botId = "bot-123";
+      const updates: Partial<CycleState> = {
+        capital_available: 50000,
+      };
+
+      mockRpc.mockResolvedValueOnce({
+        data: null,
+        error: { message: "Database error" },
+      });
+
+      await expect(manager.updateStateAtomic(botId, updates)).rejects.toThrow(
+        "State update failed: Database error",
       );
     });
   });
 
   describe("Write-Ahead Logging", () => {
-    it("should save state before executing operation", async () => {
+    it("should execute operation with WAL", async () => {
       const botId = "bot-123";
       const stateUpdate: Partial<CycleState> = {
         capital_available: 45000,
       };
 
-      const mockOperation = jest.fn().mockResolvedValue({ success: true });
+      const mockOperation = jest
+        .fn<() => Promise<{ success: boolean }>>()
+        .mockResolvedValue({ success: true });
 
-      // Mock successful WAL entry
-      mockQueryBuilder.single.mockResolvedValueOnce({
-        data: { id: "wal-123" },
+      mockRpc.mockResolvedValueOnce({
+        data: { wal_id: "wal-123", state: {}, success: true },
         error: null,
       });
 
-      await manager.executeWithWriteAheadLog(
+      const result = await manager.executeWithWriteAheadLog(
         botId,
         stateUpdate,
         mockOperation,
         { type: "test" },
       );
 
-      // Should insert WAL entry
-      expect(mockQueryBuilder.insert).toHaveBeenCalled();
-      // Should execute operation
+      expect(mockRpc).toHaveBeenCalledWith("execute_with_wal", {
+        p_bot_id: botId,
+        p_state_update: stateUpdate,
+        p_operation_metadata: { type: "test" },
+      });
       expect(mockOperation).toHaveBeenCalled();
+      expect(result).toEqual({ success: true });
     });
 
-    it("should not execute operation if WAL fails", async () => {
+    it("should propagate operation errors", async () => {
       const botId = "bot-123";
       const stateUpdate: Partial<CycleState> = {
         capital_available: 45000,
       };
 
-      const mockOperation = jest.fn();
+      const mockOperation = jest
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(new Error("Operation failed"));
 
-      // Mock WAL failure
-      mockQueryBuilder.single.mockResolvedValueOnce({
-        data: null,
-        error: { message: "WAL failed" },
+      mockRpc.mockResolvedValueOnce({
+        data: { wal_id: "wal-123" },
+        error: null,
       });
 
       await expect(
         manager.executeWithWriteAheadLog(botId, stateUpdate, mockOperation, {}),
-      ).rejects.toThrow();
-
-      // Operation should not be called
-      expect(mockOperation).not.toHaveBeenCalled();
+      ).rejects.toThrow("Operation failed");
     });
   });
 
@@ -187,13 +193,11 @@ describe("StateTransactionManager", () => {
       const updates: Partial<CycleState> = {
         capital_available: 60000,
       };
-      const expectedVersion = Date.now();
+      const expectedVersion = 5;
 
-      // Mock current state with version
-      const currentState = {
+      const updatedState: CycleState = {
         id: botId,
-        capital_available: 50000,
-        updated_at: new Date(expectedVersion).toISOString(),
+        capital_available: 60000,
         status: "READY",
         purchases_remaining: 5,
         btc_accumulated: 0,
@@ -202,22 +206,26 @@ describe("StateTransactionManager", () => {
         cost_accum_usdt: 0,
         btc_accum_net: 0,
         buy_amount: 10000,
+        updated_at: new Date().toISOString(),
       };
 
-      mockQueryBuilder.single
-        .mockResolvedValueOnce({ data: currentState, error: null })
-        .mockResolvedValueOnce({
-          data: { ...currentState, ...updates },
-          error: null,
-        });
+      mockRpc.mockResolvedValueOnce({
+        data: updatedState,
+        error: null,
+      });
 
-      await manager.updateStateWithVersion(botId, updates, expectedVersion);
-
-      // Should check version in update
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith(
-        "updated_at",
-        currentState.updated_at,
+      const result = await manager.updateStateWithVersion(
+        botId,
+        updates,
+        expectedVersion,
       );
+
+      expect(mockRpc).toHaveBeenCalledWith("update_state_atomic", {
+        p_bot_id: botId,
+        p_updates: updates,
+        p_expected_version: expectedVersion,
+      });
+      expect(result).toEqual(updatedState);
     });
 
     it("should throw VersionConflictError on version mismatch", async () => {
@@ -225,31 +233,16 @@ describe("StateTransactionManager", () => {
       const updates: Partial<CycleState> = {
         capital_available: 60000,
       };
-      const expectedVersion = Date.now() - 10000; // Old version
+      const expectedVersion = 5;
 
-      // Mock current state with newer version
-      const currentState = {
-        id: botId,
-        updated_at: new Date().toISOString(), // Newer version
-        capital_available: 50000,
-        status: "READY",
-        purchases_remaining: 5,
-        btc_accumulated: 0,
-        ath_price: null,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
-        buy_amount: 10000,
-      };
-
-      mockQueryBuilder.single.mockResolvedValueOnce({
-        data: currentState,
-        error: null,
+      mockRpc.mockResolvedValueOnce({
+        data: null,
+        error: { message: "Version conflict. Expected: 5, Current: 7" },
       });
 
       await expect(
         manager.updateStateWithVersion(botId, updates, expectedVersion),
-      ).rejects.toThrow("Version conflict");
+      ).rejects.toThrow("Version conflict: expected 5, got 7");
     });
   });
 
@@ -260,24 +253,7 @@ describe("StateTransactionManager", () => {
         capital_available: 55000,
       };
 
-      let attempts = 0;
-      const mockRpc = mockSupabase as { rpc: jest.Mock };
-
-      // Mock deadlock on first attempt, success on second
-      mockRpc.rpc.mockImplementation((method) => {
-        if (method === "begin_transaction") {
-          attempts++;
-          if (attempts === 1) {
-            return Promise.resolve({
-              data: null,
-              error: { message: "deadlock detected" },
-            });
-          }
-        }
-        return Promise.resolve({ data: null, error: null });
-      });
-
-      const mockState = {
+      const mockState: CycleState = {
         id: botId,
         capital_available: 55000,
         status: "READY",
@@ -291,18 +267,21 @@ describe("StateTransactionManager", () => {
         updated_at: new Date().toISOString(),
       };
 
-      mockQueryBuilder.single.mockResolvedValue({
-        data: mockState,
-        error: null,
-      });
+      // First call fails with deadlock, second succeeds
+      mockRpc
+        .mockResolvedValueOnce({
+          data: null,
+          error: { message: "deadlock detected" },
+        })
+        .mockResolvedValueOnce({ data: mockState, error: null });
 
-      await manager.updateStateWithRetry(botId, updates, {
+      const result = await manager.updateStateWithRetry(botId, updates, {
         maxRetries: 3,
         delayMs: 10,
       });
 
-      // Should be called twice (failed once, succeeded once)
-      expect(attempts).toBe(2);
+      expect(mockRpc).toHaveBeenCalledTimes(2);
+      expect(result).toEqual(mockState);
     });
 
     it("should throw DeadlockError after max retries", async () => {
@@ -312,8 +291,7 @@ describe("StateTransactionManager", () => {
       };
 
       // Always return deadlock error
-      const mockRpc = mockSupabase as { rpc: jest.Mock };
-      mockRpc.rpc.mockResolvedValue({
+      mockRpc.mockResolvedValue({
         data: null,
         error: { message: "deadlock detected" },
       });
@@ -328,42 +306,6 @@ describe("StateTransactionManager", () => {
   });
 
   describe("Audit Trail", () => {
-    it("should log state changes to bot_events", async () => {
-      const botId = "bot-123";
-      const updates: Partial<CycleState> = {
-        capital_available: 45000,
-        purchases_remaining: 4,
-      };
-
-      const mockState = {
-        id: botId,
-        capital_available: 45000,
-        purchases_remaining: 4,
-        status: "READY",
-        btc_accumulated: 0,
-        ath_price: null,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
-        buy_amount: 10000,
-        updated_at: new Date().toISOString(),
-      };
-
-      mockQueryBuilder.single
-        .mockResolvedValueOnce({ data: mockState, error: null })
-        .mockResolvedValueOnce({ data: mockState, error: null });
-
-      await manager.updateStateAtomic(botId, updates);
-
-      // Should insert audit log
-      expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          event_type: "STATE_UPDATE",
-          severity: "info",
-        }),
-      );
-    });
-
     it("should retrieve state history from audit trail", async () => {
       const botId = "bot-123";
 
@@ -386,19 +328,13 @@ describe("StateTransactionManager", () => {
         },
       ];
 
-      mockQueryBuilder.limit.mockReturnValue({
-        data: mockHistory,
-        error: null,
-      });
+      mockLimit.mockReturnValue({ data: mockHistory, error: null });
 
       const history = await manager.getStateHistory(botId, 10);
 
+      expect(mockFrom).toHaveBeenCalledWith("bot_events");
+      expect(mockFilter).toHaveBeenCalledWith("metadata->bot_id", "eq", botId);
       expect(history).toEqual(mockHistory);
-      expect(mockQueryBuilder.filter).toHaveBeenCalledWith(
-        "metadata->bot_id",
-        "eq",
-        botId,
-      );
     });
   });
 
@@ -406,36 +342,27 @@ describe("StateTransactionManager", () => {
     it("should recover incomplete transactions on startup", async () => {
       const botId = "bot-123";
 
-      const incompleteWALs = [
-        {
-          id: "wal-1",
-          event_type: "write_ahead_log",
-          severity: "info",
-          metadata: {
-            bot_id: botId,
-            status: "pending",
-            state_update: { capital_available: 40000 },
-          },
-          created_at: new Date().toISOString(),
-        },
-      ];
-
-      // Mock finding incomplete WALs
-      mockQueryBuilder.order.mockReturnValue({
-        data: incompleteWALs,
+      mockRpc.mockResolvedValueOnce({
+        data: { recovered: 2, failed: 1, total: 3 },
         error: null,
       });
 
-      await manager.recoverIncompleteTransactions(botId);
+      const result = await manager.recoverIncompleteTransactions(botId);
 
-      // Should update WAL entries to rolled_back
-      expect(mockQueryBuilder.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          metadata: expect.objectContaining({
-            status: "rolled_back",
-          }),
-        }),
-      );
+      expect(mockRpc).toHaveBeenCalledWith("recover_incomplete_wal", {
+        p_bot_id: botId,
+      });
+      expect(result).toEqual({ recovered: 2, failed: 1 });
+    });
+
+    it("should return zeros if recovery returns no data", async () => {
+      const botId = "bot-123";
+
+      mockRpc.mockResolvedValueOnce({ data: null, error: null });
+
+      const result = await manager.recoverIncompleteTransactions(botId);
+
+      expect(result).toEqual({ recovered: 0, failed: 0 });
     });
   });
 
@@ -447,41 +374,35 @@ describe("StateTransactionManager", () => {
         { botId: "bot-3", changes: { capital_available: 70000 } },
       ];
 
-      await manager.batchUpdateState(updates);
-
-      // Should start single transaction
-      const mockRpc = mockSupabase as { rpc: jest.Mock };
-      expect(mockRpc.rpc).toHaveBeenCalledWith("begin_transaction");
-      expect(mockRpc.rpc).toHaveBeenCalledWith("commit_transaction");
-
-      // Should update each bot
-      expect(mockQueryBuilder.update).toHaveBeenCalledTimes(3);
-    });
-
-    it("should rollback all updates if any fails", async () => {
-      const updates = [
-        { botId: "bot-1", changes: { capital_available: 50000 } },
-        { botId: "bot-2", changes: { capital_available: -1000 } }, // Invalid
-      ];
-
-      // Make second update fail
-      let updateCount = 0;
-      mockQueryBuilder.eq.mockImplementation(() => {
-        updateCount++;
-        if (updateCount === 2) {
-          return {
-            data: null,
-            error: { message: "Invalid value" },
-          };
-        }
-        return mockQueryBuilder;
+      mockRpc.mockResolvedValueOnce({
+        data: { success: true },
+        error: null,
       });
 
-      await expect(manager.batchUpdateState(updates)).rejects.toThrow();
+      await manager.batchUpdateState(updates);
 
-      // Should rollback
-      const mockRpc = mockSupabase as { rpc: jest.Mock };
-      expect(mockRpc.rpc).toHaveBeenCalledWith("rollback_transaction");
+      expect(mockRpc).toHaveBeenCalledWith("batch_update_states", {
+        p_updates: [
+          { bot_id: "bot-1", changes: { capital_available: 50000 } },
+          { bot_id: "bot-2", changes: { capital_available: 60000 } },
+          { bot_id: "bot-3", changes: { capital_available: 70000 } },
+        ],
+      });
+    });
+
+    it("should throw error if batch update fails", async () => {
+      const updates = [
+        { botId: "bot-1", changes: { capital_available: 50000 } },
+      ];
+
+      mockRpc.mockResolvedValueOnce({
+        data: null,
+        error: { message: "Batch update error" },
+      });
+
+      await expect(manager.batchUpdateState(updates)).rejects.toThrow(
+        "Batch update failed: Batch update error",
+      );
     });
   });
 
@@ -489,10 +410,10 @@ describe("StateTransactionManager", () => {
     it("should use SERIALIZABLE isolation for critical updates", async () => {
       const botId = "bot-123";
       const updates: Partial<CycleState> = {
-        capital_available: 100000, // Critical financial update
+        capital_available: 100000,
       };
 
-      const mockState = {
+      const mockState: CycleState = {
         id: botId,
         capital_available: 100000,
         status: "READY",
@@ -506,45 +427,89 @@ describe("StateTransactionManager", () => {
         updated_at: new Date().toISOString(),
       };
 
-      mockQueryBuilder.single
-        .mockResolvedValueOnce({ data: mockState, error: null })
-        .mockResolvedValueOnce({ data: mockState, error: null });
+      mockRpc.mockResolvedValueOnce({
+        data: mockState,
+        error: null,
+      });
 
-      await manager.updateStateCritical(botId, updates);
+      const result = await manager.updateStateCritical(botId, updates);
 
-      // Should use serializable transaction
-      const mockRpc = mockSupabase as { rpc: jest.Mock };
-      expect(mockRpc.rpc).toHaveBeenCalledWith(
-        "begin_transaction_serializable",
-      );
+      expect(mockRpc).toHaveBeenCalledWith("update_state_critical", {
+        p_bot_id: botId,
+        p_updates: updates,
+      });
+      expect(result).toEqual(mockState);
     });
 
     it("should validate critical conditions", async () => {
       const botId = "bot-123";
       const updates: Partial<CycleState> = {
-        capital_available: -5000, // Invalid negative capital
+        capital_available: -5000,
       };
-
-      // Mock getting current state
-      mockQueryBuilder.single.mockResolvedValueOnce({
-        data: {
-          id: botId,
-          capital_available: 50000,
-          status: "READY",
-          purchases_remaining: 5,
-          btc_accumulated: 0,
-          ath_price: null,
-          reference_price: null,
-          cost_accum_usdt: 0,
-          btc_accum_net: 0,
-          buy_amount: 10000,
-          updated_at: new Date().toISOString(),
-        },
-        error: null,
-      });
 
       await expect(manager.updateStateCritical(botId, updates)).rejects.toThrow(
         "Cannot set negative capital",
+      );
+
+      // Should not call RPC if validation fails
+      expect(mockRpc).not.toHaveBeenCalled();
+    });
+
+    it("should validate negative purchases remaining", async () => {
+      const botId = "bot-123";
+      const updates: Partial<CycleState> = {
+        purchases_remaining: -1,
+      };
+
+      await expect(manager.updateStateCritical(botId, updates)).rejects.toThrow(
+        "Cannot set negative purchases remaining",
+      );
+
+      expect(mockRpc).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Get Current State with Version", () => {
+    it("should fetch current state with version field", async () => {
+      const botId = "bot-123";
+
+      const mockState = {
+        id: botId,
+        capital_available: 50000,
+        status: "READY",
+        purchases_remaining: 5,
+        btc_accumulated: 0,
+        ath_price: null,
+        reference_price: null,
+        cost_accum_usdt: 0,
+        btc_accum_net: 0,
+        buy_amount: 10000,
+        updated_at: new Date().toISOString(),
+        version: 7,
+      };
+
+      mockSingle.mockResolvedValueOnce({
+        data: mockState,
+        error: null,
+      });
+
+      const result = await manager.getCurrentStateWithVersion(botId);
+
+      expect(mockFrom).toHaveBeenCalledWith("cycle_state");
+      expect(mockEq).toHaveBeenCalledWith("id", botId);
+      expect(result).toEqual(mockState);
+    });
+
+    it("should throw error if state not found", async () => {
+      const botId = "bot-123";
+
+      mockSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
+      });
+
+      await expect(manager.getCurrentStateWithVersion(botId)).rejects.toThrow(
+        `Bot state not found: ${botId}`,
       );
     });
   });
