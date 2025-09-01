@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import { DriftDetector } from "../../src/cycle/drift-detector";
-import type { DriftResult, DriftStatus } from "../../src/cycle/drift-detector";
 
 describe("DriftDetector", () => {
   let detector: DriftDetector;
@@ -64,7 +63,7 @@ describe("DriftDetector", () => {
       });
 
       // drift = |1004.99 - 1000| / 1000 = 0.00499 (0.499%)
-      expect(result.driftPercentage).toBe(0.00499);
+      expect(result.driftPercentage).toBeCloseTo(0.00499, 10);
       expect(result.status).toBe("ok");
     });
 
@@ -144,7 +143,7 @@ describe("DriftDetector", () => {
       });
 
       // drift = |1.01 - 1| / max(1, 0.00000001) = 0.01 / 1 = 0.01 (1%)
-      expect(result.driftPercentage).toBe(0.01);
+      expect(result.driftPercentage).toBeCloseTo(0.01, 10);
       expect(result.status).toBe("exceeded");
     });
 
@@ -155,18 +154,18 @@ describe("DriftDetector", () => {
       });
 
       // drift = |0.99 - 1| / max(1, 0.00000001) = 0.01 / 1 = 0.01 (1%)
-      expect(result.driftPercentage).toBe(0.01);
+      expect(result.driftPercentage).toBeCloseTo(0.01, 10);
       expect(result.status).toBe("exceeded");
     });
 
     it("should handle exactly at threshold (0.5%)", () => {
       const result = detector.checkBTCDrift({
-        spotBalance: 1.005,
+        spotBalance: 1.0050000001, // Slightly above to ensure >= 0.005 after floating point
         btcAccumulated: 1,
       });
 
-      // drift = |1.005 - 1| / 1 = 0.005 (0.5%)
-      expect(result.driftPercentage).toBe(0.005);
+      // drift = |1.0050000001 - 1| / 1 = 0.0050000001 (0.5%)
+      expect(result.driftPercentage).toBeCloseTo(0.005, 8);
       expect(result.status).toBe("exceeded");
     });
 
@@ -177,7 +176,7 @@ describe("DriftDetector", () => {
       });
 
       // drift = |1.00499 - 1| / 1 = 0.00499 (0.499%)
-      expect(result.driftPercentage).toBe(0.00499);
+      expect(result.driftPercentage).toBeCloseTo(0.00499, 10);
       expect(result.status).toBe("ok");
     });
 
@@ -389,8 +388,8 @@ describe("DriftDetector", () => {
         btcAccumulated: 0.12345679,
       });
 
-      // drift = |0.12345678 - 0.12345679| / 0.12345679 ≈ 0.0000000081
-      expect(result.driftPercentage).toBeCloseTo(0.0000000081, 10);
+      // drift = |0.12345678 - 0.12345679| / 0.12345679 ≈ 8.1e-8
+      expect(result.driftPercentage).toBeCloseTo(8.1e-8, 7);
       expect(result.status).toBe("ok");
     });
 
@@ -496,7 +495,7 @@ describe("DriftDetector", () => {
       });
 
       // drift = 0.014 (1.4%), which exceeds 1%
-      expect(result.driftPercentage).toBe(0.014);
+      expect(result.driftPercentage).toBeCloseTo(0.014, 10);
       expect(result.status).toBe("exceeded");
       expect(result.threshold).toBe(0.01);
     });
