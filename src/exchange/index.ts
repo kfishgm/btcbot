@@ -19,7 +19,10 @@ export type {
 } from "./candle-processor";
 export { HistoricalCandleManager } from "./historical-candle-manager";
 export type {
+  ExtendedKline,
   HistoricalCandleConfig,
+  ATHCalculateOptions,
+  ATHChangeEvent,
   CandleStatistics,
   CandleMetrics,
 } from "./historical-candle-manager";

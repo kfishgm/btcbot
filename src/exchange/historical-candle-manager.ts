@@ -1,11 +1,27 @@
+import { EventEmitter } from "events";
 import { BinanceClient } from "./binance-client";
 import type { BinanceKline } from "./types";
 import { logger } from "../utils/logger";
+
+// Extended kline with closed status
+export interface ExtendedKline extends BinanceKline {
+  isClosed?: boolean;
+}
 
 export interface HistoricalCandleConfig {
   maxCandles?: number;
   restPollingInterval?: number;
   websocketFailureThreshold?: number;
+}
+
+export interface ATHCalculateOptions {
+  excludeUnclosed?: boolean;
+}
+
+export interface ATHChangeEvent {
+  oldATH: number;
+  newATH: number;
+  timestamp: number;
 }
 
 export interface CandleStatistics {
@@ -24,12 +40,12 @@ export interface CandleMetrics {
   successRate: number;
 }
 
-export class HistoricalCandleManager {
+export class HistoricalCandleManager extends EventEmitter {
   private client: BinanceClient;
   private symbol: string;
   private interval: string;
   private config: Required<HistoricalCandleConfig>;
-  private candles: BinanceKline[] = [];
+  private candles: ExtendedKline[] = [];
   private initialized = false;
   private pollingInterval: NodeJS.Timeout | null = null;
   private websocketFailureCount = 0;
@@ -38,6 +54,8 @@ export class HistoricalCandleManager {
   private failedFetches = 0;
   private lastFetchLatency = 0;
   private initialMemoryUsage = 0;
+  private cachedATH: number | null = null;
+  private lastATHCandles: ExtendedKline[] = [];
 
   constructor(
     client: BinanceClient,
@@ -45,6 +63,7 @@ export class HistoricalCandleManager {
     interval: string,
     config?: HistoricalCandleConfig,
   ) {
+    super();
     this.client = client;
     this.symbol = symbol;
     this.interval = interval;
@@ -85,7 +104,12 @@ export class HistoricalCandleManager {
         );
       }
 
-      this.candles = klines;
+      // Mark all fetched candles with their closed status
+      this.candles = klines.map((kline) => this.markCandleStatus(kline));
+
+      // Initialize ATH cache after loading candles
+      this.cachedATH = null;
+      this.calculateATH(); // Populate cache
       this.initialized = true;
     } catch (error) {
       this.failedFetches++;
@@ -95,7 +119,7 @@ export class HistoricalCandleManager {
     }
   }
 
-  addCandle(candle: BinanceKline): void {
+  addCandle(candle: BinanceKline | ExtendedKline): void {
     // Validate candle data
     this.validateCandle(candle);
 
@@ -108,28 +132,59 @@ export class HistoricalCandleManager {
       });
     }
 
+    // Mark candle status if not already marked
+    const markedCandle = this.markCandleStatus(candle);
+
     // Check if candle with same openTime exists
     const existingIndex = this.candles.findIndex(
-      (c) => c.openTime === candle.openTime,
+      (c) => c.openTime === markedCandle.openTime,
     );
+
+    // Get old ATH before making changes
+    const oldATH = this.getATH();
 
     if (existingIndex !== -1) {
       // Update existing candle
-      this.candles[existingIndex] = candle;
+      this.candles[existingIndex] = markedCandle;
     } else {
       // Add new candle
-      this.candles.push(candle);
+      this.candles.push(markedCandle);
 
-      // Maintain sliding window
+      // Maintain sliding window - keep maxCandles most recent
       if (this.candles.length > this.config.maxCandles) {
         // Sort by openTime and keep most recent
         this.candles.sort((a, b) => a.openTime - b.openTime);
         this.candles = this.candles.slice(-this.config.maxCandles);
       }
     }
+
+    // Invalidate cache when candles change
+    this.cachedATH = null;
+
+    // Check if ATH changed and emit event if it did
+    const newATH = this.calculateATH();
+    if (oldATH !== 0 && oldATH !== newATH && markedCandle.isClosed) {
+      this.emit("athChanged", {
+        oldATH,
+        newATH,
+        timestamp: Date.now(),
+      } as ATHChangeEvent);
+    }
   }
 
-  private validateCandle(candle: BinanceKline): void {
+  private markCandleStatus(
+    candle: BinanceKline | ExtendedKline,
+  ): ExtendedKline {
+    const now = Date.now();
+    // A candle is closed if its closeTime is in the past
+    const isClosed = candle.closeTime < now;
+    return {
+      ...candle,
+      isClosed,
+    };
+  }
+
+  private validateCandle(candle: BinanceKline | ExtendedKline): void {
     // Validate numeric values
     const prices = [candle.open, candle.high, candle.low, candle.close];
     for (const price of prices) {
@@ -150,24 +205,86 @@ export class HistoricalCandleManager {
     }
   }
 
-  getCandleHistory(): BinanceKline[] {
+  getCandleHistory(): ExtendedKline[] {
     // Return a copy to ensure thread safety
     return [...this.candles];
   }
 
-  calculateATH(): number {
+  calculateATH(options?: ATHCalculateOptions): number {
+    // Default is to exclude unclosed candles
+    const excludeUnclosed = options?.excludeUnclosed ?? true;
+
+    // Check if we can use cached value
+    if (this.cachedATH !== null && this.candlesMatchCache()) {
+      return this.cachedATH;
+    }
+
     if (this.candles.length === 0) {
+      this.cachedATH = 0;
+      this.lastATHCandles = [];
       return 0;
     }
 
+    // Filter to only closed candles if required
+    const candlesToUse = excludeUnclosed
+      ? this.candles.filter((c) => {
+          // Re-check closed status in case time has passed
+          const now = Date.now();
+          c.isClosed = c.closeTime < now;
+          return c.isClosed;
+        })
+      : this.candles;
+
+    if (candlesToUse.length === 0) {
+      this.cachedATH = 0;
+      this.lastATHCandles = [...this.candles];
+      return 0;
+    }
+
+    // Calculate max from the last 20 closed candles
+    const recentClosedCandles = candlesToUse.slice(-20);
+
     let maxHigh = 0;
-    for (const candle of this.candles) {
+    for (const candle of recentClosedCandles) {
       const high = parseFloat(candle.high);
       if (high > maxHigh) {
         maxHigh = high;
       }
     }
+
+    // Cache the result
+    this.cachedATH = maxHigh;
+    this.lastATHCandles = [...this.candles];
+
     return maxHigh;
+  }
+
+  getATH(): number {
+    // Return cached ATH without recalculation
+    if (this.cachedATH !== null && this.candlesMatchCache()) {
+      return this.cachedATH;
+    }
+    return this.calculateATH();
+  }
+
+  private candlesMatchCache(): boolean {
+    // Check if candles have changed since last ATH calculation
+    if (this.candles.length !== this.lastATHCandles.length) {
+      return false;
+    }
+
+    // Quick check - compare first and last candle
+    if (this.candles.length > 0) {
+      const firstMatch =
+        this.candles[0].openTime === this.lastATHCandles[0]?.openTime;
+      const lastIdx = this.candles.length - 1;
+      const lastMatch =
+        this.candles[lastIdx].openTime ===
+        this.lastATHCandles[lastIdx]?.openTime;
+      return firstMatch && lastMatch;
+    }
+
+    return true;
   }
 
   getStatistics(): CandleStatistics {
@@ -273,7 +390,7 @@ export class HistoricalCandleManager {
 
       // Merge new candles with existing ones
       for (const kline of klines) {
-        this.addCandle(kline);
+        this.addCandle(this.markCandleStatus(kline));
       }
     } catch (error) {
       this.failedFetches++;
@@ -315,5 +432,8 @@ export class HistoricalCandleManager {
     this.totalFetches = 0;
     this.failedFetches = 0;
     this.lastFetchLatency = 0;
+    this.cachedATH = null;
+    this.lastATHCandles = [];
+    this.removeAllListeners();
   }
 }
