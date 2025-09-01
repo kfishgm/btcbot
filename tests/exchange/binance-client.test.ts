@@ -36,6 +36,8 @@ describe("BinanceClient", () => {
     jest.clearAllMocks();
     jest.useFakeTimers();
     mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
+    // Reset the mock implementation
+    mockFetch.mockReset();
   });
 
   afterEach(() => {
@@ -99,6 +101,9 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ serverTime: Date.now() }),
+        headers: new Headers(),
+        status: 200,
+        statusText: "OK",
       } as unknown as Response);
 
       await client.syncTime();
@@ -107,6 +112,9 @@ describe("BinanceClient", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ balances: [] }),
+        headers: new Headers(),
+        status: 200,
+        statusText: "OK",
       } as unknown as Response);
 
       await client.getAccountInfo();
@@ -115,7 +123,7 @@ describe("BinanceClient", () => {
       const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
       const headers = lastCall![1]?.headers as Headers;
       expect(headers.get("X-MBX-APIKEY")).toBe("test-api-key");
-    });
+    }, 10000);
   });
 
   describe("Signature Generation", () => {

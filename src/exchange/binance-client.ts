@@ -166,12 +166,33 @@ export class BinanceClient {
           url += `?${queryString}`;
         }
 
-        const response = await fetch(url, {
-          method,
-          headers,
-          body,
-          signal: AbortSignal.timeout(this.config.timeout || 30000),
-        });
+        // Only use AbortController if available (for Node 16+)
+        let response: Response;
+        if (typeof AbortController !== "undefined") {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(
+            () => controller.abort(),
+            this.config.timeout || 30000,
+          );
+
+          try {
+            response = await fetch(url, {
+              method,
+              headers,
+              body,
+              signal: controller.signal,
+            });
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        } else {
+          // Fallback for older environments
+          response = await fetch(url, {
+            method,
+            headers,
+            body,
+          });
+        }
 
         this.updateRateLimits(response.headers);
 
