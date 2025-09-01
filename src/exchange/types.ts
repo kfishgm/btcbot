@@ -152,6 +152,59 @@ export interface BinanceListenKey {
   listenKey: string;
 }
 
+export interface BinanceExchangeInfo {
+  timezone: string;
+  serverTime: number;
+  rateLimits: Array<{
+    rateLimitType: string;
+    interval: string;
+    intervalNum: number;
+    limit: number;
+  }>;
+  symbols: BinanceSymbolInfo[];
+}
+
+export interface BinanceSymbolInfo {
+  symbol: string;
+  status: string;
+  baseAsset: string;
+  baseAssetPrecision: number;
+  quoteAsset: string;
+  quoteAssetPrecision: number;
+  orderTypes: string[];
+  icebergAllowed: boolean;
+  ocoAllowed: boolean;
+  isSpotTradingAllowed: boolean;
+  isMarginTradingAllowed: boolean;
+  filters: BinanceSymbolFilter[];
+  permissions: string[];
+}
+
+export interface BinanceSymbolFilter {
+  filterType: string;
+  minPrice?: string;
+  maxPrice?: string;
+  tickSize?: string;
+  minQty?: string;
+  maxQty?: string;
+  stepSize?: string;
+  minNotional?: string;
+  applyToMarket?: boolean;
+  avgPriceMins?: number;
+}
+
+export interface SymbolTradingRules {
+  symbol: string;
+  minPrice: number;
+  maxPrice: number;
+  tickSize: number;
+  minQty: number;
+  maxQty: number;
+  stepSize: number;
+  minNotional: number;
+  lastUpdated: number;
+}
+
 export interface WebSocketMessage {
   e: string;
   E: number;
