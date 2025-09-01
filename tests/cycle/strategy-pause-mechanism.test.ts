@@ -50,7 +50,7 @@ describe("StrategyPauseMechanism", () => {
       mockCycleStateManager,
       mockDriftDetector,
       mockDiscordNotifier,
-    );
+    });
   });
 
   describe("Initialization", () => {
@@ -58,7 +58,7 @@ describe("StrategyPauseMechanism", () => {
       expect(pauseMechanism).toBeDefined();
       expect(pauseMechanism.isPausedStatus()).toBe(false);
       expect(pauseMechanism.getPauseReason()).toBeNull();
-    );
+    });
 
     it("should restore paused state from database on initialization", async () => {
       // Mock database returns existing paused state
@@ -80,13 +80,13 @@ describe("StrategyPauseMechanism", () => {
             }),
           }),
         }),
-      );
+      });
 
       await pauseMechanism.initialize();
 
       expect(pauseMechanism.isPausedStatus()).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("DRIFT_DETECTED");
-    );
+    });
   });
 
   describe("Drift Detection Pausing", () => {
@@ -106,7 +106,7 @@ describe("StrategyPauseMechanism", () => {
           threshold: 0.005,
         },
         overallStatus: "exceeded",
-      );
+      });
 
       // Mock current state
       mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
@@ -115,14 +115,14 @@ describe("StrategyPauseMechanism", () => {
         capital_available: 1000,
         btc_accumulated: 0.01,
         purchases_remaining: 5,
-      );
+      });
 
       const result = await pauseMechanism.checkDriftAndPause(
         1010,
         1000,
         0.01,
         0.01,
-      );
+      });
 
       expect(result).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("DRIFT_DETECTED");
@@ -130,7 +130,7 @@ describe("StrategyPauseMechanism", () => {
         usdtDrift: 0.01,
         btcDrift: 0.001,
         threshold: 0.005,
-      );
+      });
 
       // Verify Discord notification was sent
       expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledWith({
@@ -144,13 +144,13 @@ describe("StrategyPauseMechanism", () => {
           }),
         ]),
         requiresAction: true,
-      );
+      });
 
       // Verify database update
       expect(mockSupabase.from).toHaveBeenCalledWith("cycle_state");
       expect(mockSupabase.update).toHaveBeenCalledWith({
         status: "PAUSED",
-      );
+      });
 
       // Verify bot event was logged
       expect(mockSupabase.from).toHaveBeenCalledWith("bot_events");
@@ -160,8 +160,8 @@ describe("StrategyPauseMechanism", () => {
           severity: "error",
           message: expect.stringContaining("drift exceeded"),
         }),
-      );
-    );
+      });
+    });
 
     it("should pause strategy when BTC drift exceeds threshold", async () => {
       mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
@@ -178,7 +178,7 @@ describe("StrategyPauseMechanism", () => {
           threshold: 0.005,
         },
         overallStatus: "exceeded",
-      );
+      });
 
       mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
         id: 1,
@@ -186,14 +186,14 @@ describe("StrategyPauseMechanism", () => {
         capital_available: 500,
         btc_accumulated: 0.01,
         purchases_remaining: 5,
-      );
+      });
 
       const result = await pauseMechanism.checkDriftAndPause(
         500,
         500,
         0.01008,
         0.01,
-      );
+      });
 
       expect(result).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("DRIFT_DETECTED");
@@ -204,8 +204,8 @@ describe("StrategyPauseMechanism", () => {
         expect.objectContaining({
           description: expect.stringContaining("BTC drift: 0.80%"),
         }),
-      );
-    );
+      });
+    });
 
     it("should not pause when drift is within acceptable threshold", async () => {
       mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
@@ -222,20 +222,20 @@ describe("StrategyPauseMechanism", () => {
           threshold: 0.005,
         },
         overallStatus: "ok",
-      );
+      });
 
       const result = await pauseMechanism.checkDriftAndPause(
         1001,
         1000,
         0.01002,
         0.01,
-      );
+      });
 
       expect(result).toBe(false);
       expect(pauseMechanism.getPauseReason()).toBeNull();
       expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
       expect(pauseMechanism.isPausedStatus()).toBe(false);
-    );
+    });
 
     it("should handle drift check when already paused", async () => {
       // First pause the strategy
@@ -251,13 +251,13 @@ describe("StrategyPauseMechanism", () => {
         1000,
         0.01,
         0.01,
-      );
+      });
 
       // Should not re-pause or send another notification
       expect(result).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("CRITICAL_ERROR"); // Original reason
       expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
-    );
+    });
   });
 
   describe("Critical Error Pausing", () => {
@@ -276,7 +276,7 @@ describe("StrategyPauseMechanism", () => {
       expect(result.errorDetails).toEqual({
         message: "Insufficient balance for trade",
         context,
-      );
+      });
 
       // Verify Discord notification
       expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledWith({
@@ -296,18 +296,18 @@ describe("StrategyPauseMechanism", () => {
           },
         ]),
         requiresAction: true,
-      );
+      });
 
       // Verify state update
       expect(mockSupabase.update).toHaveBeenCalledWith({
         status: "PAUSED",
-      );
-    );
+      });
+    });
 
     it("should pause on network connectivity error", async () => {
       const error = new Error(
         "ECONNREFUSED: Connection refused to Binance API",
-      );
+      });
       const context = {
         operation: "FETCH_MARKET_DATA",
         endpoint: "api.binance.com",
@@ -325,8 +325,8 @@ describe("StrategyPauseMechanism", () => {
           title: "🚨 Strategy Paused: Critical Error",
           description: expect.stringContaining("ECONNREFUSED"),
         }),
-      );
-    );
+      });
+    });
 
     it("should pause on database corruption error", async () => {
       const error = new Error("Database integrity check failed");
@@ -353,14 +353,14 @@ describe("StrategyPauseMechanism", () => {
             context,
           }),
         }),
-      );
-    );
+      });
+    });
 
     it("should not double-pause on multiple critical errors", async () => {
       // First error
       await pauseMechanism.pauseOnError(new Error("First error"), {
         operation: "OP1",
-      );
+      });
 
       // Reset mock counts
       jest.clearAllMocks();
@@ -369,7 +369,7 @@ describe("StrategyPauseMechanism", () => {
       const result = await pauseMechanism.pauseOnError(
         new Error("Second error"),
         { operation: "OP2" },
-      );
+      });
 
       expect(result).toBe(true);
       expect(result.alreadyPaused).toBe(true);
@@ -381,8 +381,8 @@ describe("StrategyPauseMechanism", () => {
         expect.objectContaining({
           event_type: "ERROR_WHILE_PAUSED",
         }),
-      );
-    );
+      });
+    });
   });
 
   describe("Manual Resume", () => {
@@ -397,7 +397,7 @@ describe("StrategyPauseMechanism", () => {
           btcDrift: 0.002,
         },
       };
-    );
+    });
 
     it("should successfully resume when validation passes", async () => {
       // Mock successful validation
@@ -410,7 +410,7 @@ describe("StrategyPauseMechanism", () => {
         reference_price: 50000,
         cost_accum_usdt: 500,
         btc_accum_net: 0.01,
-      );
+      });
 
       mockCycleStateManager.validateState = jest.fn().mockReturnValue(true);
 
@@ -419,7 +419,7 @@ describe("StrategyPauseMechanism", () => {
         usdt: { status: "ok", driftPercentage: 0.001 },
         btc: { status: "ok", driftPercentage: 0.001 },
         overallStatus: "ok",
-      );
+      });
 
       // Mock exchange connectivity check
       pauseMechanism["validateExchangeConnectivity"] = jest
@@ -430,20 +430,20 @@ describe("StrategyPauseMechanism", () => {
         force: false,
         validatorId: "admin-123",
         reason: "Drift resolved after manual balance adjustment",
-      );
+      });
 
       expect(result.resumed).toBe(true);
       expect(result.validationResults).toEqual({
         stateValid: true,
         driftAcceptable: true,
         exchangeConnected: true,
-      );
+      });
       expect(pauseMechanism.isPausedStatus()).toBe(false);
 
       // Verify state was updated to READY
       expect(mockSupabase.update).toHaveBeenCalledWith({
         status: "READY",
-      );
+      });
 
       // Verify resume notification was sent
       expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledWith({
@@ -467,7 +467,7 @@ describe("StrategyPauseMechanism", () => {
             inline: true,
           },
         ]),
-      );
+      });
 
       // Verify resume event was logged
       expect(mockSupabase.insert).toHaveBeenCalledWith(
@@ -479,8 +479,8 @@ describe("StrategyPauseMechanism", () => {
             reason: "Drift resolved after manual balance adjustment",
           }),
         }),
-      );
-    );
+      });
+    });
 
     it("should fail to resume when state validation fails", async () => {
       mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
@@ -488,14 +488,14 @@ describe("StrategyPauseMechanism", () => {
         status: "PAUSED",
         capital_available: -100, // Invalid negative value
         btc_accumulated: 0.01,
-      );
+      });
 
       mockCycleStateManager.validateState = jest.fn().mockReturnValue(false);
 
       const result = await pauseMechanism.resume({
         force: false,
         validatorId: "admin-123",
-      );
+      });
 
       expect(result.resumed).toBe(false);
       expect(result.error).toBe("State validation failed");
@@ -505,7 +505,7 @@ describe("StrategyPauseMechanism", () => {
       // Should not update state
       expect(mockSupabase.update).not.toHaveBeenCalledWith({
         status: "READY",
-      );
+      });
 
       // Should send validation failure notification
       expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledWith(
@@ -513,8 +513,8 @@ describe("StrategyPauseMechanism", () => {
           title: "⚠️ Resume Failed: Validation Error",
           severity: "warning",
         }),
-      );
-    );
+      });
+    });
 
     it("should fail to resume when drift is still exceeded", async () => {
       mockCycleStateManager.validateState = jest.fn().mockReturnValue(true);
@@ -524,31 +524,31 @@ describe("StrategyPauseMechanism", () => {
         usdt: { status: "exceeded", driftPercentage: 0.01 },
         btc: { status: "ok", driftPercentage: 0.001 },
         overallStatus: "exceeded",
-      );
+      });
 
       const result = await pauseMechanism.resume({
         force: false,
         validatorId: "admin-123",
-      );
+      });
 
       expect(result.resumed).toBe(false);
       expect(result.error).toBe("Drift still exceeds threshold");
       expect(result.validationResults.driftAcceptable).toBe(false);
       expect(pauseMechanism.isPausedStatus()).toBe(true);
-    );
+    });
 
     it("should allow force resume bypassing validation", async () => {
       // Set up failing validations
       mockCycleStateManager.validateState = jest.fn().mockReturnValue(false);
       mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
         overallStatus: "exceeded",
-      );
+      });
 
       const result = await pauseMechanism.resume({
         force: true,
         validatorId: "admin-123",
         reason: "Emergency override - manual verification completed",
-      );
+      });
 
       expect(result.resumed).toBe(true);
       expect(result.forced).toBe(true);
@@ -561,7 +561,7 @@ describe("StrategyPauseMechanism", () => {
           severity: "warning",
           description: expect.stringContaining("FORCED RESUME"),
         }),
-      );
+      });
 
       // Verify force resume is logged
       expect(mockSupabase.insert).toHaveBeenCalledWith(
@@ -573,15 +573,15 @@ describe("StrategyPauseMechanism", () => {
             validationBypassed: true,
           }),
         }),
-      );
-    );
+      });
+    });
 
     it("should recalculate all values after resume", async () => {
       // Mock successful validation
       mockCycleStateManager.validateState = jest.fn().mockReturnValue(true);
       mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
         overallStatus: "ok",
-      );
+      });
       pauseMechanism["validateExchangeConnectivity"] = jest
         .fn()
         .mockResolvedValue(true);
@@ -594,12 +594,12 @@ describe("StrategyPauseMechanism", () => {
           0.01,
           referencePrice: 50000,
           buyAmount: 100,
-        );
+        });
 
       const result = await pauseMechanism.resume({
         force: false,
         validatorId: "admin-123",
-      );
+      });
 
       expect(result.resumed).toBe(true);
       expect(pauseMechanism["recalculateStrategyValues"]).toHaveBeenCalled();
@@ -609,8 +609,8 @@ describe("StrategyPauseMechanism", () => {
         expect.objectContaining({
           status: "READY",
         }),
-      );
-    );
+      });
+    });
 
     it("should fail to resume when not paused", async () => {
       pauseMechanism["pausedState"] = {
@@ -623,12 +623,12 @@ describe("StrategyPauseMechanism", () => {
       const result = await pauseMechanism.resume({
         force: false,
         validatorId: "admin-123",
-      );
+      });
 
       expect(result.resumed).toBe(false);
       expect(result.error).toBe("Strategy is not currently paused");
       expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
-    );
+    });
   });
 
   describe("State Persistence", () => {
@@ -642,12 +642,12 @@ describe("StrategyPauseMechanism", () => {
             }),
           }),
         }),
-      );
+      });
 
       await pauseMechanism["persistPauseState"]({
         reason: "DRIFT_DETECTED",
         metadata: { usdtDrift: 0.01 },
-      );
+      });
 
       expect(mockSupabase.from).toHaveBeenCalledWith("strategy_pause_state");
       expect(mockSupabase.insert).toHaveBeenCalledWith({
@@ -655,8 +655,8 @@ describe("StrategyPauseMechanism", () => {
         pause_reason: "DRIFT_DETECTED",
         paused_at: expect.any(String),
         pause_metadata: { usdtDrift: 0.01 },
-      );
-    );
+      });
+    });
 
     it("should clear pause state from database on resume", async () => {
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -665,13 +665,13 @@ describe("StrategyPauseMechanism", () => {
             error: null,
           }),
         }),
-      );
+      });
 
       await pauseMechanism["clearPauseState"]();
 
       expect(mockSupabase.from).toHaveBeenCalledWith("strategy_pause_state");
       expect(mockSupabase.delete).toHaveBeenCalled();
-    );
+    });
   });
 
   describe("Integration with CycleStateManager", () => {
@@ -680,26 +680,26 @@ describe("StrategyPauseMechanism", () => {
         overallStatus: "exceeded",
         usdt: { status: "exceeded", driftPercentage: 0.01 },
         btc: { status: "ok", driftPercentage: 0.001 },
-      );
+      });
 
       mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
         id: 1,
         status: "READY",
-      );
+      });
 
       await pauseMechanism.checkDriftAndPause(
         1010,
         1000,
         0.01,
         0.01,
-      );
+      });
 
       // Verify cycle state was updated to PAUSED
       expect(mockSupabase.from).toHaveBeenCalledWith("cycle_state");
       expect(mockSupabase.update).toHaveBeenCalledWith({
         status: "PAUSED",
-      );
-    );
+      });
+    });
 
     it("should coordinate with cycle state manager for resume", async () => {
       pauseMechanism["pausedState"] = {
@@ -712,11 +712,11 @@ describe("StrategyPauseMechanism", () => {
       mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
         id: 1,
         status: "PAUSED",
-      );
+      });
       mockCycleStateManager.validateState = jest.fn().mockReturnValue(true);
       mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
         overallStatus: "ok",
-      );
+      });
       pauseMechanism["validateExchangeConnectivity"] = jest
         .fn()
         .mockResolvedValue(true);
@@ -724,13 +724,13 @@ describe("StrategyPauseMechanism", () => {
       await pauseMechanism.resume({
         force: false,
         validatorId: "admin-123",
-      );
+      });
 
       // Verify cycle state was updated back to READY
       expect(mockSupabase.update).toHaveBeenCalledWith({
         status: "READY",
-      );
-    );
+      });
+    });
   });
 
   describe("Edge Cases and Error Handling", () => {
@@ -741,12 +741,12 @@ describe("StrategyPauseMechanism", () => {
             .fn()
             .mockRejectedValue(new Error("Database connection lost")),
         }),
-      );
+      });
 
       const result = await pauseMechanism.pauseOnError(
         new Error("Test error"),
         {},
-      );
+      });
 
       // Should still mark as paused in memory
       expect(result).toBe(true);
@@ -756,8 +756,8 @@ describe("StrategyPauseMechanism", () => {
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining("Failed to update database"),
         expect.objectContaining({ error: expect.any(Error) }),
-      );
-    );
+      });
+    });
 
     it("should handle Discord notification failures gracefully", async () => {
       mockDiscordNotifier.sendAlert = jest
@@ -767,7 +767,7 @@ describe("StrategyPauseMechanism", () => {
       const result = await pauseMechanism.pauseOnError(
         new Error("Test error"),
         {},
-      );
+      });
 
       // Should still pause successfully
       expect(result).toBe(true);
@@ -776,17 +776,17 @@ describe("StrategyPauseMechanism", () => {
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining("Failed to send Discord notification"),
         expect.objectContaining({ error: expect.any(Error) }),
-      );
-    );
+      });
+    });
 
     it("should handle concurrent pause requests", async () => {
       // Simulate concurrent pause requests
       const pause1 = pauseMechanism.pauseOnError(new Error("Error 1"), {
         operation: "OP1",
-      );
+      });
       const pause2 = pauseMechanism.pauseOnError(new Error("Error 2"), {
         operation: "OP2",
-      );
+      });
 
       const [result1, result2] = await Promise.all([pause1, pause2]);
 
@@ -794,7 +794,7 @@ describe("StrategyPauseMechanism", () => {
       const results = [result1, result2];
       expect(results.filter((r) => r.alreadyPaused === true).length).toBe(1);
       expect(results.every((r) => r.paused === true)).toBe(true);
-    );
+    });
 
     it("should maintain pause state through instance recreation", async () => {
       // First instance pauses
@@ -806,7 +806,7 @@ describe("StrategyPauseMechanism", () => {
         mockDriftDetector,
         mockCycleStateManager,
         mockDiscordNotifier,
-      );
+      });
 
       // Mock database returns paused state
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -822,13 +822,13 @@ describe("StrategyPauseMechanism", () => {
             }),
           }),
         }),
-      );
+      });
 
       await newPauseMechanism.initialize();
 
       expect(newPauseMechanism.isPausedStatus()).toBe(true);
       expect(newPauseMechanism.getPauseReason()).toBe("CRITICAL_ERROR");
-    );
+    });
   });
 
   describe("Pause Reason Details", () => {
@@ -846,7 +846,7 @@ describe("StrategyPauseMechanism", () => {
         usdt: { status: "exceeded", driftPercentage: 0.015 },
         btc: { status: "ok", driftPercentage: 0.003 },
         overallStatus: "exceeded",
-      );
+      });
 
       await pauseMechanism.checkDriftAndPause(metadata);
 
@@ -859,8 +859,8 @@ describe("StrategyPauseMechanism", () => {
           usdtDrift: 0.015,
           btcDrift: 0.003,
         }),
-      );
-    );
+      });
+    });
 
     it("should categorize pause reasons correctly", () => {
       const reasons = pauseMechanism.getPauseReasonCategories();
@@ -871,7 +871,7 @@ describe("StrategyPauseMechanism", () => {
         MANUAL_PAUSE: "Manually paused by operator",
         STATE_CORRUPTION: "Cycle state validation failed",
         EXCHANGE_ERROR: "Exchange connectivity or API error",
-      );
-    );
+      });
+    });
   });
 );
