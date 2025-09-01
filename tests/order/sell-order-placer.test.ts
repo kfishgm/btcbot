@@ -735,14 +735,14 @@ describe("SellOrderPlacer", () => {
         result.avgPrice,
       );
 
-      // When fee is in BTC, it affects the net result
+      // When fee is in BTC, it doesn't affect USDT calculation
       // principal = 50000 * 1.0 = 50000
-      // BTC fee = 0.001 BTC * 54835 (avg price) = 54.835 USDT equivalent
-      // net_usdt_received = 54835 - 54.835 = 54780.165
-      // profit = max(0, 54780.165 - 50000) = 4780.165
+      // net_usdt_received = 54835 (no USDT fee)
+      // profit = max(0, 54835 - 50000) = 4835
+      // BTC fees reduce the actual BTC sold, not the USDT received
       expect(profitData.principal.toNumber()).toBe(50000);
-      expect(profitData.netUsdtReceived.toNumber()).toBeCloseTo(54780.165, 2);
-      expect(profitData.profit.toNumber()).toBeCloseTo(4780.165, 2);
+      expect(profitData.netUsdtReceived.toNumber()).toBe(54835);
+      expect(profitData.profit.toNumber()).toBe(4835);
     });
   });
 
@@ -790,25 +790,30 @@ describe("SellOrderPlacer", () => {
 
       mockBinanceClient.createOrder.mockRejectedValue(new Error("API Error"));
 
-      let errorEvent: Error | null = null;
+      let errorEventData: { error: Error } | undefined;
 
       sellOrderPlacer.on(
         "orderFailed",
-        (data: { error: Error }) => (errorEvent = data.error),
+        (data: { error: Error }) => (errorEventData = data),
       );
 
-      await expect(
-        sellOrderPlacer.placeOrder(
+      try {
+        await sellOrderPlacer.placeOrder(
           btcAccumulated,
           currentPrice,
           new Decimal("48000"),
           0.003,
-        ),
-      ).rejects.toThrow("API Error");
+        );
+        // Should not reach here
+        expect(true).toBe(false);
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe("API Error");
+      }
 
-      expect(errorEvent).toBeDefined();
-      expect(errorEvent).not.toBeNull();
-      expect(errorEvent?.message).toBe("API Error");
+      expect(errorEventData).toBeDefined();
+      expect(errorEventData?.error).toBeInstanceOf(Error);
+      expect(errorEventData?.error.message).toBe("API Error");
     });
   });
 

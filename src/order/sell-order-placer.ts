@@ -211,7 +211,15 @@ export class SellOrderPlacer extends EventEmitter {
     currentPrice: Decimal,
     referencePrice: Decimal,
     slippageGuardPct: number = 0.003,
+    totalBtcAccumulated?: Decimal,
   ): Promise<OrderResult> {
+    // CRITICAL: Validate we're selling ALL accumulated BTC (per STRATEGY.md)
+    if (totalBtcAccumulated && !btcToSell.equals(totalBtcAccumulated)) {
+      throw new Error(
+        `Must sell ALL accumulated BTC. Requested: ${btcToSell.toString()}, Accumulated: ${totalBtcAccumulated.toString()}`,
+      );
+    }
+
     // Prepare order
     const orderParams = await this.prepareOrder(
       btcToSell,
@@ -300,29 +308,26 @@ export class SellOrderPlacer extends EventEmitter {
     btcSold: Decimal,
     usdtReceived: Decimal,
     feeUSDT: Decimal,
-    feeBTC: Decimal,
+    _feeBTC: Decimal, // BTC fees already accounted for in quantity
     referencePrice: Decimal,
-    avgPrice: Decimal,
+    _avgPrice: Decimal, // Kept for interface compatibility
   ): ProfitData {
     // Calculate principal (what we paid for the BTC)
     const principal = referencePrice.mul(btcSold);
 
-    // Net USDT received after fees
+    // Net USDT received after USDT fees only
+    // BTC fees already reduced the BTC quantity sold, don't double-count
     const netUsdtReceived = usdtReceived.sub(feeUSDT);
 
-    // Account for BTC fees by converting to USDT at the sale price
-    const btcFeeInUSDT = feeBTC.mul(avgPrice);
-    const totalNetReceived = netUsdtReceived.sub(btcFeeInUSDT);
-
     // Profit can never be negative (per STRATEGY.md)
-    const profit = Decimal.max(0, totalNetReceived.sub(principal));
+    const profit = Decimal.max(0, netUsdtReceived.sub(principal));
 
     return {
       btcSold,
       usdtReceived,
       principal,
       profit,
-      netUsdtReceived: totalNetReceived,
+      netUsdtReceived,
     };
   }
 
