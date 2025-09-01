@@ -25,7 +25,8 @@
     "tests/**/*",
     "supabase/**/*",
     "e2e/**/*",
-    "__tests__/**/*"
+    "__tests__/**/*",
+    "playwright.config.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }
