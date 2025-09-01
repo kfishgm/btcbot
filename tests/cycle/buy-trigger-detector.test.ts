@@ -1,6 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { BuyTriggerDetector } from "../../src/cycle/buy-trigger-detector";
 import { BuyAmountCalculator } from "../../src/cycle/buy-amount-calculator";
+import { logger } from "../../src/utils/logger";
 
 // Import types from the implementation
 import type {
@@ -1080,9 +1081,7 @@ describe("BuyTriggerDetector", () => {
 
   describe("Logging and Monitoring", () => {
     it("should log decision when buy is triggered", () => {
-      const consoleSpy = jest
-        .spyOn(console, "log")
-        .mockImplementation(() => {});
+      const loggerSpy = jest.spyOn(logger, "info").mockImplementation(() => {});
 
       const state: CycleState = {
         status: "READY",
@@ -1120,19 +1119,21 @@ describe("BuyTriggerDetector", () => {
 
       detector.checkBuyTrigger(state, config, candle, balances);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "BUY TRIGGERED: Price 48000.00 <= Threshold 49000.00, Amount: 100.00 USDT",
-        ),
+      expect(loggerSpy).toHaveBeenCalledWith(
+        "BUY TRIGGERED",
+        expect.objectContaining({
+          module: "BuyTriggerDetector",
+          price: 48000,
+          threshold: 49000,
+          amount: 100,
+        }),
       );
 
-      consoleSpy.mockRestore();
+      loggerSpy.mockRestore();
     });
 
     it("should log skip reason when buy is not triggered", () => {
-      const consoleSpy = jest
-        .spyOn(console, "log")
-        .mockImplementation(() => {});
+      const loggerSpy = jest.spyOn(logger, "info").mockImplementation(() => {});
 
       const state: CycleState = {
         status: "READY",
@@ -1168,11 +1169,11 @@ describe("BuyTriggerDetector", () => {
       const result = detector.checkBuyTrigger(state, config, candle, balances);
 
       // No log should be called when buy is skipped
-      expect(consoleSpy).not.toHaveBeenCalled();
+      expect(loggerSpy).not.toHaveBeenCalled();
       // But the reason should be in the result
       expect(result.reason).toContain("No purchases remaining");
 
-      consoleSpy.mockRestore();
+      loggerSpy.mockRestore();
     });
   });
 

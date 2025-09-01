@@ -23,6 +23,7 @@ import {
   BuyAmountCalculator,
   CycleState as BuyAmountCycleState,
 } from "./buy-amount-calculator";
+import { logger } from "../utils/logger.js";
 
 export interface CycleState {
   status: "READY" | "HOLDING" | "PAUSED";
@@ -271,12 +272,14 @@ export class BuyTriggerDetector {
     threshold: number,
     amount?: number,
   ): void {
-    // In production, this would use a proper logging service
-    // For now, using console.log for development
     if (shouldBuy && amount !== undefined) {
-      console.log(
-        `BUY TRIGGERED: Price ${this.formatPrice(currentPrice)} <= Threshold ${this.formatPrice(threshold)}, Amount: ${this.formatPrice(amount)} USDT`,
-      );
+      logger.info("BUY TRIGGERED", {
+        module: "BuyTriggerDetector",
+        price: currentPrice,
+        threshold: threshold,
+        amount: amount,
+        message: `Price ${this.formatPrice(currentPrice)} <= Threshold ${this.formatPrice(threshold)}, Amount: ${this.formatPrice(amount)} USDT`,
+      });
     }
     // Don't log when not triggered to avoid spam
   }
