@@ -385,7 +385,7 @@ export class Logger {
             fs.mkdirSync(logDir, { recursive: true });
           }
           fs.appendFileSync(this.config.filePath, output + "\n");
-        } catch (err) {
+        } catch {
           // Silently ignore file write errors in test mode
         }
       }
