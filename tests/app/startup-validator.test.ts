@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { StartupValidator } from "../../src/app/startup-validator";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { Decimal } from "decimal.js";
-import type { Database } from "../../types/supabase";
 
 jest.mock("../../src/exchange/binance-client");
 jest.mock("@supabase/supabase-js");
@@ -566,7 +564,7 @@ describe("StartupValidator", () => {
       mockBinanceClient.ping.mockResolvedValue(true);
       mockSupabaseClient.from.mockReturnValue({
         select: jest.fn().mockReturnValue({
-          limit: jest.fn().mockResolvedValue({ error: null }),
+          limit: jest.fn().mockResolvedValue({ error: null } as never),
         }),
       });
       mockDiscordNotifier.sendAlert.mockResolvedValue(undefined);
@@ -664,7 +662,7 @@ describe("StartupValidator", () => {
       mockBinanceClient.ping.mockResolvedValue(true);
       mockSupabaseClient.from.mockReturnValue({
         select: jest.fn().mockReturnValue({
-          limit: jest.fn().mockResolvedValue({ error: null }),
+          limit: jest.fn().mockResolvedValue({ error: null } as never),
         }),
       });
       mockDiscordNotifier.sendAlert.mockResolvedValue(undefined);
@@ -716,15 +714,20 @@ describe("StartupValidator", () => {
     });
 
     it("should fail fast on critical connectivity errors", async () => {
-      mockBinanceClient.ping.mockRejectedValue(new Error("Connection failed"));
+      // Make ping succeed once for configuration validation, then fail for connectivity
+      mockBinanceClient.ping
+        .mockResolvedValueOnce(true) // Success for configuration validation
+        .mockRejectedValue(new Error("Connection failed")); // Fail for connectivity validation
 
       const report = await validator.validate();
 
       expect(report.overallSuccess).toBe(false);
       expect(report.connectivity.success).toBe(false);
-      // Should have run configuration but not balance
+      // Should have run configuration but not balance (fail-fast after connectivity)
       expect(mockStrategyConfigLoader.loadConfig).toHaveBeenCalled();
       expect(mockBalanceManager.getBalance).not.toHaveBeenCalled();
+      // Verify Binance was called 1 time in config + 3 retries in connectivity = 4 total
+      expect(mockBinanceClient.ping).toHaveBeenCalledTimes(4);
     });
 
     it("should continue on warnings", async () => {

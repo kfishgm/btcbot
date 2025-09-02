@@ -29,12 +29,17 @@ import type {
   StrategyConfigLoader,
   StrategyConfig,
 } from "../config/strategy-config-loader";
+import { StartupValidator } from "./startup-validator";
+import type { StartupValidatorConfig } from "./startup-validator";
+import type { BinanceClient } from "../exchange/binance-client";
+import type { ValidationReport } from "../types/validation";
 import { Logger } from "../utils/logger";
 
 const logger = new Logger();
 
 export interface OrchestratorConfig {
   supabaseClient: SupabaseClient<Database>;
+  binanceClient: BinanceClient;
   webSocketManager: WebSocketManager;
   candleProcessor: CandleProcessor;
   cycleStateManager: CycleStateManager;
@@ -47,7 +52,7 @@ export interface OrchestratorConfig {
   sellOrderStateUpdater: SellOrderStateUpdater;
   driftDetector: DriftDetector;
   strategyPauseMechanism: StrategyPauseMechanism;
-  discordNotifier: DiscordNotifier;
+  discordNotifier?: DiscordNotifier;
   eventLogger: EventLogger;
   balanceManager: BalanceManager;
   connectionManager: ConnectionManager;
@@ -139,29 +144,47 @@ export class MainOrchestrator extends EventEmitter {
     try {
       logger.info("Initializing Main Orchestrator...");
 
-      // 1. Ensure database connection
+      // 1. Run startup validation
+      logger.info("Running startup validation...");
+      const validationReport = await this.runStartupValidation();
+
+      if (!validationReport.overallSuccess) {
+        const errorMessage = this.formatValidationErrors(validationReport);
+        logger.error("Startup validation failed", { report: validationReport });
+        throw new Error(`Startup validation failed:\n${errorMessage}`);
+      }
+
+      if (validationReport.summary.totalWarnings > 0) {
+        logger.warn("Startup validation completed with warnings", {
+          warnings: validationReport.summary.totalWarnings,
+        });
+      } else {
+        logger.info("Startup validation passed successfully");
+      }
+
+      // 2. Ensure database connection
       await this.config.connectionManager.connect();
 
-      // 2. Load strategy configuration
+      // 3. Load strategy configuration
       this.strategyConfig = await this.config.strategyConfigLoader.loadConfig();
       if (!this.strategyConfig) {
         throw new Error("No active strategy configuration found");
       }
 
-      // 3. Initialize cycle state manager
+      // 4. Initialize cycle state manager
       await this.config.cycleStateManager.initialize();
 
-      // 4. Check if strategy is paused
+      // 5. Check if strategy is paused
       const isPaused = this.config.strategyPauseMechanism.isPausedStatus();
       if (isPaused) {
         logger.warn("Strategy is currently paused. Starting in paused mode.");
         this.emit("strategyPaused");
       }
 
-      // 5. Setup event listeners
+      // 6. Setup event listeners
       this.setupEventListeners();
 
-      // 6. Start health monitoring if enabled
+      // 7. Start health monitoring if enabled
       if (this.config.enableHealthMonitoring) {
         this.startHealthMonitoring();
       }
@@ -459,10 +482,12 @@ export class MainOrchestrator extends EventEmitter {
             ) {
               const profit = 0; // Profit calculation is done in state updater
               logger.info(`Cycle complete. Profit: ${profit}`);
-              await this.config.discordNotifier.sendAlert(
-                `✅ Cycle complete. Profit: $${profit.toFixed(2)}`,
-                "info",
-              );
+              if (this.config.discordNotifier) {
+                await this.config.discordNotifier.sendAlert(
+                  `✅ Cycle complete. Profit: $${profit.toFixed(2)}`,
+                  "info",
+                );
+              }
               await this.config.eventLogger.queueEvent({
                 event_type: "CYCLE_COMPLETE",
                 severity: "INFO",
@@ -618,10 +643,12 @@ export class MainOrchestrator extends EventEmitter {
               updatedState,
             );
 
-            await this.config.discordNotifier.sendAlert(
-              `📈 Buy executed at ${buyOrderResult.avgPrice.toFixed(2)}`,
-              "info",
-            );
+            if (this.config.discordNotifier) {
+              await this.config.discordNotifier.sendAlert(
+                `📈 Buy executed at ${buyOrderResult.avgPrice.toFixed(2)}`,
+                "info",
+              );
+            }
             await this.config.eventLogger.queueEvent({
               event_type: "BUY_EXECUTED",
               severity: "INFO",
@@ -843,5 +870,62 @@ export class MainOrchestrator extends EventEmitter {
 
   isHealthy(): boolean {
     return this.health.status === "healthy";
+  }
+
+  /**
+   * Run startup validation
+   */
+  private async runStartupValidation(): Promise<ValidationReport> {
+    const validatorConfig: StartupValidatorConfig = {
+      binanceClient: this.config.binanceClient,
+      supabaseClient: this.config.supabaseClient,
+      discordNotifier: this.config.discordNotifier,
+      balanceManager: this.config.balanceManager,
+      cycleStateManager: this.config.cycleStateManager,
+      strategyConfigLoader: this.config.strategyConfigLoader,
+    };
+
+    const validator = new StartupValidator(validatorConfig);
+    const report = await validator.validate();
+
+    // Log the formatted report
+    const formattedReport = validator.formatReport(report);
+    if (report.overallSuccess) {
+      logger.info(`\n${formattedReport}`);
+    } else {
+      logger.error(`\n${formattedReport}`);
+    }
+
+    return report;
+  }
+
+  /**
+   * Format validation errors for display
+   */
+  private formatValidationErrors(report: ValidationReport): string {
+    const errors: string[] = [];
+
+    if (report.configuration.errors.length > 0) {
+      errors.push("Configuration errors:");
+      report.configuration.errors.forEach((e) => {
+        errors.push(`  - [${e.code}] ${e.message}`);
+      });
+    }
+
+    if (report.connectivity.errors.length > 0) {
+      errors.push("Connectivity errors:");
+      report.connectivity.errors.forEach((e) => {
+        errors.push(`  - [${e.code}] ${e.message}`);
+      });
+    }
+
+    if (report.balance.errors.length > 0) {
+      errors.push("Balance errors:");
+      report.balance.errors.forEach((e) => {
+        errors.push(`  - [${e.code}] ${e.message}`);
+      });
+    }
+
+    return errors.join("\n");
   }
 }

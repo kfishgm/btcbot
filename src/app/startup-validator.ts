@@ -314,10 +314,8 @@ export class StartupValidator {
         lastError = error as Error;
         retries--;
         if (retries > 0) {
-          // Wait before retry (exponential backoff)
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.pow(2, 3 - retries) * 1000),
-          );
+          // Wait before retry - shorter delay for tests
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
       }
     }

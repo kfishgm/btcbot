@@ -5,3 +5,5 @@ export type {
   OrchestratorMemoryStats,
   OrchestratorPerformanceMetrics,
 } from "./main-orchestrator";
+export { StartupValidator } from "./startup-validator";
+export type { StartupValidatorConfig } from "./startup-validator";

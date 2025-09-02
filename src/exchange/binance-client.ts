@@ -237,10 +237,12 @@ export class BinanceClient {
    */
   async ping(): Promise<boolean> {
     try {
-      await this.publicRequest("GET", "/api/v3/ping");
+      await this.makeRequest("/api/v3/ping", "GET", {}, false);
       return true;
     } catch (error) {
-      throw this.errorHandler.handleError(error);
+      // Re-throw the error with formatted message
+      const message = this.errorHandler.formatErrorMessage(error);
+      throw new Error(message);
     }
   }
 
