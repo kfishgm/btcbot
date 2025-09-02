@@ -16,6 +16,22 @@ import * as fs from "fs";
 import * as path from "path";
 // import winston from "winston"; // Not needed in tests
 
+// Helper functions for console spy compatibility
+const toHaveBeenCalled = (spy: { mock: { calls: unknown[][] } }) => {
+  return expect(spy.mock.calls.length).toBeGreaterThan(0);
+};
+
+const notToHaveBeenCalled = (spy: { mock: { calls: unknown[][] } }) => {
+  return expect(spy.mock.calls.length).toBe(0);
+};
+
+const toHaveBeenCalledTimes = (
+  spy: { mock: { calls: unknown[][] } },
+  times: number,
+) => {
+  return expect(spy.mock.calls.length).toBe(times);
+};
+
 describe("Logger Module", () => {
   let logger: Logger;
   let originalEnv: string | undefined;
@@ -26,6 +42,9 @@ describe("Logger Module", () => {
     info: ReturnType<typeof jest.spyOn>;
     debug: ReturnType<typeof jest.spyOn>;
   };
+  let stdoutSpy: ReturnType<typeof jest.spyOn>;
+  let stderrSpy: ReturnType<typeof jest.spyOn>;
+  let capturedOutput: Array<{ stream: "stdout" | "stderr"; content: string }>;
 
   beforeEach(() => {
     // Save original NODE_ENV
@@ -34,13 +53,66 @@ describe("Logger Module", () => {
     // Reset any module state
     jest.clearAllMocks();
 
-    // Spy on console methods
+    // Clear captured output
+    capturedOutput = [];
+
+    // Spy on process streams and capture output
+    stdoutSpy = jest
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: unknown) => {
+        const content = String(chunk);
+        capturedOutput.push({ stream: "stdout", content });
+        // Create mock console calls for backward compatibility
+        // Match both uppercase and lowercase patterns
+        if (content.includes("[INFO]") || content.includes('"info"')) {
+          consoleSpy.info.mock.calls.push([content.trim()]);
+        } else if (content.includes("[DEBUG]") || content.includes('"debug"')) {
+          consoleSpy.debug.mock.calls.push([content.trim()]);
+        } else if (content.includes('"level":"info"')) {
+          consoleSpy.info.mock.calls.push([content.trim()]);
+        } else if (content.includes('"level":"debug"')) {
+          consoleSpy.debug.mock.calls.push([content.trim()]);
+        }
+        return true;
+      });
+
+    stderrSpy = jest
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: unknown) => {
+        const content = String(chunk);
+        capturedOutput.push({ stream: "stderr", content });
+        // Create mock console calls for backward compatibility
+        // Match both uppercase and lowercase patterns
+        if (content.includes("[ERROR]") || content.includes('"error"')) {
+          consoleSpy.error.mock.calls.push([content.trim()]);
+        } else if (content.includes("[WARN]") || content.includes('"warn"')) {
+          consoleSpy.warn.mock.calls.push([content.trim()]);
+        } else if (content.includes('"level":"error"')) {
+          consoleSpy.error.mock.calls.push([content.trim()]);
+        } else if (content.includes('"level":"warn"')) {
+          consoleSpy.warn.mock.calls.push([content.trim()]);
+        }
+        return true;
+      });
+
+    // Create console spy mocks that match the old interface
+    const createMockSpy = () => {
+      const spy = {
+        mock: { calls: [] as unknown[][] },
+        mockImplementation: jest.fn(),
+        mockClear: () => {
+          spy.mock.calls = [];
+        },
+      };
+      return spy as unknown as ReturnType<typeof jest.spyOn>;
+    };
+
     consoleSpy = {
-      log: jest.spyOn(console, "log").mockImplementation(() => {}),
-      error: jest.spyOn(console, "error").mockImplementation(() => {}),
-      warn: jest.spyOn(console, "warn").mockImplementation(() => {}),
-      info: jest.spyOn(console, "info").mockImplementation(() => {}),
-      debug: jest.spyOn(console, "debug").mockImplementation(() => {}),
+      log: createMockSpy(),
+      error: createMockSpy(),
+      warn: createMockSpy(),
+      info: createMockSpy(),
+      debug: createMockSpy(),
     };
   });
 
@@ -56,7 +128,11 @@ describe("Logger Module", () => {
     // Restore NODE_ENV
     process.env.NODE_ENV = originalEnv;
 
-    // Restore console methods
+    // Restore stream spies
+    if (stdoutSpy) stdoutSpy.mockRestore();
+    if (stderrSpy) stderrSpy.mockRestore();
+
+    // Restore all other mocks
     jest.restoreAllMocks();
 
     // Clean up any test log files
@@ -124,7 +200,7 @@ describe("Logger Module", () => {
       // This will fail - log methods don't exist yet
       logger.info("Info message");
 
-      expect(consoleSpy.info).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.info);
       const lastCall = consoleSpy.info.mock.calls[0];
       expect(JSON.stringify(lastCall)).toContain("Info message");
     });
@@ -134,15 +210,15 @@ describe("Logger Module", () => {
       logger.error("Error message");
       logger.warn("Warning message");
 
-      expect(consoleSpy.error).toHaveBeenCalled();
-      expect(consoleSpy.warn).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.error);
+      toHaveBeenCalled(consoleSpy.warn);
     });
 
     it("should NOT log messages at lower severity levels", () => {
       // This will fail - debug method doesn't exist yet
       logger.debug("Debug message");
 
-      expect(consoleSpy.debug).not.toHaveBeenCalled();
+      notToHaveBeenCalled(consoleSpy.debug);
     });
 
     it("should respect log level hierarchy: ERROR > WARN > INFO > DEBUG", () => {
@@ -154,17 +230,17 @@ describe("Logger Module", () => {
       warnLogger.warn("Warning");
       warnLogger.error("Error");
 
-      expect(consoleSpy.debug).not.toHaveBeenCalled();
-      expect(consoleSpy.info).not.toHaveBeenCalled();
-      expect(consoleSpy.warn).toHaveBeenCalled();
-      expect(consoleSpy.error).toHaveBeenCalled();
+      notToHaveBeenCalled(consoleSpy.debug);
+      notToHaveBeenCalled(consoleSpy.info);
+      toHaveBeenCalled(consoleSpy.warn);
+      toHaveBeenCalled(consoleSpy.error);
     });
 
     it("should support dynamic log level changes", () => {
       logger.setLevel(LogLevel.DEBUG);
 
       logger.debug("Debug message after level change");
-      expect(consoleSpy.debug).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.debug);
     });
   });
 
@@ -280,7 +356,7 @@ describe("Logger Module", () => {
       logger.error("Undefined error", undefined);
 
       // Should not throw
-      expect(consoleSpy.error).toHaveBeenCalledTimes(4);
+      toHaveBeenCalledTimes(consoleSpy.error, 4);
     });
 
     it("should sanitize sensitive information from errors", () => {
@@ -602,7 +678,7 @@ describe("Logger Module", () => {
 
       logger.info("Console transport test");
 
-      expect(consoleSpy.info).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.info);
     });
 
     it("should support file transport", async () => {
@@ -631,7 +707,7 @@ describe("Logger Module", () => {
       logger.info("Multi-transport test");
 
       // Check console
-      expect(consoleSpy.info).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.info);
 
       // Check file
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -648,7 +724,7 @@ describe("Logger Module", () => {
       logger.info("Custom transport test", { data: 123 });
 
       // Verify console was called
-      expect(consoleSpy.info).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.info);
       const output = consoleSpy.info.mock.calls[0][0];
       expect(output).toContain("Custom transport test");
     });
@@ -667,7 +743,7 @@ describe("Logger Module", () => {
       }).not.toThrow();
 
       // Console should still work
-      expect(consoleSpy.info).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.info);
     });
   });
 
@@ -815,13 +891,13 @@ describe("Logger Module", () => {
       }
 
       // Should not output immediately
-      expect(consoleSpy.info).not.toHaveBeenCalled();
+      notToHaveBeenCalled(consoleSpy.info);
 
       // Force flush
       logger.flushBuffer();
 
       // Now should have output
-      expect(consoleSpy.info).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.info);
     });
 
     it("should auto-flush when buffer is full", () => {
@@ -836,7 +912,7 @@ describe("Logger Module", () => {
       logger.info("Message 3");
 
       // Should auto-flush
-      expect(consoleSpy.info).toHaveBeenCalledTimes(3);
+      toHaveBeenCalledTimes(consoleSpy.info, 3);
     });
 
     it("should flush on timer interval", async () => {
@@ -848,13 +924,13 @@ describe("Logger Module", () => {
       logger.info("Buffered message");
 
       // Not flushed yet
-      expect(consoleSpy.info).not.toHaveBeenCalled();
+      notToHaveBeenCalled(consoleSpy.info);
 
       // Wait for interval
       await new Promise((resolve) => setTimeout(resolve, 150));
 
       // Should be flushed now
-      expect(consoleSpy.info).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.info);
     });
 
     it("should flush on process exit", () => {
@@ -867,7 +943,7 @@ describe("Logger Module", () => {
       // Simulate process exit
       process.emit("beforeExit", 0);
 
-      expect(consoleSpy.info).toHaveBeenCalled();
+      toHaveBeenCalled(consoleSpy.info);
     });
   });
 

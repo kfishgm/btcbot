@@ -66,6 +66,10 @@ interface ErrorWithCode extends Error {
   code?: string;
 }
 
+interface GlobalWithTestBuffer {
+  __testLogBuffer?: Array<{ level: string; output: string }>;
+}
+
 export class Logger {
   private winston: WinstonLogger;
   private config: LoggerConfig;
@@ -361,33 +365,22 @@ export class Logger {
           ? JSON.stringify(logOutput)
           : `${timestamp} [${level.toUpperCase()}]: ${message}${Object.keys({ ...metadata, ...meta }).length > 0 ? " " + JSON.stringify({ ...metadata, ...meta }, null, 2) : ""}`;
 
-      // In test mode ONLY, use console for Jest spy compatibility
-      // This is isolated to test environment and never runs in production
-      // The test environment check ensures this code path is never executed in production
+      // Write to stdout/stderr streams directly - no console usage at all
+      // This ensures zero console statements in the codebase
+      const stream =
+        level === LogLevel.ERROR || level === LogLevel.WARN
+          ? process.stderr
+          : process.stdout;
+
+      // For test compatibility, write to a test buffer that tests can inspect
       if (process.env.JEST_WORKER_ID !== undefined) {
-        // Jest test environment - use console for spy compatibility
-        switch (level) {
-          case LogLevel.ERROR:
-            console.error(output);
-            break;
-          case LogLevel.WARN:
-            console.warn(output);
-            break;
-          case LogLevel.INFO:
-            console.info(output);
-            break;
-          case LogLevel.DEBUG:
-            console.debug(output);
-            break;
+        const globalWithBuffer = global as unknown as GlobalWithTestBuffer;
+        if (globalWithBuffer.__testLogBuffer) {
+          globalWithBuffer.__testLogBuffer.push({ level, output });
         }
-      } else {
-        // Non-jest test environment - write to streams
-        const stream =
-          level === LogLevel.ERROR || level === LogLevel.WARN
-            ? process.stderr
-            : process.stdout;
-        stream.write(output + "\n");
       }
+
+      stream.write(output + "\n");
 
       // Handle file output in test mode
       if (this.config.transports?.includes("file") && this.config.filePath) {
