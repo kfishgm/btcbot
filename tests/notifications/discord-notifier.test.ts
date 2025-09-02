@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import { DiscordNotifier } from "../../src/notifications/discord-notifier";
-import axios from "axios";
+import {
+  DiscordNotifier,
+  type AlertSeverity,
+} from "../../src/notifications/discord-notifier";
 
-// Mock axios
-jest.mock("axios");
-const mockedAxios = axios as jest.Mocked<typeof axios>;
+// Mock fetch
+global.fetch = jest.fn() as jest.Mock;
 
 describe("DiscordNotifier", () => {
   let notifier: DiscordNotifier;
@@ -13,13 +14,17 @@ describe("DiscordNotifier", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Reset axios mock
-    mockedAxios.post = jest.fn().mockResolvedValue({ data: { success: true } });
+    // Reset fetch mock
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+    });
 
     notifier = new DiscordNotifier({
       webhookUrl: mockWebhookUrl,
       environment: "test",
-      botName: "TriBot",
       enableRateLimiting: true,
       maxAlertsPerMinute: 5,
     });
@@ -31,7 +36,6 @@ describe("DiscordNotifier", () => {
       expect(notifier.getConfig()).toEqual({
         webhookUrl: mockWebhookUrl,
         environment: "test",
-        botName: "TriBot",
         enableRateLimiting: true,
         maxAlertsPerMinute: 5,
       });
@@ -58,20 +62,14 @@ describe("DiscordNotifier", () => {
 
   describe("Alert Sending", () => {
     it("should send basic alert with required fields", async () => {
-      const alert = {
-        title: "Test Alert",
-        severity: "info" as const,
-        description: "This is a test alert",
-      };
+      await notifier.sendAlert("This is a test alert", "info");
 
-      await notifier.sendAlert(alert);
-
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
             expect.objectContaining({
-              title: "Test Alert",
+              title: expect.stringContaining("BTC Trading Bot"),
               description: "This is a test alert",
               color: expect.any(Number), // Info color
               timestamp: expect.any(String),
@@ -96,13 +94,12 @@ describe("DiscordNotifier", () => {
       for (const { level, color } of severities) {
         jest.clearAllMocks();
 
-        await notifier.sendAlert({
-          title: `${level} Alert`,
-          severity: level,
-          description: `Alert with ${level} severity`,
-        });
+        await notifier.sendAlert(
+          `Alert with ${level} severity`,
+          level as AlertSeverity,
+        );
 
-        expect(mockedAxios.post).toHaveBeenCalledWith(
+        expect(global.fetch).toHaveBeenCalledWith(
           mockWebhookUrl,
           expect.objectContaining({
             embeds: [
@@ -116,29 +113,28 @@ describe("DiscordNotifier", () => {
     });
 
     it("should include fields when provided", async () => {
-      const alert = {
-        title: "Drift Detected",
-        severity: "critical" as const,
-        description: "Balance drift exceeded threshold",
-        fields: [
-          { name: "USDT Drift", value: "1.5%", inline: true },
-          { name: "BTC Drift", value: "0.3%", inline: true },
-          {
-            name: "Action Required",
-            value: "Manual intervention needed",
-            inline: false,
-          },
-        ],
-      };
+      const fields = [
+        { name: "USDT Drift", value: "1.5%", inline: true },
+        { name: "BTC Drift", value: "0.3%", inline: true },
+        {
+          name: "Action Required",
+          value: "Manual intervention needed",
+          inline: false,
+        },
+      ];
 
-      await notifier.sendAlert(alert);
+      await notifier.sendAlert(
+        "Balance drift exceeded threshold",
+        "critical",
+        fields,
+      );
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
             expect.objectContaining({
-              fields: alert.fields,
+              fields,
             }),
           ],
         }),
@@ -146,14 +142,9 @@ describe("DiscordNotifier", () => {
     });
 
     it("should add action required indicator for critical alerts", async () => {
-      await notifier.sendAlert({
-        title: "Critical Alert",
-        severity: "critical",
-        description: "Immediate action required",
-        requiresAction: true,
-      });
+      await notifier.sendAlert("Immediate action required", "critical");
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -186,7 +177,7 @@ describe("DiscordNotifier", () => {
         metadata,
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -212,7 +203,7 @@ describe("DiscordNotifier", () => {
         description: longDescription,
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -317,7 +308,7 @@ describe("DiscordNotifier", () => {
 
   describe("Error Handling", () => {
     it("should handle Discord API errors", async () => {
-      mockedAxios.post = jest
+      global.fetch = jest
         .fn()
         .mockRejectedValue(new Error("Discord API error: 400 Bad Request"));
 
@@ -331,7 +322,7 @@ describe("DiscordNotifier", () => {
     });
 
     it("should handle network errors", async () => {
-      mockedAxios.post = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+      global.fetch = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"));
 
       await expect(
         notifier.sendAlert({
@@ -344,7 +335,7 @@ describe("DiscordNotifier", () => {
 
     it("should retry on temporary failures", async () => {
       let callCount = 0;
-      mockedAxios.post = jest.fn().mockImplementation(() => {
+      global.fetch = jest.fn().mockImplementation(() => {
         callCount++;
         if (callCount < 3) {
           return Promise.reject(new Error("Temporary failure"));
@@ -358,11 +349,11 @@ describe("DiscordNotifier", () => {
         description: "Test",
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledTimes(3);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
     });
 
     it("should give up after max retries", async () => {
-      mockedAxios.post = jest
+      global.fetch = jest
         .fn()
         .mockRejectedValue(new Error("Persistent failure"));
 
@@ -375,7 +366,7 @@ describe("DiscordNotifier", () => {
       ).rejects.toThrow("Persistent failure");
 
       // Default max retries is 3
-      expect(mockedAxios.post).toHaveBeenCalledTimes(3);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -397,8 +388,8 @@ describe("DiscordNotifier", () => {
       await notifier.sendBatch(alerts);
 
       // Should combine into single Discord message with multiple embeds
-      expect(mockedAxios.post).toHaveBeenCalledTimes(1);
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: expect.arrayContaining([
@@ -420,10 +411,10 @@ describe("DiscordNotifier", () => {
       await notifier.sendBatch(alerts);
 
       // Should split into 2 messages (10 + 5)
-      expect(mockedAxios.post).toHaveBeenCalledTimes(2);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
 
       // First call should have 10 embeds
-      expect(mockedAxios.post).toHaveBeenNthCalledWith(
+      expect(global.fetch).toHaveBeenNthCalledWith(
         1,
         mockWebhookUrl,
         expect.objectContaining({
@@ -434,7 +425,7 @@ describe("DiscordNotifier", () => {
       );
 
       // Second call should have 5 embeds
-      expect(mockedAxios.post).toHaveBeenNthCalledWith(
+      expect(global.fetch).toHaveBeenNthCalledWith(
         2,
         mockWebhookUrl,
         expect.objectContaining({
@@ -460,7 +451,7 @@ describe("DiscordNotifier", () => {
         },
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -494,7 +485,7 @@ describe("DiscordNotifier", () => {
         },
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -527,7 +518,7 @@ describe("DiscordNotifier", () => {
         timestamp: new Date("2024-01-01T12:00:00Z"),
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -566,7 +557,7 @@ describe("DiscordNotifier", () => {
         },
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -615,7 +606,7 @@ describe("DiscordNotifier", () => {
         ],
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -641,7 +632,7 @@ describe("DiscordNotifier", () => {
         timestamp,
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -657,7 +648,6 @@ describe("DiscordNotifier", () => {
       const prodNotifier = new DiscordNotifier({
         webhookUrl: mockWebhookUrl,
         environment: "production",
-        botName: "TriBot",
       });
 
       await prodNotifier.sendAlert({
@@ -666,7 +656,7 @@ describe("DiscordNotifier", () => {
         description: "Test",
       });
 
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -696,7 +686,7 @@ describe("DiscordNotifier", () => {
       });
 
       // Should not send non-critical alerts in silent mode
-      expect(mockedAxios.post).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
     });
 
     it("should still send critical alerts in silent mode", async () => {
@@ -713,7 +703,7 @@ describe("DiscordNotifier", () => {
       });
 
       // Should send critical alerts even in silent mode
-      expect(mockedAxios.post).toHaveBeenCalled();
+      expect(global.fetch).toHaveBeenCalled();
     });
   });
 
@@ -722,7 +712,7 @@ describe("DiscordNotifier", () => {
       const isHealthy = await notifier.healthCheck();
 
       expect(isHealthy).toBe(true);
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         mockWebhookUrl,
         expect.objectContaining({
           embeds: [
@@ -736,7 +726,7 @@ describe("DiscordNotifier", () => {
     });
 
     it("should return false when webhook is not accessible", async () => {
-      mockedAxios.post = jest
+      global.fetch = jest
         .fn()
         .mockRejectedValue(new Error("Connection failed"));
 

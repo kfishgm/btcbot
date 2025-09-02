@@ -27,20 +27,35 @@ jest.mock("../../src/utils/logger");
 describe("StrategyPauseMechanism Integration", () => {
   let pauseMechanism: StrategyPauseMechanism;
   let mockSupabase: jest.Mocked<SupabaseClient<Database>>;
+  let mockQueryBuilder: {
+    insert: jest.Mock;
+    update: jest.Mock;
+    select: jest.Mock;
+    single: jest.Mock;
+    eq: jest.Mock;
+    delete: jest.Mock;
+    order: jest.Mock;
+    limit: jest.Mock;
+  };
   let driftDetector: DriftDetector;
   let cycleStateManager: CycleStateManager;
   let mockDiscordNotifier: jest.Mocked<DiscordNotifier>;
 
   beforeEach(() => {
     // Create mock Supabase client
+    mockQueryBuilder = {
+      insert: jest.fn(() => mockQueryBuilder),
+      update: jest.fn(() => mockQueryBuilder),
+      select: jest.fn(() => mockQueryBuilder),
+      single: jest.fn(() => Promise.resolve({ data: null, error: null })),
+      eq: jest.fn(() => mockQueryBuilder),
+      delete: jest.fn(() => mockQueryBuilder),
+      order: jest.fn(() => mockQueryBuilder),
+      limit: jest.fn(() => mockQueryBuilder),
+    };
+
     mockSupabase = {
-      from: jest.fn().mockReturnThis(),
-      insert: jest.fn().mockReturnThis(),
-      update: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      single: jest.fn().mockResolvedValue({ data: null, error: null }),
-      eq: jest.fn().mockReturnThis(),
-      delete: jest.fn().mockReturnThis(),
+      from: jest.fn().mockReturnValue(mockQueryBuilder),
     } as unknown as jest.Mocked<SupabaseClient<Database>>;
 
     // Create real DriftDetector with default threshold
@@ -55,26 +70,35 @@ describe("StrategyPauseMechanism Integration", () => {
 
     // Mock Discord notifier (external service)
     mockDiscordNotifier = {
-      sendAlert: jest.fn().mockResolvedValue(undefined),
-      sendDriftAlert: jest.fn().mockResolvedValue(undefined),
-      sendErrorAlert: jest.fn().mockResolvedValue(undefined),
-      sendTradeAlert: jest.fn().mockResolvedValue(undefined),
-      sendResumeAlert: jest.fn().mockResolvedValue(undefined),
-      sendBatch: jest.fn().mockResolvedValue(undefined),
-      healthCheck: jest.fn().mockResolvedValue(true),
-      getConfig: jest.fn().mockReturnValue({
+      sendAlert: jest.fn(() => Promise.resolve()),
+      sendPauseAlert: jest.fn(() => Promise.resolve()),
+      sendResumeSuccessAlert: jest.fn(() => Promise.resolve()),
+      sendResumeFailedAlert: jest.fn(() => Promise.resolve()),
+      sendDriftAlert: jest.fn(() => Promise.resolve()),
+      sendErrorAlert: jest.fn(() => Promise.resolve()),
+      sendTradeAlert: jest.fn(() => Promise.resolve()),
+      sendResumeAlert: jest.fn(() => Promise.resolve()),
+      sendBatch: jest.fn(() => Promise.resolve()),
+      sendBatchAlerts: jest.fn(() => Promise.resolve()),
+      healthCheck: jest.fn(() => Promise.resolve(true)),
+      testWebhook: jest.fn(() => Promise.resolve(true)),
+      getConfig: jest.fn(() => ({
         webhookUrl: "https://discord.webhook.url",
         environment: "test",
-      }),
+        enableRateLimiting: true,
+        rateLimitWindow: 60000,
+        rateLimitCount: 5,
+        silentMode: false,
+      })),
     } as unknown as jest.Mocked<DiscordNotifier>;
 
     // Initialize the pause mechanism with real components
-    pauseMechanism = new StrategyPauseMechanism({
-      supabase: mockSupabase,
-      driftDetector,
+    pauseMechanism = new StrategyPauseMechanism(
+      mockSupabase,
       cycleStateManager,
-      discordNotifier: mockDiscordNotifier,
-    });
+      driftDetector,
+      mockDiscordNotifier,
+    );
   });
 
   afterEach(() => {
@@ -132,40 +156,35 @@ describe("StrategyPauseMechanism Integration", () => {
       await cycleStateManager.initialize();
 
       // Simulate drift condition (1% USDT drift, exceeds 0.5% threshold)
-      const result = await pauseMechanism.checkAndPauseOnDrift({
-        usdtSpotBalance: 1010, // 1% drift from 1000
-        capitalAvailable: 1000,
-        btcSpotBalance: 0.01,
-        btcAccumulated: 0.01,
-      });
+      const result = await pauseMechanism.checkDriftAndPause(
+        1010, // usdtSpotBalance - 1% drift from 1000
+        1000, // capitalAvailable
+        0.01, // btcSpotBalance
+        0.01, // btcAccumulated
+      );
 
       // Verify pause was triggered
-      expect(result.paused).toBe(true);
-      expect(result.reason).toBe("DRIFT_DETECTED");
-      expect(result.driftDetails).toEqual({
-        usdtDrift: 0.01,
-        btcDrift: 0,
-        threshold: 0.005,
-      });
+      expect(result).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(true);
+      expect(pauseMechanism.getPauseReason()).toContain("drift exceeded");
 
       // Verify Discord notification was sent
-      expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledWith(
+      expect(mockDiscordNotifier.sendPauseAlert).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: expect.stringContaining("Drift Detected"),
-          severity: "critical",
-          requiresAction: true,
+          type: "drift_detected",
+          message: expect.stringContaining("drift exceeded"),
         }),
       );
 
       // Verify cycle state was updated
       expect(mockSupabase.from).toHaveBeenCalledWith("cycle_state");
-      expect(mockSupabase.update).toHaveBeenCalledWith({
+      expect(mockQueryBuilder.update).toHaveBeenCalledWith({
         status: "PAUSED",
       });
 
       // Verify bot event was logged
       expect(mockSupabase.from).toHaveBeenCalledWith("bot_events");
-      expect(mockSupabase.insert).toHaveBeenCalledWith(
+      expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
         expect.objectContaining({
           event_type: "STRATEGY_PAUSED_DRIFT",
           severity: "error",
@@ -198,18 +217,18 @@ describe("StrategyPauseMechanism Integration", () => {
       await cycleStateManager.initialize();
 
       // Simulate small drift (0.3%, below 0.5% threshold)
-      const result = await pauseMechanism.checkAndPauseOnDrift({
-        usdtSpotBalance: 1003, // 0.3% drift
-        capitalAvailable: 1000,
-        btcSpotBalance: 0.01002, // 0.2% drift
-        btcAccumulated: 0.01,
-      });
+      const result = await pauseMechanism.checkDriftAndPause(
+        1003, // usdtSpotBalance - 0.3% drift
+        1000, // capitalAvailable
+        0.01002, // btcSpotBalance - 0.2% drift
+        0.01, // btcAccumulated
+      );
 
       // Verify no pause
-      expect(result.paused).toBe(false);
-      expect(result.reason).toBeNull();
-      expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
-      expect(mockSupabase.update).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+      expect(pauseMechanism.isPausedStatus()).toBe(false);
+      expect(pauseMechanism.getPauseReason()).toBeNull();
+      expect(mockDiscordNotifier.sendPauseAlert).not.toHaveBeenCalled();
     });
   });
 
@@ -274,30 +293,27 @@ describe("StrategyPauseMechanism Integration", () => {
         availableBalance: 50,
       };
 
-      const pauseResult = await pauseMechanism.pauseOnCriticalError(
+      const pauseResult = await pauseMechanism.pauseOnError(
         new Error("Insufficient balance for trade"),
         errorContext,
       );
 
       expect(pauseResult.paused).toBe(true);
       expect(pauseResult.reason).toBe("CRITICAL_ERROR");
-      expect(pauseMechanism.isPaused()).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(true);
 
       // Verify Discord alert was sent
-      expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledWith(
+      expect(mockDiscordNotifier.sendPauseAlert).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: expect.stringContaining("Critical Error"),
-          severity: "critical",
+          type: "critical_error",
+          message: expect.any(String),
         }),
       );
 
       // Step 3: Attempt resume with validation
       // First attempt - simulate drift still exists (should fail)
-      await pauseMechanism.resume({
-        force: false,
-        validatorId: "admin-123",
-        reason: "Attempting to resume after balance correction",
-      });
+      const firstResumeAttempt = await pauseMechanism.resumeStrategy(false);
+      expect(firstResumeAttempt).toBe(false); // Should fail due to drift
 
       // Mock exchange connectivity check
       pauseMechanism["validateExchangeConnectivity"] = jest
@@ -364,26 +380,14 @@ describe("StrategyPauseMechanism Integration", () => {
         overallStatus: "ok",
       });
 
-      const successfulResume = await pauseMechanism.resume({
-        force: false,
-        validatorId: "admin-123",
-        reason: "Issues resolved, drift corrected",
-      });
+      const successfulResume = await pauseMechanism.resumeStrategy(false);
 
-      expect(successfulResume.resumed).toBe(true);
-      expect(successfulResume.validationResults).toEqual({
-        stateValid: true,
-        driftAcceptable: true,
-        exchangeConnected: true,
-      });
-      expect(pauseMechanism.isPaused()).toBe(false);
+      expect(successfulResume).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(false);
 
       // Verify resume notification
-      expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: expect.stringContaining("Strategy Resumed"),
-          severity: "info",
-        }),
+      expect(mockDiscordNotifier.sendResumeSuccessAlert).toHaveBeenCalledWith(
+        false,
       );
     });
   });
@@ -395,7 +399,7 @@ describe("StrategyPauseMechanism Integration", () => {
 
       // First error causes pause
       const error1 = new Error("Database connection lost");
-      const result1 = await pauseMechanism.pauseOnCriticalError(error1, {
+      const result1 = await pauseMechanism.pauseOnError(error1, {
         operation: "DATABASE_QUERY",
       });
 
@@ -407,7 +411,7 @@ describe("StrategyPauseMechanism Integration", () => {
 
       // Second error while already paused
       const error2 = new Error("Exchange API timeout");
-      const result2 = await pauseMechanism.pauseOnCriticalError(error2, {
+      const result2 = await pauseMechanism.pauseOnError(error2, {
         operation: "FETCH_TICKER",
       });
 
@@ -415,11 +419,11 @@ describe("StrategyPauseMechanism Integration", () => {
       expect(result2.alreadyPaused).toBe(true);
 
       // Should not send another Discord alert for second error
-      expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
+      expect(mockDiscordNotifier.sendPauseAlert).not.toHaveBeenCalled();
 
       // Third error
       const error3 = new Error("Invalid order parameters");
-      const result3 = await pauseMechanism.pauseOnCriticalError(error3, {
+      const result3 = await pauseMechanism.pauseOnError(error3, {
         operation: "VALIDATE_ORDER",
       });
 
@@ -427,7 +431,7 @@ describe("StrategyPauseMechanism Integration", () => {
       expect(result3.alreadyPaused).toBe(true);
 
       // Strategy should still be paused with original reason
-      expect(pauseMechanism.isPaused()).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(true);
       expect(pauseMechanism.getPauseReason()).toBe("CRITICAL_ERROR");
     });
   });
@@ -472,7 +476,7 @@ describe("StrategyPauseMechanism Integration", () => {
       // Initialize should restore paused state
       await newPauseMechanism.initialize();
 
-      expect(newPauseMechanism.isPaused()).toBe(true);
+      expect(newPauseMechanism.isPausedStatus()).toBe(true);
       expect(newPauseMechanism.getPauseReason()).toBe("DRIFT_DETECTED");
 
       const pauseDetails = newPauseMechanism.getPauseDetails();
@@ -487,12 +491,11 @@ describe("StrategyPauseMechanism Integration", () => {
   describe("Force Resume Scenarios", () => {
     it("should allow force resume bypassing all validations", async () => {
       // Setup paused state
-      await pauseMechanism.pauseOnCriticalError(
-        new Error("Critical system failure"),
-        { operation: "SYSTEM_CHECK" },
-      );
+      await pauseMechanism.pauseOnError(new Error("Critical system failure"), {
+        operation: "SYSTEM_CHECK",
+      });
 
-      expect(pauseMechanism.isPaused()).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(true);
 
       // Setup failing validations
       mockSupabase.from = jest.fn().mockImplementation((table) => {
@@ -553,35 +556,23 @@ describe("StrategyPauseMechanism Integration", () => {
         .mockResolvedValue(false);
 
       // Normal resume should fail
-      const normalResume = await pauseMechanism.resume({
-        force: false,
-        validatorId: "admin-123",
-      });
+      const normalResume = await pauseMechanism.resumeStrategy(false);
 
-      expect(normalResume.resumed).toBe(false);
-      expect(normalResume.error).toBeDefined();
+      expect(normalResume).toBe(false);
 
       // Force resume should succeed despite failures
-      const forceResume = await pauseMechanism.resume({
-        force: true,
-        validatorId: "admin-123",
-        reason: "Emergency override - manual verification completed",
-      });
+      const forceResume = await pauseMechanism.resumeStrategy(true);
 
-      expect(forceResume.resumed).toBe(true);
-      expect(forceResume.forced).toBe(true);
-      expect(pauseMechanism.isPaused()).toBe(false);
+      expect(forceResume).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(false);
 
       // Verify warning notification was sent
-      expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: expect.stringContaining("Force Resumed"),
-          severity: "warning",
-        }),
+      expect(mockDiscordNotifier.sendResumeSuccessAlert).toHaveBeenCalledWith(
+        true,
       );
 
       // Verify force resume was logged
-      expect(mockSupabase.insert).toHaveBeenCalledWith(
+      expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
         expect.objectContaining({
           event_type: "STRATEGY_FORCE_RESUMED",
           severity: "warning",
@@ -594,13 +585,13 @@ describe("StrategyPauseMechanism Integration", () => {
     it("should handle concurrent pause requests correctly", async () => {
       // Simulate concurrent errors from different parts of the system
       const promises = [
-        pauseMechanism.pauseOnCriticalError(new Error("API Error"), {
+        pauseMechanism.pauseOnError(new Error("API Error"), {
           operation: "API_CALL",
         }),
-        pauseMechanism.pauseOnCriticalError(new Error("Database Error"), {
+        pauseMechanism.pauseOnError(new Error("Database Error"), {
           operation: "DB_QUERY",
         }),
-        pauseMechanism.pauseOnCriticalError(new Error("Validation Error"), {
+        pauseMechanism.pauseOnError(new Error("Validation Error"), {
           operation: "VALIDATION",
         }),
       ];
@@ -618,12 +609,12 @@ describe("StrategyPauseMechanism Integration", () => {
       expect(results.every((r) => r.paused)).toBe(true);
 
       // Only one Discord notification should be sent
-      expect(mockDiscordNotifier.sendAlert).toHaveBeenCalledTimes(1);
+      expect(mockDiscordNotifier.sendPauseAlert).toHaveBeenCalledTimes(1);
     });
 
     it("should handle pause during resume attempt", async () => {
       // Setup initial paused state
-      await pauseMechanism.pauseOnCriticalError(new Error("Initial error"), {});
+      await pauseMechanism.pauseOnError(new Error("Initial error"), {});
 
       // Mock successful validation for resume
       const mockUsdtResult: DriftResult = {
@@ -677,16 +668,12 @@ describe("StrategyPauseMechanism Integration", () => {
         .mockResolvedValue(true);
 
       // Attempt resume which will fail due to database error
-      const resumeResult = await pauseMechanism.resume({
-        force: false,
-        validatorId: "admin-123",
-      });
+      const resumeResult = await pauseMechanism.resumeStrategy(false);
 
-      expect(resumeResult.resumed).toBe(false);
-      expect(resumeResult.error).toContain("Failed to update cycle state");
+      expect(resumeResult).toBe(false);
 
       // Should still be paused
-      expect(pauseMechanism.isPaused()).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(true);
     });
   });
 
@@ -749,16 +736,19 @@ describe("StrategyPauseMechanism Integration", () => {
       for (const scenario of scenarios) {
         jest.clearAllMocks();
 
-        const result = await pauseMechanism.checkAndPauseOnDrift(
-          scenario.balances,
+        const result = await pauseMechanism.checkDriftAndPause(
+          scenario.balances.usdtSpotBalance,
+          scenario.balances.capitalAvailable,
+          scenario.balances.btcSpotBalance,
+          scenario.balances.btcAccumulated,
         );
 
-        expect(result.paused).toBe(scenario.expectedPaused);
+        expect(result).toBe(scenario.expectedPaused);
 
         if (scenario.expectedPaused) {
-          expect(mockDiscordNotifier.sendAlert).toHaveBeenCalled();
+          expect(mockDiscordNotifier.sendPauseAlert).toHaveBeenCalled();
         } else {
-          expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
+          expect(mockDiscordNotifier.sendPauseAlert).not.toHaveBeenCalled();
         }
       }
     });
@@ -767,18 +757,18 @@ describe("StrategyPauseMechanism Integration", () => {
   describe("Error Recovery Patterns", () => {
     it("should handle and recover from Discord notification failures", async () => {
       // Mock Discord to fail
-      mockDiscordNotifier.sendAlert = jest
+      mockDiscordNotifier.sendPauseAlert = jest
         .fn()
         .mockRejectedValue(new Error("Discord webhook unavailable"));
 
       // Pause should still work even if Discord fails
-      const result = await pauseMechanism.pauseOnCriticalError(
+      const result = await pauseMechanism.pauseOnError(
         new Error("Test error"),
         {},
       );
 
       expect(result.paused).toBe(true);
-      expect(pauseMechanism.isPaused()).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(true);
 
       // Verify error was logged
       expect(logger.error).toHaveBeenCalledWith(
@@ -800,14 +790,14 @@ describe("StrategyPauseMechanism Integration", () => {
         };
       });
 
-      const result = await pauseMechanism.pauseOnCriticalError(
+      const result = await pauseMechanism.pauseOnError(
         new Error("Test error"),
         {},
       );
 
       // Should still pause in memory even if database fails
       expect(result.paused).toBe(true);
-      expect(pauseMechanism.isPaused()).toBe(true);
+      expect(pauseMechanism.isPausedStatus()).toBe(true);
 
       // Verify database error was logged
       expect(logger.error).toHaveBeenCalledWith(

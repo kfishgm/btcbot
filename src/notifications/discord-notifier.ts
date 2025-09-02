@@ -7,6 +7,7 @@ export interface DiscordNotifierConfig {
   rateLimitWindow?: number; // milliseconds
   rateLimitCount?: number;
   silentMode?: boolean;
+  environment?: string;
 }
 
 export interface DiscordMessage {
@@ -56,6 +57,7 @@ export class DiscordNotifier {
       rateLimitWindow: config.rateLimitWindow ?? 60000, // 1 minute
       rateLimitCount: config.rateLimitCount ?? 5,
       silentMode: config.silentMode ?? false,
+      environment: config.environment ?? "development",
     };
 
     this.rateLimitInfo = {
@@ -289,6 +291,56 @@ export class DiscordNotifier {
       logger.error("Discord webhook test failed", { error });
       return false;
     }
+  }
+
+  // Alias methods for backward compatibility with tests
+  async sendBatch(
+    alerts: Array<{
+      title: string;
+      severity: AlertSeverity;
+      description: string;
+    }>,
+  ): Promise<void> {
+    for (const alert of alerts) {
+      await this.sendAlert(alert.description, alert.severity);
+    }
+  }
+
+  async sendDriftAlert(driftData: {
+    usdtDrift: number;
+    btcDrift: number;
+    threshold: number;
+  }): Promise<void> {
+    const reason: PauseReason = {
+      type: "drift_detected",
+      message: `Balance drift exceeded: USDT ${(driftData.usdtDrift * 100).toFixed(2)}%, BTC ${(driftData.btcDrift * 100).toFixed(2)}%`,
+      metadata: driftData,
+    };
+    await this.sendPauseAlert(reason);
+  }
+
+  async sendErrorAlert(
+    error: Error,
+    context?: Record<string, unknown>,
+  ): Promise<void> {
+    const reason: PauseReason = {
+      type: "critical_error",
+      message: error.message,
+      metadata: { errorName: error.name, context },
+    };
+    await this.sendPauseAlert(reason);
+  }
+
+  async sendResumeAlert(forced: boolean = false): Promise<void> {
+    await this.sendResumeSuccessAlert(forced);
+  }
+
+  async healthCheck(): Promise<boolean> {
+    return this.testWebhook();
+  }
+
+  getConfig(): DiscordNotifierConfig {
+    return { ...this.config };
   }
 
   private async sendToWebhook(message: DiscordMessage): Promise<void> {

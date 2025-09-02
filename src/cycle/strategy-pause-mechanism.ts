@@ -171,7 +171,8 @@ export class StrategyPauseMechanism {
         .insert({
           status: "paused",
           pause_reason: reason.message,
-          pause_metadata: reason.metadata || {},
+          pause_metadata: (reason.metadata ||
+            {}) as Database["public"]["Tables"]["pause_states"]["Insert"]["pause_metadata"],
         })
         .select()
         .single();
