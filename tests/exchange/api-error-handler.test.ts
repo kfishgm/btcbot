@@ -377,9 +377,15 @@ describe("BinanceApiErrorHandler", () => {
         return state;
       });
 
-      const result = await errorHandler.executeWithRetry(operation, {
+      const promise = errorHandler.executeWithRetry(operation, {
         preserveState: true,
       });
+
+      // Advance timers for retries
+      await jest.advanceTimersByTimeAsync(1000);
+      await jest.advanceTimersByTimeAsync(2000);
+
+      const result = await promise;
 
       expect(result.counter).toBe(3);
       expect(result.data).toEqual(["attempt-1", "attempt-2", "attempt-3"]);
@@ -398,10 +404,14 @@ describe("BinanceApiErrorHandler", () => {
         .mockRejectedValueOnce(new Error("ECONNREFUSED"))
         .mockResolvedValueOnce({ success: true, context });
 
-      const result = await errorHandler.executeWithRetry(
-        () => operation(context),
-        { context },
-      );
+      const promise = errorHandler.executeWithRetry(() => operation(context), {
+        context,
+      });
+
+      // Advance timer for retry
+      await jest.advanceTimersByTimeAsync(1000);
+
+      const result = await promise;
 
       expect(result.context).toEqual(context);
       expect(operation).toHaveBeenCalledWith(context);
@@ -420,7 +430,13 @@ describe("BinanceApiErrorHandler", () => {
         .mockRejectedValueOnce(new Error("ECONNREFUSED"))
         .mockResolvedValueOnce({ success: true, params });
 
-      await errorHandler.executeWithRetry(() => operation(params));
+      const promise = errorHandler.executeWithRetry(() => operation(params));
+
+      // Advance timers for retries
+      await jest.advanceTimersByTimeAsync(1000);
+      await jest.advanceTimersByTimeAsync(2000);
+
+      await promise;
 
       expect(operation).toHaveBeenCalledTimes(3);
       expect(operation).toHaveBeenCalledWith(params);
@@ -545,10 +561,13 @@ describe("BinanceApiErrorHandler", () => {
         .mockRejectedValueOnce(new Error("ETIMEDOUT"))
         .mockResolvedValueOnce({ id: 2 });
 
-      const [result1, result2] = await Promise.all([
-        errorHandler.executeWithRetry(operation1),
-        errorHandler.executeWithRetry(operation2),
-      ]);
+      const promise1 = errorHandler.executeWithRetry(operation1);
+      const promise2 = errorHandler.executeWithRetry(operation2);
+
+      // Advance timer for both retries
+      await jest.advanceTimersByTimeAsync(1000);
+
+      const [result1, result2] = await Promise.all([promise1, promise2]);
 
       expect(result1).toEqual({ id: 1 });
       expect(result2).toEqual({ id: 2 });
@@ -575,9 +594,16 @@ describe("BinanceApiErrorHandler", () => {
         .fn<() => Promise<never>>()
         .mockRejectedValue(new Error("ECONNREFUSED"));
 
-      await expect(
-        errorHandler.executeWithRetry(operation, { onFailure: cleanup }),
-      ).rejects.toThrow();
+      const promise = errorHandler.executeWithRetry(operation, {
+        onFailure: cleanup,
+      });
+
+      // Advance timers for all retries
+      await jest.advanceTimersByTimeAsync(1000);
+      await jest.advanceTimersByTimeAsync(2000);
+      await jest.advanceTimersByTimeAsync(4000);
+
+      await expect(promise).rejects.toThrow();
 
       expect(cleanup).toHaveBeenCalledTimes(1);
     });
@@ -590,7 +616,14 @@ describe("BinanceApiErrorHandler", () => {
         .mockRejectedValueOnce(new Error("ECONNREFUSED"))
         .mockResolvedValueOnce({ success: true });
 
-      await errorHandler.executeWithRetry(operation, { onFailure: cleanup });
+      const promise = errorHandler.executeWithRetry(operation, {
+        onFailure: cleanup,
+      });
+
+      // Advance timer for retry
+      await jest.advanceTimersByTimeAsync(1000);
+
+      await promise;
 
       expect(cleanup).not.toHaveBeenCalled();
     });
@@ -610,7 +643,12 @@ describe("BinanceApiErrorHandler", () => {
           data: { symbol: "BTCUSDT", price: "50000" },
         });
 
-      const result = await errorHandler.executeWithRetry(mockRequest);
+      const promise = errorHandler.executeWithRetry(mockRequest);
+
+      // Advance timer for retry
+      await jest.advanceTimersByTimeAsync(1000);
+
+      const result = await promise;
 
       expect(result.data.symbol).toBe("BTCUSDT");
       expect(mockRequest).toHaveBeenCalledTimes(2);
@@ -670,7 +708,16 @@ describe("BinanceApiErrorHandler", () => {
         .fn<() => Promise<never>>()
         .mockRejectedValue(new Error("ECONNREFUSED"));
 
-      await expect(customHandler.executeWithRetry(operation)).rejects.toThrow(
+      const promise = customHandler.executeWithRetry(operation);
+
+      // Advance timers for all 5 retries
+      await jest.advanceTimersByTimeAsync(1000);
+      await jest.advanceTimersByTimeAsync(2000);
+      await jest.advanceTimersByTimeAsync(4000);
+      await jest.advanceTimersByTimeAsync(8000);
+      await jest.advanceTimersByTimeAsync(16000);
+
+      await expect(promise).rejects.toThrow(
         "Maximum retry attempts (5) exceeded",
       );
 
