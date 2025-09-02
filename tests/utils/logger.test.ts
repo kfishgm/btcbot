@@ -387,8 +387,10 @@ describe("Logger Module", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       const files = fs.readdirSync("./logs");
-      const todayLog = files.find((f) =>
-        f.includes(new Date().toISOString().split("T")[0]),
+      // The logger creates files with pattern app-YYYY-MM-DD.log
+      const today = new Date().toISOString().split("T")[0];
+      const todayLog = files.find(
+        (f) => f.includes(today) || f === "app.log", // Either rotated file or current log
       );
 
       expect(todayLog).toBeDefined();

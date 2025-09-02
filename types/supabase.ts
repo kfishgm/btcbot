@@ -198,6 +198,42 @@ export type Database = {
           },
         ];
       };
+      pause_states: {
+        Row: {
+          id: number;
+          status: string;
+          pause_reason: string;
+          pause_metadata: Json;
+          paused_at: string;
+          resumed_at: string | null;
+          resume_metadata: Json | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: number;
+          status: string;
+          pause_reason: string;
+          pause_metadata?: Json;
+          paused_at?: string;
+          resumed_at?: string | null;
+          resume_metadata?: Json | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: number;
+          status?: string;
+          pause_reason?: string;
+          pause_metadata?: Json;
+          paused_at?: string;
+          resumed_at?: string | null;
+          resume_metadata?: Json | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
