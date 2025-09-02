@@ -112,11 +112,10 @@ export class EventLogger {
   private flushInterval: number;
   private testRunId?: string;
   private retryAttempts: number;
-  private retryDelayMs: number;
+  private readonly retryDelayMs: number;
 
   private eventQueue: QueuedEvent[] = [];
   private flushTimer?: NodeJS.Timeout;
-  private isShuttingDown = false;
   private offlineQueueEnabled = false;
   private offlineQueue: QueuedEvent[] = [];
   private deduplicationEnabled = false;
@@ -328,8 +327,6 @@ export class EventLogger {
   }
 
   async shutdown(): Promise<void> {
-    this.isShuttingDown = true;
-
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
       this.flushTimer = undefined;
@@ -463,7 +460,7 @@ export class EventLogger {
       event_type: "CYCLE_COMPLETE",
       severity: "INFO",
       message: `Cycle ${metrics.cycleId} completed with ${metrics.profitPercentage.toFixed(2)}% profit`,
-      metadata: metrics,
+      metadata: { ...metrics },
     });
   }
 
@@ -472,7 +469,7 @@ export class EventLogger {
       event_type: "PERFORMANCE_METRICS",
       severity: "INFO",
       message: "Performance metrics recorded",
-      metadata: metrics,
+      metadata: { ...metrics },
     });
   }
 
@@ -481,7 +478,7 @@ export class EventLogger {
       event_type: "STRATEGY_METRICS",
       severity: "INFO",
       message: `Strategy metrics for ${metrics.period}`,
-      metadata: metrics,
+      metadata: { ...metrics },
     });
   }
 
@@ -699,7 +696,7 @@ export class EventLogger {
     for (const event of queueToRetry) {
       try {
         await this.insertBatch([event]);
-      } catch (error) {
+      } catch {
         this.offlineQueue.push(event);
       }
     }
