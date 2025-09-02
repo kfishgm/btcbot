@@ -11,46 +11,77 @@ jest.mock("../../src/utils/logger");
 
 describe("StrategyPauseMechanism", () => {
   let pauseMechanism: StrategyPauseMechanism;
-  let mockSupabase: jest.Mocked<SupabaseClient<Database>>;
-  let mockDriftDetector: jest.Mocked<DriftDetector>;
-  let mockCycleStateManager: jest.Mocked<CycleStateManager>;
-  let mockDiscordNotifier: jest.Mocked<DiscordNotifier>;
+  let mockSupabase: SupabaseClient<Database>;
+  let mockDriftDetector: DriftDetector;
+  let mockCycleStateManager: CycleStateManager;
+  let mockDiscordNotifier: DiscordNotifier;
 
   beforeEach(() => {
     // Reset all mocks
     jest.clearAllMocks();
 
-    // Create mock Supabase client
-    mockSupabase = {
-      from: jest.fn().mockReturnThis(),
-      insert: jest.fn().mockReturnThis(),
-      update: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      single: jest.fn().mockResolvedValue({ data: null, error: null }),
-      eq: jest.fn().mockReturnThis(),
-      order: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockReturnThis(),
-    } as unknown as jest.Mocked<SupabaseClient<Database>>;
+    // Create a properly typed mock Supabase client
+    let pauseStateData: unknown = null;
+    const mockQueryBuilder = {
+      insert: jest.fn((data: unknown) => {
+        // Store the data being inserted for pause_states
+        if (data && typeof data === "object" && "pause_reason" in data) {
+          pauseStateData = {
+            id: 1,
+            status: "status" in data ? data.status : "paused",
+            pause_reason: data.pause_reason,
+            pause_metadata: "pause_metadata" in data ? data.pause_metadata : {},
+            paused_at: new Date().toISOString(),
+            resumed_at: null,
+            resume_metadata: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+        return mockQueryBuilder;
+      }),
+      update: jest.fn(() => mockQueryBuilder),
+      select: jest.fn(() => mockQueryBuilder),
+      single: jest.fn(() => {
+        // Return the stored pause data if available
+        if (pauseStateData) {
+          const result = { data: pauseStateData, error: null };
+          pauseStateData = null; // Reset after use
+          return Promise.resolve(result);
+        }
+        return Promise.resolve({ data: null, error: null });
+      }),
+      eq: jest.fn(() => mockQueryBuilder),
+      order: jest.fn(() => mockQueryBuilder),
+      limit: jest.fn(() => mockQueryBuilder),
+      delete: jest.fn(() => mockQueryBuilder),
+    };
 
-    // Create real instances with mocked methods
-    mockDriftDetector = new DriftDetector() as jest.Mocked<DriftDetector>;
+    mockSupabase = {
+      from: jest.fn(() => mockQueryBuilder),
+    } as unknown as SupabaseClient<Database>;
+
+    // Create mock instances
+    mockDriftDetector = new DriftDetector();
     mockCycleStateManager = new CycleStateManager(mockSupabase, {
       initialCapitalUSDT: 1000,
       maxPurchases: 10,
       minBuyUSDT: 10,
-    }) as jest.Mocked<CycleStateManager>;
+    });
 
     mockDiscordNotifier = new DiscordNotifier({
       webhookUrl: "https://discord.webhook.url",
-    }) as jest.Mocked<DiscordNotifier>;
+    });
 
-    // Mock specific methods
-    mockDiscordNotifier.sendPauseAlert = jest.fn().mockResolvedValue(undefined);
-    mockDiscordNotifier.sendResumeSuccessAlert = jest
-      .fn()
+    // Mock the methods we need
+    jest
+      .spyOn(mockDiscordNotifier, "sendPauseAlert")
       .mockResolvedValue(undefined);
-    mockDiscordNotifier.sendResumeFailedAlert = jest
-      .fn()
+    jest
+      .spyOn(mockDiscordNotifier, "sendResumeSuccessAlert")
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(mockDiscordNotifier, "sendResumeFailedAlert")
       .mockResolvedValue(undefined);
 
     // Initialize the pause mechanism
@@ -71,65 +102,78 @@ describe("StrategyPauseMechanism", () => {
 
     it("should restore paused state from database on initialization", async () => {
       // Mock database returns existing paused state
-      const mockSingle = jest.fn().mockResolvedValue({
-        data: {
-          id: 1,
-          status: "paused",
-          pause_reason: "Drift detected",
-          paused_at: new Date().toISOString(),
-          pause_metadata: {
-            usdtDrift: 0.01,
-            btcDrift: 0.008,
-          },
-        },
-        error: null,
-      });
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          eq: jest.fn().mockReturnValue({
-            order: jest.fn().mockReturnValue({
-              limit: jest.fn().mockReturnValue({
-                single: mockSingle,
-              }),
-            }),
+      const mockQueryBuilder = {
+        select: jest.fn(() => mockQueryBuilder),
+        eq: jest.fn(() => mockQueryBuilder),
+        order: jest.fn(() => mockQueryBuilder),
+        limit: jest.fn(() => mockQueryBuilder),
+        single: jest.fn(() =>
+          Promise.resolve({
+            data: {
+              id: 1,
+              status: "paused",
+              pause_reason: "Drift detected",
+              paused_at: new Date().toISOString(),
+              pause_metadata: {
+                usdtDrift: 0.01,
+                btcDrift: 0.008,
+              },
+            },
+            error: null,
           }),
-        }),
-      });
+        ),
+      };
 
-      await pauseMechanism.initialize();
+      const mockSupabaseWithData = {
+        from: jest.fn(() => mockQueryBuilder),
+      } as unknown as SupabaseClient<Database>;
 
-      expect(pauseMechanism.isPausedStatus()).toBe(true);
-      expect(pauseMechanism.getPauseReason()).toBe("Drift detected");
+      const pauseMechanismWithState = new StrategyPauseMechanism(
+        mockSupabaseWithData,
+        mockCycleStateManager,
+        mockDriftDetector,
+        mockDiscordNotifier,
+      );
+
+      await pauseMechanismWithState.initialize();
+
+      expect(pauseMechanismWithState.isPausedStatus()).toBe(true);
+      expect(pauseMechanismWithState.getPauseReason()).toBe("Drift detected");
     });
   });
 
   describe("Drift Detection Pausing", () => {
     it("should pause strategy when drift exceeds threshold", async () => {
       // Mock drift detection result
-      mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
+      jest.spyOn(mockDriftDetector, "checkDrift").mockReturnValue({
         usdt: {
           asset: "USDT",
           driftPercentage: 0.01, // 1% drift
-          status: "exceeded",
+          status: "exceeded" as const,
           threshold: 0.005,
         },
         btc: {
           asset: "BTC",
           driftPercentage: 0.001,
-          status: "ok",
+          status: "ok" as const,
           threshold: 0.005,
         },
-        overallStatus: "exceeded",
+        overallStatus: "exceeded" as const,
       });
 
       // Mock current state
-      mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
         id: "test-id",
         status: "READY",
         capital_available: 1000,
         btc_accumulated: 0.01,
         purchases_remaining: 5,
+        ath_price: null,
+        btc_accum_net: null,
+        buy_amount: null,
+        cost_accum_usdt: null,
+        reference_price: null,
+        updated_at: null,
       });
 
       const result = await pauseMechanism.checkDriftAndPause(
@@ -148,20 +192,20 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should not pause when drift is within acceptable threshold", async () => {
-      mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
+      jest.spyOn(mockDriftDetector, "checkDrift").mockReturnValue({
         usdt: {
           asset: "USDT",
           driftPercentage: 0.001,
-          status: "ok",
+          status: "ok" as const,
           threshold: 0.005,
         },
         btc: {
           asset: "BTC",
           driftPercentage: 0.002,
-          status: "ok",
+          status: "ok" as const,
           threshold: 0.005,
         },
-        overallStatus: "ok",
+        overallStatus: "ok" as const,
       });
 
       const result = await pauseMechanism.checkDriftAndPause(
@@ -186,11 +230,18 @@ describe("StrategyPauseMechanism", () => {
         availableBalance: 50,
       };
 
-      mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
         id: "test-id",
         status: "READY",
         capital_available: 1000,
         btc_accumulated: 0.01,
+        purchases_remaining: 5,
+        ath_price: null,
+        btc_accum_net: null,
+        buy_amount: null,
+        cost_accum_usdt: null,
+        reference_price: null,
+        updated_at: null,
       });
 
       await pauseMechanism.pauseOnError(error, context);
@@ -201,9 +252,18 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should not double-pause on multiple errors", async () => {
-      mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
         id: "test-id",
         status: "READY",
+        capital_available: 1000,
+        btc_accumulated: 0.01,
+        purchases_remaining: 5,
+        ath_price: null,
+        btc_accum_net: null,
+        buy_amount: null,
+        cost_accum_usdt: null,
+        reference_price: null,
+        updated_at: null,
       });
 
       // First error
@@ -222,26 +282,40 @@ describe("StrategyPauseMechanism", () => {
 
   describe("Resume", () => {
     beforeEach(async () => {
-      // Pause the strategy first using the public API
-      mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
+      // Pause the strategy first
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
         id: "test-id",
         status: "READY",
         capital_available: 1000,
         btc_accumulated: 0.01,
+        purchases_remaining: 5,
+        ath_price: null,
+        btc_accum_net: null,
+        buy_amount: null,
+        cost_accum_usdt: null,
+        reference_price: null,
+        updated_at: null,
       });
 
       await pauseMechanism.pauseOnError(new Error("Test pause"), {});
     });
 
     it("should successfully resume when validation passes", async () => {
-      mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
         id: "test-id",
         status: "PAUSED",
         capital_available: 1000,
         btc_accumulated: 0.01,
+        purchases_remaining: 5,
+        ath_price: null,
+        btc_accum_net: null,
+        buy_amount: null,
+        cost_accum_usdt: null,
+        reference_price: null,
+        updated_at: null,
       });
 
-      mockCycleStateManager.validateState = jest.fn().mockReturnValue(true);
+      jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(true);
 
       const result = await pauseMechanism.resumeStrategy(false);
 
@@ -251,14 +325,21 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should fail to resume when state validation fails", async () => {
-      mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
         id: "test-id",
         status: "PAUSED",
         capital_available: -100, // Invalid negative value
         btc_accumulated: 0.01,
+        purchases_remaining: 5,
+        ath_price: null,
+        btc_accum_net: null,
+        buy_amount: null,
+        cost_accum_usdt: null,
+        reference_price: null,
+        updated_at: null,
       });
 
-      mockCycleStateManager.validateState = jest.fn().mockReturnValue(false);
+      jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(false);
 
       const result = await pauseMechanism.resumeStrategy(false);
 
@@ -268,14 +349,21 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should allow force resume bypassing validation", async () => {
-      mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
         id: "test-id",
         status: "PAUSED",
         capital_available: 1000,
         btc_accumulated: 0.01,
+        purchases_remaining: 5,
+        ath_price: null,
+        btc_accum_net: null,
+        buy_amount: null,
+        cost_accum_usdt: null,
+        reference_price: null,
+        updated_at: null,
       });
 
-      mockCycleStateManager.validateState = jest.fn().mockReturnValue(false);
+      jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(false);
 
       const result = await pauseMechanism.resumeStrategy(true); // Force resume
 
@@ -290,27 +378,34 @@ describe("StrategyPauseMechanism", () => {
   describe("State Management", () => {
     it("should track pause metadata", async () => {
       // Mock drift detection to trigger pause with metadata
-      mockDriftDetector.checkDrift = jest.fn().mockReturnValue({
+      jest.spyOn(mockDriftDetector, "checkDrift").mockReturnValue({
         usdt: {
           asset: "USDT",
           driftPercentage: 0.015,
-          status: "exceeded",
+          status: "exceeded" as const,
           threshold: 0.005,
         },
         btc: {
           asset: "BTC",
           driftPercentage: 0.003,
-          status: "ok",
+          status: "ok" as const,
           threshold: 0.005,
         },
-        overallStatus: "exceeded",
+        overallStatus: "exceeded" as const,
       });
 
-      mockCycleStateManager.getCurrentState = jest.fn().mockReturnValue({
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
         id: "test-id",
         status: "READY",
         capital_available: 1000,
         btc_accumulated: 0.01,
+        purchases_remaining: 5,
+        ath_price: null,
+        btc_accum_net: null,
+        buy_amount: null,
+        cost_accum_usdt: null,
+        reference_price: null,
+        updated_at: null,
       });
 
       await pauseMechanism.checkDriftAndPause(1015, 1000, 0.01003, 0.01);
