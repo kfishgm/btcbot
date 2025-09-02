@@ -8,7 +8,6 @@ export interface EventLoggerConfig {
   flushInterval?: number;
   testRunId?: string;
   retryAttempts?: number;
-  retryDelayMs?: number;
 }
 
 export interface BaseEvent {
@@ -112,7 +111,6 @@ export class EventLogger {
   private flushInterval: number;
   private testRunId?: string;
   private retryAttempts: number;
-  private readonly retryDelayMs: number;
 
   private eventQueue: QueuedEvent[] = [];
   private flushTimer?: NodeJS.Timeout;
@@ -131,7 +129,6 @@ export class EventLogger {
     this.flushInterval = config.flushInterval ?? 5000;
     this.testRunId = config.testRunId;
     this.retryAttempts = config.retryAttempts ?? 3;
-    this.retryDelayMs = config.retryDelayMs ?? 1000;
 
     this.initializeDefaultEventTypes();
     this.startFlushTimer();
