@@ -8,6 +8,11 @@ export interface DiscordNotifierConfig {
   rateLimitCount?: number;
   silentMode?: boolean;
   environment?: string;
+  enableRetry?: boolean;
+  maxRetries?: number;
+  retryDelay?: number; // milliseconds
+  maxQueueSize?: number;
+  queueTTL?: number; // milliseconds
 }
 
 export interface DiscordMessage {
@@ -41,10 +46,29 @@ interface RateLimitInfo {
   windowStart: number;
 }
 
+interface QueuedMessage {
+  id: string;
+  type: "alert" | "trade" | "cycle" | "pause" | "resume" | "error";
+  message: DiscordMessage;
+  timestamp: number;
+  retryCount: number;
+}
+
+export interface CycleCompleteData {
+  profit: number;
+  profitPercentage: number;
+  cycleNumber: number;
+  totalTrades: number;
+  duration: number; // milliseconds
+  finalCapital: number;
+}
+
 export class DiscordNotifier {
   private config: Required<DiscordNotifierConfig>;
   private rateLimitInfo: RateLimitInfo;
   private isHealthy: boolean = true;
+  private messageQueue: QueuedMessage[] = [];
+  private queueProcessing: boolean = false;
 
   constructor(config: DiscordNotifierConfig) {
     if (!config.webhookUrl) {
@@ -58,6 +82,11 @@ export class DiscordNotifier {
       rateLimitCount: config.rateLimitCount ?? 5,
       silentMode: config.silentMode ?? false,
       environment: config.environment ?? "development",
+      enableRetry: config.enableRetry ?? false,
+      maxRetries: config.maxRetries ?? 3,
+      retryDelay: config.retryDelay ?? 1000,
+      maxQueueSize: config.maxQueueSize ?? 100,
+      queueTTL: config.queueTTL ?? 24 * 60 * 60 * 1000, // 24 hours
     };
 
     this.rateLimitInfo = {
@@ -117,7 +146,12 @@ export class DiscordNotifier {
       username: "BTC Trading Bot",
     };
 
-    await this.sendToWebhook(discordMessage);
+    try {
+      await this.sendToWebhook(discordMessage);
+    } catch (error) {
+      await this.queueMessage("alert", discordMessage);
+      throw error;
+    }
   }
 
   async sendPauseAlert(reason: PauseReason): Promise<void> {
@@ -251,7 +285,70 @@ export class DiscordNotifier {
       username: "BTC Trading Bot",
     };
 
-    await this.sendToWebhook(message);
+    try {
+      await this.sendToWebhook(message);
+    } catch (error) {
+      await this.queueMessage("trade", message);
+      throw error;
+    }
+  }
+
+  async sendCycleCompleteAlert(data: CycleCompleteData): Promise<void> {
+    const emoji = data.profit > 0 ? "💰" : "📊";
+    const color = data.profit > 0 ? 0x00ff00 : 0xffa500;
+
+    const fields: DiscordField[] = [
+      {
+        name: "Profit",
+        value: `$${data.profit.toFixed(2)}`,
+        inline: true,
+      },
+      {
+        name: "Profit %",
+        value: `${data.profitPercentage.toFixed(2)}%`,
+        inline: true,
+      },
+      {
+        name: "Total Trades",
+        value: data.totalTrades.toString(),
+        inline: true,
+      },
+      {
+        name: "Duration",
+        value: this.formatDuration(data.duration),
+        inline: true,
+      },
+      {
+        name: "Final Capital",
+        value: `$${data.finalCapital.toFixed(2)}`,
+        inline: true,
+      },
+    ];
+
+    const embed: DiscordEmbed = {
+      title: `${emoji} Cycle #${data.cycleNumber} Complete`,
+      description: `Trading cycle completed successfully${
+        data.profit > 0 ? " with profit!" : "."
+      }`,
+      color,
+      fields,
+      timestamp: new Date().toISOString(),
+      footer: {
+        text: "BTC Trading Bot",
+      },
+    };
+
+    const message: DiscordMessage = {
+      embeds: [embed],
+      username: "BTC Trading Bot",
+    };
+
+    try {
+      await this.sendToWebhook(message);
+    } catch (error) {
+      await this.queueMessage("cycle", message);
+      throw error;
+    }
   }
 
   async sendBatchAlerts(messages: string[]): Promise<void> {
@@ -343,7 +440,10 @@ export class DiscordNotifier {
     return { ...this.config };
   }
 
-  private async sendToWebhook(message: DiscordMessage): Promise<void> {
+  private async sendToWebhook(
+    message: DiscordMessage,
+    retryCount: number = 0,
+  ): Promise<void> {
     try {
       const response = await fetch(this.config.webhookUrl, {
         method: "POST",
@@ -367,6 +467,17 @@ export class DiscordNotifier {
     } catch (error) {
       this.isHealthy = false;
       logger.error("Failed to send Discord notification", { error });
+
+      // Retry logic
+      if (this.config.enableRetry && retryCount < this.config.maxRetries) {
+        const delay = this.config.retryDelay * Math.pow(2, retryCount); // Exponential backoff
+        logger.info(
+          `Retrying Discord webhook in ${delay}ms (attempt ${retryCount + 1}/${this.config.maxRetries})`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this.sendToWebhook(message, retryCount + 1);
+      }
+
       throw error;
     }
   }
@@ -444,5 +555,119 @@ export class DiscordNotifier {
 
   formatPercentage(value: number): string {
     return `${(value * 100).toFixed(2)}%`;
+  }
+
+  formatDuration(milliseconds: number): string {
+    const hours = Math.floor(milliseconds / (1000 * 60 * 60));
+    const minutes = Math.floor((milliseconds % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  }
+
+  // Queue management methods
+  private async queueMessage(
+    type: QueuedMessage["type"],
+    message: DiscordMessage,
+  ): Promise<void> {
+    // Enforce max queue size
+    if (this.messageQueue.length >= this.config.maxQueueSize) {
+      // Remove oldest message
+      this.messageQueue.shift();
+      logger.warn("Discord message queue full, removing oldest message");
+    }
+
+    const queuedMessage: QueuedMessage = {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type,
+      message,
+      timestamp: Date.now(),
+      retryCount: 0,
+    };
+
+    this.messageQueue.push(queuedMessage);
+    logger.info(
+      `Queued Discord message (type: ${type}, queue size: ${this.messageQueue.length})`,
+    );
+  }
+
+  getQueuedMessages(): Array<{
+    id: string;
+    type: string;
+    timestamp: number;
+    retryCount: number;
+  }> {
+    return this.messageQueue.map(({ message: _, ...rest }) => rest);
+  }
+
+  async retryQueuedMessages(): Promise<{ successful: number; failed: number }> {
+    if (this.queueProcessing) {
+      logger.warn("Queue processing already in progress");
+      return { successful: 0, failed: 0 };
+    }
+
+    this.queueProcessing = true;
+    let successful = 0;
+    let failed = 0;
+
+    const messagesToRetry = [...this.messageQueue];
+    this.messageQueue = [];
+
+    for (const queuedMessage of messagesToRetry) {
+      try {
+        await this.sendToWebhook(queuedMessage.message);
+        successful++;
+        logger.info(
+          `Successfully sent queued message (id: ${queuedMessage.id})`,
+        );
+      } catch (error) {
+        failed++;
+        queuedMessage.retryCount++;
+
+        // Re-queue if not exceeded max retries
+        if (queuedMessage.retryCount < this.config.maxRetries) {
+          this.messageQueue.push(queuedMessage);
+        } else {
+          logger.error(
+            `Dropping queued message after max retries (id: ${queuedMessage.id})`,
+            {
+              error,
+            },
+          );
+        }
+      }
+    }
+
+    this.queueProcessing = false;
+    logger.info(
+      `Queue retry complete (successful: ${successful}, failed: ${failed})`,
+    );
+    return { successful, failed };
+  }
+
+  clearOldQueuedMessages(maxAge: number = this.config.queueTTL): void {
+    const now = Date.now();
+    const before = this.messageQueue.length;
+
+    this.messageQueue = this.messageQueue.filter(
+      (msg) => now - msg.timestamp < maxAge,
+    );
+
+    const removed = before - this.messageQueue.length;
+    if (removed > 0) {
+      logger.info(`Cleared ${removed} old messages from queue`);
+    }
+  }
+
+  clearQueue(): void {
+    const count = this.messageQueue.length;
+    this.messageQueue = [];
+    logger.info(`Cleared ${count} messages from queue`);
+  }
+
+  getQueueSize(): number {
+    return this.messageQueue.length;
   }
 }
