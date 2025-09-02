@@ -116,3 +116,4 @@ e2e-results/
 playwright/screenshots/
 playwright/videos/
 playwright/traces/
+test-logs/
