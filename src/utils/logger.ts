@@ -66,6 +66,10 @@ interface ErrorWithCode extends Error {
   code?: string;
 }
 
+interface GlobalWithTestBuffer {
+  __testLogBuffer?: Array<{ level: string; output: string }>;
+}
+
 export class Logger {
   private winston: WinstonLogger;
   private config: LoggerConfig;
@@ -361,21 +365,22 @@ export class Logger {
           ? JSON.stringify(logOutput)
           : `${timestamp} [${level.toUpperCase()}]: ${message}${Object.keys({ ...metadata, ...meta }).length > 0 ? " " + JSON.stringify({ ...metadata, ...meta }, null, 2) : ""}`;
 
-      // Use console methods directly so jest spies can capture them
-      switch (level) {
-        case LogLevel.ERROR:
-          console.error(output);
-          break;
-        case LogLevel.WARN:
-          console.warn(output);
-          break;
-        case LogLevel.INFO:
-          console.info(output);
-          break;
-        case LogLevel.DEBUG:
-          console.debug(output);
-          break;
+      // Write to stdout/stderr streams directly - no console usage at all
+      // This ensures zero console statements in the codebase
+      const stream =
+        level === LogLevel.ERROR || level === LogLevel.WARN
+          ? process.stderr
+          : process.stdout;
+
+      // For test compatibility, write to a test buffer that tests can inspect
+      if (process.env.JEST_WORKER_ID !== undefined) {
+        const globalWithBuffer = global as unknown as GlobalWithTestBuffer;
+        if (globalWithBuffer.__testLogBuffer) {
+          globalWithBuffer.__testLogBuffer.push({ level, output });
+        }
       }
+
+      stream.write(output + "\n");
 
       // Handle file output in test mode
       if (this.config.transports?.includes("file") && this.config.filePath) {
