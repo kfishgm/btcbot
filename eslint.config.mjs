@@ -21,6 +21,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.js', '*.mjs', '.claude/**'],
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.js', '*.mjs', '.claude/**', 'e2e/**'],
   }
 );
