@@ -1,4 +1,5 @@
 import { createHmac } from "crypto";
+import { BinanceApiErrorHandler } from "./api-error-handler";
 import type {
   BinanceConfig,
   BinanceOrder,
@@ -27,6 +28,7 @@ export class BinanceClient {
   private orderTimestamps: number[] = [];
   private isAuthenticated: boolean = false;
   private warnings: string[] = [];
+  private errorHandler: BinanceApiErrorHandler;
 
   constructor(config: BinanceConfig) {
     // Validate API credentials
@@ -53,6 +55,13 @@ export class BinanceClient {
       this.baseUrl = "https://api.binance.com";
       this.wsUrl = "wss://stream.binance.com:9443";
     }
+
+    // Initialize error handler
+    this.errorHandler = new BinanceApiErrorHandler({
+      maxRetries: 3,
+      baseDelay: 1000,
+      backoffMultiplier: 2,
+    });
   }
 
   private validateCredentials(config: BinanceConfig): void {
@@ -168,11 +177,16 @@ export class BinanceClient {
 
   getRateLimitInfo(): RateLimitInfo {
     this.cleanupOldOrderTimestamps();
+    // Merge rate limit info from error handler
+    const errorHandlerInfo = this.errorHandler.getRateLimitInfo();
     return {
-      weightUsed: this.weightUsed,
+      weightUsed: Math.max(this.weightUsed, errorHandlerInfo.weightUsed),
       weightLimit: this.weightLimit,
       ordersPerSecond: this.orderTimestamps.length,
-      lastResetTime: this.lastResetTime,
+      lastResetTime: Math.max(
+        this.lastResetTime,
+        errorHandlerInfo.lastResetTime,
+      ),
     };
   }
 
@@ -236,125 +250,113 @@ export class BinanceClient {
     method: string = "GET",
     params: Record<string, unknown> = {},
     signed: boolean = false,
-    retries: number = 3,
   ): Promise<T> {
-    let lastError: Error | null = null;
+    const operation = async (): Promise<T> => {
+      let url = `${this.baseUrl}${endpoint}`;
+      let body: string | undefined;
+      const headers = new Headers({
+        "X-MBX-APIKEY": this.config.apiKey,
+      });
 
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        let url = `${this.baseUrl}${endpoint}`;
-        let body: string | undefined;
-        const headers = new Headers({
-          "X-MBX-APIKEY": this.config.apiKey,
-        });
+      if (signed) {
+        params.timestamp = this.getTimestamp();
+        params.recvWindow = this.config.recvWindow;
+      }
 
-        if (signed) {
-          params.timestamp = this.getTimestamp();
-          params.recvWindow = this.config.recvWindow;
-        }
+      const queryString = this.buildQueryString(params);
 
-        const queryString = this.buildQueryString(params);
-
-        if (signed) {
-          const signature = this.generateSignature(queryString);
-          const signedQuery = `${queryString}&signature=${signature}`;
-          if (method === "GET" || method === "DELETE") {
-            url += `?${signedQuery}`;
-          } else {
-            headers.set("Content-Type", "application/x-www-form-urlencoded");
-            body = signedQuery;
-          }
-        } else if (queryString && method === "GET") {
-          url += `?${queryString}`;
-        }
-
-        // Only use AbortController if available (for Node 16+)
-        let response: Response | undefined;
-        if (typeof AbortController !== "undefined") {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(
-            () => controller.abort(),
-            this.config.timeout || 30000,
-          );
-
-          try {
-            response = await fetch(url, {
-              method,
-              headers,
-              body,
-              signal: controller.signal,
-            });
-          } catch (fetchError) {
-            clearTimeout(timeoutId);
-            throw fetchError;
-          }
-          clearTimeout(timeoutId);
+      if (signed) {
+        const signature = this.generateSignature(queryString);
+        const signedQuery = `${queryString}&signature=${signature}`;
+        if (method === "GET" || method === "DELETE") {
+          url += `?${signedQuery}`;
         } else {
-          // Fallback for older environments
+          headers.set("Content-Type", "application/x-www-form-urlencoded");
+          body = signedQuery;
+        }
+      } else if (queryString && method === "GET") {
+        url += `?${queryString}`;
+      }
+
+      // Only use AbortController if available (for Node 16+)
+      let response: Response | undefined;
+      if (typeof AbortController !== "undefined") {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(
+          () => controller.abort(),
+          this.config.timeout || 30000,
+        );
+
+        try {
           response = await fetch(url, {
             method,
             headers,
             body,
+            signal: controller.signal,
           });
+        } catch (fetchError) {
+          clearTimeout(timeoutId);
+          throw fetchError;
         }
-
-        // Only update rate limits if we got a response
-        if (response && response.headers) {
-          this.updateRateLimits(response.headers);
-        }
-
-        if (!response) {
-          throw new Error("No response received from server");
-        }
-
-        if (!response.ok) {
-          const error = (await response.json()) as BinanceError;
-
-          // Handle rate limiting
-          if (response.status === 429) {
-            const retryAfter = response.headers.get("retry-after");
-            const waitTime = retryAfter
-              ? parseInt(retryAfter, 10) * 1000
-              : 2000;
-            await new Promise((resolve) => setTimeout(resolve, waitTime));
-            continue;
-          }
-
-          // Handle timestamp errors with automatic resync
-          if (error.code === -1021 && attempt === 0) {
-            await this.syncTime();
-            continue;
-          }
-
-          // Create detailed error with Binance error code
-          const errorMessage = `Binance API Error [${error.code}]: ${error.msg || "Request failed"}`;
-          const apiError = new Error(errorMessage) as Error & { code?: number };
-          apiError.code = error.code;
-
-          // Don't retry on client errors (4xx) except rate limiting
-          if (
-            response.status >= 400 &&
-            response.status < 500 &&
-            response.status !== 429
-          ) {
-            throw apiError;
-          }
-
-          throw apiError;
-        }
-
-        return (await response.json()) as T;
-      } catch (error) {
-        lastError = error as Error;
-        if (attempt < retries - 1) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.pow(2, attempt) * 1000),
-          );
-        }
+        clearTimeout(timeoutId);
+      } else {
+        // Fallback for older environments
+        response = await fetch(url, {
+          method,
+          headers,
+          body,
+        });
       }
-    }
 
-    throw lastError || new Error("Request failed after retries");
+      // Only update rate limits if we got a response
+      if (response && response.headers) {
+        this.updateRateLimits(response.headers);
+        // Also update the error handler's rate limit info
+        const headersObj: Record<string, string> = {};
+        response.headers.forEach((value, key) => {
+          headersObj[key] = value;
+        });
+        this.errorHandler.updateRateLimitInfo({ headers: headersObj });
+      }
+
+      if (!response) {
+        throw new Error("No response received from server");
+      }
+
+      if (!response.ok) {
+        const error = (await response.json()) as BinanceError;
+
+        // Create structured error for the error handler
+        const apiError = {
+          response: {
+            status: response.status,
+            data: error,
+            headers: {} as Record<string, string>,
+          },
+          message: `Binance API Error [${error.code}]: ${error.msg || "Request failed"}`,
+        };
+
+        // Convert headers to plain object
+        response.headers.forEach((value, key) => {
+          apiError.response.headers[key] = value;
+        });
+
+        // Handle timestamp errors with automatic resync
+        // This will be retried automatically by the error handler
+        if (error.code === -1021) {
+          await this.syncTime();
+          // Mark as retryable by making it look like a network error
+          apiError.message = "ETIMEDOUT: " + apiError.message;
+        }
+
+        throw apiError;
+      }
+
+      return (await response.json()) as T;
+    };
+
+    // Use the error handler to execute with retries
+    return this.errorHandler.executeWithRetry(operation);
   }
 
   async getExchangeInfo(symbol?: string): Promise<BinanceExchangeInfo> {
