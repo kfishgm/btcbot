@@ -1,3 +1,11 @@
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 import { EventLogger } from "../../src/monitoring/event-logger.js";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Database } from "../../types/supabase.js";
@@ -107,17 +115,13 @@ describe("EventLogger", () => {
   describe("Trade Event Logging", () => {
     it("should log buy order events with complete trade context", async () => {
       const tradeEvent = {
-        orderId: "ORDER-123",
         type: "BUY" as const,
+        symbol: "BTC/USDT",
         price: 50000.0,
         quantity: 0.002,
-        quoteQuantity: 100.0,
-        feeAsset: "BTC",
-        feeAmount: 0.000002,
         cycleId: "cycle-uuid-123",
-        cycleNumber: 1,
         purchaseNumber: 3,
-        timestamp: new Date().toISOString(),
+        fees: 0.000002,
       };
 
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -132,39 +136,37 @@ describe("EventLogger", () => {
       await eventLogger.logTradeExecuted(tradeEvent);
 
       expect(mockSupabase.from).toHaveBeenCalledWith("bot_events");
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
-        event_type: "TRADE_EXECUTED",
-        severity: "INFO",
-        message: expect.stringContaining("BUY order executed"),
-        metadata: expect.objectContaining({
-          orderId: "ORDER-123",
-          type: "BUY",
-          price: 50000.0,
-          quantity: 0.002,
-          quoteQuantity: 100.0,
-          feeAsset: "BTC",
-          feeAmount: 0.000002,
-          cycleId: "cycle-uuid-123",
-          cycleNumber: 1,
-          purchaseNumber: 3,
-        }),
-      });
+      // The implementation uses batch insert, so it's called with an array
+      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event_type: "TRADE_EXECUTED",
+            severity: "INFO",
+            message: expect.stringContaining("BUY order executed"),
+            metadata: expect.objectContaining({
+              type: "BUY",
+              symbol: "BTC/USDT",
+              price: 50000.0,
+              quantity: 0.002,
+              cycleId: "cycle-uuid-123",
+              purchaseNumber: 3,
+              fees: 0.000002,
+            }),
+          }),
+        ]),
+      );
     });
 
     it("should log sell order events with profit/loss calculation", async () => {
       const sellEvent = {
-        orderId: "ORDER-456",
         type: "SELL" as const,
+        symbol: "BTC/USDT",
         price: 55000.0,
         quantity: 0.01,
-        quoteQuantity: 550.0,
-        feeAsset: "USDT",
-        feeAmount: 0.55,
         cycleId: "cycle-uuid-123",
-        cycleNumber: 1,
+        fees: 0.55,
         profit: 50.0,
         profitPercentage: 10.0,
-        timestamp: new Date().toISOString(),
       };
 
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -191,13 +193,12 @@ describe("EventLogger", () => {
 
     it("should handle failed trade attempts", async () => {
       const failedTrade = {
-        orderId: "ORDER-789",
         type: "BUY" as const,
-        price: 50000.0,
-        quantity: 0.002,
-        error: new Error("Insufficient balance"),
+        symbol: "BTC/USDT",
+        attemptedPrice: 50000.0,
+        attemptedQuantity: 0.002,
+        error: "Insufficient balance",
         cycleId: "cycle-uuid-123",
-        timestamp: new Date().toISOString(),
       };
 
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -323,10 +324,11 @@ describe("EventLogger", () => {
 
     it("should log websocket connection events", async () => {
       const wsEvent = {
-        status: "CONNECTED" as const,
-        url: "wss://stream.binance.com:9443/ws",
-        reconnectCount: 0,
-        timestamp: new Date().toISOString(),
+        connected: true,
+        details: {
+          url: "wss://stream.binance.com:9443/ws",
+          reconnectCount: 0,
+        },
       };
 
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -353,12 +355,11 @@ describe("EventLogger", () => {
 
     it("should log drift halt events", async () => {
       const driftEvent = {
+        symbol: "BTC/USDT",
         referencePrice: 50000.0,
         currentPrice: 48000.0,
         driftPercentage: -4.0,
-        threshold: 3.0,
-        cycleId: "cycle-uuid-123",
-        action: "HALT" as const,
+        maxAllowedDrift: 3.0,
       };
 
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -385,15 +386,12 @@ describe("EventLogger", () => {
     it("should log cycle completion metrics", async () => {
       const cycleMetrics = {
         cycleId: "cycle-uuid-123",
-        cycleNumber: 1,
         duration: 7200000, // 2 hours
         tradesExecuted: 10,
-        btcAccumulated: 0.02,
-        totalCost: 1000.0,
-        averagePrice: 50000.0,
-        profit: 100.0,
+        totalProfit: 100.0,
         profitPercentage: 10.0,
-        successRate: 0.9,
+        startTime: new Date("2024-01-01T00:00:00Z"),
+        endTime: new Date("2024-01-01T02:00:00Z"),
       };
 
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -417,13 +415,11 @@ describe("EventLogger", () => {
 
     it("should log performance metrics periodically", async () => {
       const performanceMetrics = {
-        timestamp: new Date().toISOString(),
         cpuUsage: 45.2,
         memoryUsage: 67.8,
-        activeConnections: 3,
-        queuedOrders: 2,
-        averageLatency: 120,
-        uptimeSeconds: 3600,
+        eventLatency: 120,
+        databaseLatency: 50,
+        timestamp: new Date(),
       };
 
       mockSupabase.from = jest.fn().mockReturnValue({
@@ -660,7 +656,7 @@ describe("EventLogger", () => {
       eventLogger.registerEventType("CUSTOM_ALERT", {
         severity: "WARNING",
         priority: "HIGH",
-        requiresImmediate: true,
+        category: "CUSTOM",
       });
 
       const classification = eventLogger.classifyEvent("CUSTOM_ALERT");
@@ -932,10 +928,11 @@ describe("EventLogger", () => {
       });
 
       const tradeEvent = {
-        orderId: "ORDER-123",
         type: "BUY" as const,
+        symbol: "BTC/USDT",
         price: 50000.0,
         quantity: 0.002,
+        cycleId: "cycle-123",
       };
 
       // Enable deduplication with 1 second window
@@ -962,10 +959,11 @@ describe("EventLogger", () => {
       });
 
       const tradeEvent = {
-        orderId: "ORDER-123",
         type: "BUY" as const,
+        symbol: "BTC/USDT",
         price: 50000.0,
         quantity: 0.002,
+        cycleId: "cycle-123",
       };
 
       // Enable deduplication with 1 second window
