@@ -232,6 +232,20 @@ export class BinanceClient {
     return queryParts.filter((part) => part !== "").join("&");
   }
 
+  /**
+   * Test connectivity to the API
+   */
+  async ping(): Promise<boolean> {
+    try {
+      await this.makeRequest("/api/v3/ping", "GET", {}, false);
+      return true;
+    } catch (error) {
+      // Re-throw the error with formatted message
+      const message = this.errorHandler.formatErrorMessage(error);
+      throw new Error(message);
+    }
+  }
+
   async syncTime(): Promise<void> {
     try {
       const response = await fetch(`${this.baseUrl}/api/v3/time`);
