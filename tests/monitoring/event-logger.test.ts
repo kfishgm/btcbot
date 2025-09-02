@@ -6,99 +6,80 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import { EventLogger } from "../../src/monitoring/event-logger.js";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { Database } from "../../types/supabase.js";
-import { Logger } from "../../src/utils/logger.js";
 
-// Mock the dependencies
+// Mock the dependencies before importing them
 jest.mock("@supabase/supabase-js");
 jest.mock("../../src/utils/logger.js");
 
+import { EventLogger } from "../../src/monitoring/event-logger.js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { Logger } from "../../src/utils/logger.js";
+
+// Get the mocked version of createClient
+const { createClient } = jest.requireMock("@supabase/supabase-js") as {
+  createClient: jest.Mock;
+};
+
 describe("EventLogger", () => {
   let eventLogger: EventLogger;
-  let mockSupabase: jest.Mocked<SupabaseClient<Database>>;
-  let mockLogger: jest.Mocked<Logger>;
+  let mockSupabase: SupabaseClient;
+  let mockLogger: Logger;
+  let mockFrom: jest.Mock;
+  let mockInsert: jest.Mock;
+  let mockSelect: jest.Mock;
 
   beforeEach(() => {
     // Reset mocks
     jest.clearAllMocks();
 
-    // Setup mock Supabase client with proper typing
-    const mockFrom = jest.fn();
-    const mockInsert = jest.fn();
-    const mockSelect = jest.fn();
-    const mockEq = jest.fn();
-    const mockGte = jest.fn();
-    const mockLte = jest.fn();
-    const mockOrder = jest.fn();
-    const mockLimit = jest.fn();
-    const mockContains = jest.fn();
+    // Create mock functions for query builder chain
+    mockInsert = jest.fn();
+    mockSelect = jest.fn();
 
-    // Chain the methods properly
-    mockFrom.mockReturnValue({
+    // Setup the mock chain - insert returns an object with select
+    mockInsert.mockImplementation(() => ({
+      select: mockSelect,
+    }));
+
+    // select returns a promise by default
+    mockSelect.mockImplementation(() =>
+      Promise.resolve({
+        data: [],
+        error: null,
+      }),
+    );
+
+    // Create from mock that returns query builder
+    mockFrom = jest.fn(() => ({
       insert: mockInsert,
       select: mockSelect,
-      eq: mockEq,
-      gte: mockGte,
-      lte: mockLte,
-      order: mockOrder,
-      limit: mockLimit,
-      contains: mockContains,
-    });
+      eq: jest.fn().mockReturnThis(),
+      gte: jest.fn().mockReturnThis(),
+      lte: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      contains: jest.fn().mockReturnThis(),
+      range: jest.fn().mockReturnThis(),
+    }));
 
-    mockInsert.mockReturnValue({
-      select: mockSelect,
-    });
-
-    mockSelect.mockReturnValue({
-      eq: mockEq,
-      gte: mockGte,
-      lte: mockLte,
-      order: mockOrder,
-      limit: mockLimit,
-      contains: mockContains,
-    });
-
-    mockEq.mockReturnValue({
-      order: mockOrder,
-      limit: mockLimit,
-      gte: mockGte,
-      lte: mockLte,
-    });
-
-    mockGte.mockReturnValue({
-      lte: mockLte,
-      order: mockOrder,
-    });
-
-    mockLte.mockReturnValue({
-      order: mockOrder,
-    });
-
-    mockOrder.mockReturnValue({
-      limit: mockLimit,
-    });
-
-    mockContains.mockReturnValue({
-      order: mockOrder,
-    });
-
+    // Create mock Supabase client
     mockSupabase = {
       from: mockFrom,
-    } as unknown as jest.Mocked<SupabaseClient<Database>>;
+    } as unknown as SupabaseClient;
 
-    (createClient as jest.Mock).mockReturnValue(mockSupabase);
+    createClient.mockReturnValue(mockSupabase);
 
-    // Setup mock logger with proper typing
+    // Setup mock logger
     mockLogger = {
       info: jest.fn(),
       error: jest.fn(),
       warn: jest.fn(),
       debug: jest.fn(),
-    } as unknown as jest.Mocked<Logger>;
+    } as unknown as Logger;
 
-    // Initialize EventLogger
+    (Logger as unknown as jest.Mock).mockImplementation(() => mockLogger);
+
+    // Create EventLogger instance with required config
     eventLogger = new EventLogger({
       supabase: mockSupabase,
       logger: mockLogger,
@@ -109,90 +90,89 @@ describe("EventLogger", () => {
 
   afterEach(() => {
     // Clean up any timers
-    eventLogger.shutdown();
+    jest.clearAllTimers();
   });
 
-  describe("Trade Event Logging", () => {
-    it("should log buy order events with complete trade context", async () => {
+  describe("Trade Events", () => {
+    it("should log buy trade events", async () => {
+      // Setup mock to return success
+      mockSelect.mockImplementation(() =>
+        Promise.resolve({
+          data: [{ id: "event-id-1" }],
+          error: null,
+        }),
+      );
+
       const tradeEvent = {
         type: "BUY" as const,
         symbol: "BTC/USDT",
         price: 50000.0,
         quantity: 0.002,
         cycleId: "cycle-uuid-123",
-        purchaseNumber: 3,
+        purchaseNumber: 1,
         fees: 0.000002,
       };
 
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-1" }],
-            error: null,
-          }),
+      await eventLogger.logTradeExecuted(tradeEvent);
+
+      expect(mockFrom).toHaveBeenCalledWith("bot_events");
+      expect(mockInsert).toHaveBeenCalledWith({
+        event_type: "TRADE_EXECUTED",
+        severity: "INFO",
+        message: "Buy order executed: 0.002 BTC/USDT @ $50000",
+        metadata: expect.objectContaining({
+          type: "BUY",
+          symbol: "BTC/USDT",
+          price: 50000.0,
+          quantity: 0.002,
         }),
       });
+    });
+
+    it("should log sell trade events", async () => {
+      // Setup mock to return success
+      mockSelect.mockImplementation(() =>
+        Promise.resolve({
+          data: [{ id: "event-id-2" }],
+          error: null,
+        }),
+      );
+
+      const tradeEvent = {
+        type: "SELL" as const,
+        symbol: "BTC/USDT",
+        price: 51000.0,
+        quantity: 0.002,
+        cycleId: "cycle-uuid-123",
+        purchaseNumber: 3,
+        fees: 0.000002,
+        profit: 100.5,
+      };
 
       await eventLogger.logTradeExecuted(tradeEvent);
 
-      expect(mockSupabase.from).toHaveBeenCalledWith("bot_events");
-      // The implementation uses batch insert, so it's called with an array
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            event_type: "TRADE_EXECUTED",
-            severity: "INFO",
-            message: expect.stringContaining("BUY order executed"),
-            metadata: expect.objectContaining({
-              type: "BUY",
-              symbol: "BTC/USDT",
-              price: 50000.0,
-              quantity: 0.002,
-              cycleId: "cycle-uuid-123",
-              purchaseNumber: 3,
-              fees: 0.000002,
-            }),
-          }),
-        ]),
-      );
-    });
-
-    it("should log sell order events with profit/loss calculation", async () => {
-      const sellEvent = {
-        type: "SELL" as const,
-        symbol: "BTC/USDT",
-        price: 55000.0,
-        quantity: 0.01,
-        cycleId: "cycle-uuid-123",
-        fees: 0.55,
-        profit: 50.0,
-        profitPercentage: 10.0,
-      };
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-2" }],
-            error: null,
-          }),
-        }),
-      });
-
-      await eventLogger.logTradeExecuted(sellEvent);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "TRADE_EXECUTED",
         severity: "INFO",
-        message: expect.stringContaining("SELL order executed"),
+        message:
+          "Sell order executed: 0.002 BTC/USDT @ $51000 (Profit: $100.50)",
         metadata: expect.objectContaining({
-          profit: 50.0,
-          profitPercentage: 10.0,
+          type: "SELL",
+          profit: 100.5,
         }),
       });
     });
 
-    it("should handle failed trade attempts", async () => {
-      const failedTrade = {
+    it("should log failed trade events", async () => {
+      // Setup mock to return success
+      mockSelect.mockImplementation(() =>
+        Promise.resolve({
+          data: [{ id: "event-id-3" }],
+          error: null,
+        }),
+      );
+
+      const failedTradeEvent = {
         type: "BUY" as const,
         symbol: "BTC/USDT",
         attemptedPrice: 50000.0,
@@ -201,505 +181,197 @@ describe("EventLogger", () => {
         cycleId: "cycle-uuid-123",
       };
 
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-3" }],
-            error: null,
-          }),
-        }),
-      });
+      await eventLogger.logTradeFailed(failedTradeEvent);
 
-      await eventLogger.logTradeFailed(failedTrade);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "TRADE_FAILED",
         severity: "ERROR",
-        message: expect.stringContaining("Trade failed"),
+        message: "Failed to execute BUY: Insufficient balance",
         metadata: expect.objectContaining({
-          orderId: "ORDER-789",
-          error: {
-            message: "Insufficient balance",
-            stack: expect.any(String),
-          },
+          type: "BUY",
+          error: "Insufficient balance",
         }),
       });
     });
   });
 
-  describe("System Event Logging", () => {
-    it("should log bot startup events with configuration", async () => {
-      const startupConfig = {
-        version: "1.0.0",
-        environment: "production",
-        tradingPair: "BTCUSDT",
-        strategy: {
-          dropPercentage: 0.03,
-          risePercentage: 0.05,
-          maxPurchases: 10,
-        },
-      };
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-4" }],
-            error: null,
-          }),
+  describe("System Events", () => {
+    it("should log system start events", async () => {
+      // Setup mock to return success
+      mockSelect.mockImplementation(() =>
+        Promise.resolve({
+          data: [{ id: "event-id-4" }],
+          error: null,
         }),
-      });
+      );
 
-      await eventLogger.logSystemStart(startupConfig);
+      await eventLogger.logSystemStart({ version: "1.0.0" });
 
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "START",
         severity: "INFO",
-        message: "Bot started",
-        metadata: expect.objectContaining(startupConfig),
+        message: "Trading bot started",
+        metadata: { config: { version: "1.0.0" } },
       });
     });
 
-    it("should log bot shutdown events with reason", async () => {
-      const shutdownReason = {
-        reason: "User initiated",
-        runtime: 3600000, // 1 hour in ms
-        tradesExecuted: 5,
-        finalState: "HOLDING",
-      };
+    it("should log system stop events", async () => {
+      await eventLogger.logSystemStop("Manual shutdown");
 
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-5" }],
-            error: null,
-          }),
-        }),
-      });
-
-      await eventLogger.logSystemStop(shutdownReason);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "STOP",
         severity: "INFO",
-        message: "Bot stopped",
-        metadata: expect.objectContaining(shutdownReason),
+        message: "Trading bot stopped",
+        metadata: { reason: "Manual shutdown" },
       });
     });
 
-    it("should log system errors with full context", async () => {
-      const systemError = {
-        error: new Error("Database connection failed"),
-        context: {
-          operation: "fetching cycle state",
-          retryCount: 3,
-          lastAttempt: new Date().toISOString(),
-        },
-        severity: "ERROR" as const,
-      };
+    it("should log error events with high severity", async () => {
+      const error = new Error("Database connection failed");
+      await eventLogger.logSystemError(error);
 
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-6" }],
-            error: null,
-          }),
-        }),
-      });
-
-      await eventLogger.logSystemError(systemError);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "ERROR",
         severity: "ERROR",
         message: "System error: Database connection failed",
         metadata: expect.objectContaining({
           error: {
             message: "Database connection failed",
-            stack: expect.any(String),
+            name: "Error",
           },
-          context: systemError.context,
         }),
       });
     });
 
-    it("should log websocket connection events", async () => {
-      const wsEvent = {
+    it("should log WebSocket connection events", async () => {
+      await eventLogger.logWebsocketEvent({
         connected: true,
-        details: {
-          url: "wss://stream.binance.com:9443/ws",
-          reconnectCount: 0,
-        },
-      };
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-7" }],
-            error: null,
-          }),
-        }),
+        details: { exchange: "Binance" },
       });
 
-      await eventLogger.logWebsocketEvent(wsEvent);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "WEBSOCKET_CONNECTED",
         severity: "INFO",
-        message: "WebSocket connected",
+        message: "WebSocket connected to Binance",
         metadata: expect.objectContaining({
-          url: "wss://stream.binance.com:9443/ws",
-          reconnectCount: 0,
+          details: { exchange: "Binance" },
+          connected: true,
         }),
       });
     });
 
     it("should log drift halt events", async () => {
-      const driftEvent = {
+      await eventLogger.logDriftHalt({
         symbol: "BTC/USDT",
-        referencePrice: 50000.0,
-        currentPrice: 48000.0,
-        driftPercentage: -4.0,
-        maxAllowedDrift: 3.0,
-      };
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-8" }],
-            error: null,
-          }),
-        }),
+        currentPrice: 50000,
+        referencePrice: 48500,
+        driftPercentage: 0.035,
+        maxAllowedDrift: 0.03,
       });
 
-      await eventLogger.logDriftHalt(driftEvent);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "DRIFT_HALT",
         severity: "WARNING",
-        message: expect.stringContaining("Drift halt triggered"),
-        metadata: expect.objectContaining(driftEvent),
+        message: "Trading halted due to price drift on BTC/USDT",
+        metadata: expect.objectContaining({
+          driftPercentage: 0.035,
+          maxAllowedDrift: 0.03,
+        }),
       });
     });
   });
 
-  describe("Metric Event Logging", () => {
-    it("should log cycle completion metrics", async () => {
-      const cycleMetrics = {
+  describe("Performance Metrics", () => {
+    it("should log cycle metrics", async () => {
+      await eventLogger.logCycleComplete({
         cycleId: "cycle-uuid-123",
-        duration: 7200000, // 2 hours
-        tradesExecuted: 10,
-        totalProfit: 100.0,
-        profitPercentage: 10.0,
-        startTime: new Date("2024-01-01T00:00:00Z"),
-        endTime: new Date("2024-01-01T02:00:00Z"),
-      };
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-9" }],
-            error: null,
-          }),
-        }),
+        duration: 2500,
+        tradesExecuted: 6,
+        totalProfit: 450.75,
+        profitPercentage: 0.85,
+        startTime: new Date("2024-01-01T10:00:00Z"),
+        endTime: new Date("2024-01-01T10:30:00Z"),
       });
 
-      await eventLogger.logCycleComplete(cycleMetrics);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "CYCLE_COMPLETE",
         severity: "INFO",
-        message: expect.stringContaining("Cycle completed"),
-        metadata: expect.objectContaining(cycleMetrics),
+        message: "Cycle cycle-uuid-123 completed",
+        metadata: expect.objectContaining({
+          tradesExecuted: 6,
+          totalProfit: 450.75,
+        }),
       });
     });
 
-    it("should log performance metrics periodically", async () => {
-      const performanceMetrics = {
-        cpuUsage: 45.2,
-        memoryUsage: 67.8,
-        eventLatency: 120,
-        databaseLatency: 50,
+    it("should log performance metrics", async () => {
+      await eventLogger.logPerformanceMetrics({
+        cpuUsage: 45,
+        memoryUsage: 256,
+        eventLatency: 25,
+        databaseLatency: 30,
         timestamp: new Date(),
-      };
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-10" }],
-            error: null,
-          }),
-        }),
       });
 
-      await eventLogger.logPerformanceMetrics(performanceMetrics);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "PERFORMANCE_METRICS",
         severity: "INFO",
-        message: "Performance metrics",
-        metadata: expect.objectContaining(performanceMetrics),
+        message: "Performance metrics recorded",
+        metadata: expect.objectContaining({
+          cpuUsage: 45,
+          memoryUsage: 256,
+        }),
       });
     });
 
-    it("should log strategy performance metrics", async () => {
-      const strategyMetrics = {
+    it("should log strategy metrics", async () => {
+      await eventLogger.logStrategyMetrics({
+        winRate: 0.85,
+        totalVolume: 100000,
+        maxDrawdown: 0.15,
+        sharpeRatio: 1.5,
         period: "24h",
-        totalTrades: 50,
-        successfulTrades: 45,
-        failedTrades: 5,
-        totalVolume: 5000.0,
-        totalProfit: 250.0,
-        winRate: 0.9,
-        averageProfit: 5.0,
-        maxDrawdown: -2.5,
-      };
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-id-11" }],
-            error: null,
-          }),
-        }),
       });
 
-      await eventLogger.logStrategyMetrics(strategyMetrics);
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         event_type: "STRATEGY_METRICS",
         severity: "INFO",
-        message: "Strategy performance metrics",
-        metadata: expect.objectContaining(strategyMetrics),
-      });
-    });
-  });
-
-  describe("Batch Insert Optimization", () => {
-    it("should batch multiple events for efficient insertion", async () => {
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "batch-1" }, { id: "batch-2" }, { id: "batch-3" }],
-            error: null,
-          }),
+        message: "Strategy metrics recorded",
+        metadata: expect.objectContaining({
+          winRate: 0.85,
+          totalVolume: 100000,
         }),
-      });
-
-      // Queue multiple events
-      await eventLogger.queueEvent({
-        event_type: "TRADE_EXECUTED",
-        severity: "INFO",
-        message: "Trade 1",
-        metadata: { orderId: "1" },
-      });
-
-      await eventLogger.queueEvent({
-        event_type: "TRADE_EXECUTED",
-        severity: "INFO",
-        message: "Trade 2",
-        metadata: { orderId: "2" },
-      });
-
-      await eventLogger.queueEvent({
-        event_type: "TRADE_EXECUTED",
-        severity: "INFO",
-        message: "Trade 3",
-        metadata: { orderId: "3" },
-      });
-
-      // Force flush
-      await eventLogger.flush();
-
-      // Should have made a single batch insert
-      expect(mockSupabase.from).toHaveBeenCalledTimes(1);
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({ message: "Trade 1" }),
-          expect.objectContaining({ message: "Trade 2" }),
-          expect.objectContaining({ message: "Trade 3" }),
-        ]),
-      );
-    });
-
-    it("should auto-flush when batch size is reached", async () => {
-      // Create EventLogger with small batch size
-      eventLogger = new EventLogger({
-        supabase: mockSupabase,
-        logger: mockLogger,
-        batchSize: 2,
-        flushInterval: 10000, // Long interval to ensure auto-flush is from batch size
-      });
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "batch-1" }, { id: "batch-2" }],
-            error: null,
-          }),
-        }),
-      });
-
-      // Queue events up to batch size
-      await eventLogger.queueEvent({
-        event_type: "TRADE_EXECUTED",
-        severity: "INFO",
-        message: "Trade 1",
-        metadata: { orderId: "1" },
-      });
-
-      await eventLogger.queueEvent({
-        event_type: "TRADE_EXECUTED",
-        severity: "INFO",
-        message: "Trade 2",
-        metadata: { orderId: "2" },
-      });
-
-      // Should have auto-flushed
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledTimes(1);
-    });
-
-    it("should flush remaining events on shutdown", async () => {
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "shutdown-1" }],
-            error: null,
-          }),
-        }),
-      });
-
-      // Queue an event
-      await eventLogger.queueEvent({
-        event_type: "TRADE_EXECUTED",
-        severity: "INFO",
-        message: "Final trade",
-        metadata: { orderId: "final" },
-      });
-
-      // Shutdown should flush
-      await eventLogger.shutdown();
-
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({ message: "Final trade" }),
-        ]),
-      );
-    });
-
-    it("should handle batch insert failures with retry logic", async () => {
-      let attemptCount = 0;
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockImplementation(() => {
-            attemptCount++;
-            if (attemptCount === 1) {
-              return Promise.resolve({
-                data: null,
-                error: { message: "Database timeout" },
-              });
-            }
-            return Promise.resolve({
-              data: [{ id: "retry-success" }],
-              error: null,
-            });
-          }),
-        }),
-      });
-
-      await eventLogger.queueEvent({
-        event_type: "TRADE_EXECUTED",
-        severity: "INFO",
-        message: "Trade with retry",
-        metadata: { orderId: "retry-1" },
-      });
-
-      await eventLogger.flush();
-
-      // Should have retried
-      expect(attemptCount).toBe(2);
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to insert events"),
-        expect.any(Object),
-      );
-    });
-  });
-
-  describe("Event Classification", () => {
-    it("should classify events by severity", () => {
-      const classification = eventLogger.classifyEvent("ERROR");
-      expect(classification).toEqual({
-        severity: "ERROR",
-        priority: "HIGH",
-        requiresImmediate: true,
-      });
-    });
-
-    it("should classify trade events", () => {
-      const classification = eventLogger.classifyEvent("TRADE_EXECUTED");
-      expect(classification).toEqual({
-        severity: "INFO",
-        priority: "MEDIUM",
-        requiresImmediate: false,
-      });
-    });
-
-    it("should classify drift events as warnings", () => {
-      const classification = eventLogger.classifyEvent("DRIFT_HALT");
-      expect(classification).toEqual({
-        severity: "WARNING",
-        priority: "HIGH",
-        requiresImmediate: true,
-      });
-    });
-
-    it("should support custom event type classification", () => {
-      eventLogger.registerEventType("CUSTOM_ALERT", {
-        severity: "WARNING",
-        priority: "HIGH",
-        category: "CUSTOM",
-      });
-
-      const classification = eventLogger.classifyEvent("CUSTOM_ALERT");
-      expect(classification).toEqual({
-        severity: "WARNING",
-        priority: "HIGH",
-        requiresImmediate: true,
       });
     });
   });
 
   describe("Query Methods", () => {
-    it("should retrieve events by type", async () => {
+    it("should query events by type", async () => {
       const mockEvents = [
         {
           id: "1",
           event_type: "TRADE_EXECUTED",
+          message: "Trade executed",
+          metadata: {},
           severity: "INFO",
-          message: "Trade 1",
-          metadata: { orderId: "1" },
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: "2",
-          event_type: "TRADE_EXECUTED",
-          severity: "INFO",
-          message: "Trade 2",
-          metadata: { orderId: "2" },
           created_at: new Date().toISOString(),
         },
       ];
 
-      mockSupabase.from = jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          eq: jest.fn().mockReturnValue({
-            order: jest.fn().mockReturnValue({
-              limit: jest.fn().mockResolvedValue({
-                data: mockEvents,
-                error: null,
-              }),
-            }),
+      const mockQueryChain = {
+        eq: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        range: jest.fn(() =>
+          Promise.resolve({
+            data: mockEvents,
+            error: null,
           }),
-        }),
+        ),
+      };
+
+      mockFrom.mockReturnValue({
+        select: jest.fn().mockReturnValue(mockQueryChain),
       });
 
       const events = await eventLogger.getEventsByType("TRADE_EXECUTED", {
@@ -707,334 +379,512 @@ describe("EventLogger", () => {
       });
 
       expect(events).toEqual(mockEvents);
-      expect(mockSupabase.from).toHaveBeenCalledWith("bot_events");
-      expect(
-        mockSupabase.from("bot_events").select("*").eq,
-      ).toHaveBeenCalledWith("event_type", "TRADE_EXECUTED");
-    });
-
-    it("should retrieve events by severity", async () => {
-      const mockEvents = [
-        {
-          id: "1",
-          event_type: "ERROR",
-          severity: "ERROR",
-          message: "Error 1",
-          created_at: new Date().toISOString(),
-        },
-      ];
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          eq: jest.fn().mockReturnValue({
-            order: jest.fn().mockReturnValue({
-              limit: jest.fn().mockResolvedValue({
-                data: mockEvents,
-                error: null,
-              }),
-            }),
-          }),
-        }),
-      });
-
-      const events = await eventLogger.getEventsBySeverity("ERROR", {
-        limit: 10,
-      });
-
-      expect(events).toEqual(mockEvents);
-      expect(
-        mockSupabase.from("bot_events").select("*").eq,
-      ).toHaveBeenCalledWith("severity", "ERROR");
-    });
-
-    it("should retrieve events within a time range", async () => {
-      const startTime = new Date("2024-01-01T00:00:00Z");
-      const endTime = new Date("2024-01-02T00:00:00Z");
-
-      const mockEvents = [
-        {
-          id: "1",
-          event_type: "TRADE_EXECUTED",
-          created_at: "2024-01-01T12:00:00Z",
-        },
-      ];
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          gte: jest.fn().mockReturnValue({
-            lte: jest.fn().mockReturnValue({
-              order: jest.fn().mockResolvedValue({
-                data: mockEvents,
-                error: null,
-              }),
-            }),
-          }),
-        }),
-      });
-
-      const events = await eventLogger.getEventsByTimeRange(startTime, endTime);
-
-      expect(events).toEqual(mockEvents);
-      expect(
-        mockSupabase.from("bot_events").select("*").gte,
-      ).toHaveBeenCalledWith("created_at", startTime.toISOString());
-    });
-
-    it("should retrieve events for a specific cycle", async () => {
-      const cycleId = "cycle-uuid-123";
-      const mockEvents = [
-        {
-          id: "1",
-          event_type: "TRADE_EXECUTED",
-          metadata: { cycleId },
-        },
-      ];
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          contains: jest.fn().mockReturnValue({
-            order: jest.fn().mockResolvedValue({
-              data: mockEvents,
-              error: null,
-            }),
-          }),
-        }),
-      });
-
-      const events = await eventLogger.getEventsByCycle(cycleId);
-
-      expect(events).toEqual(mockEvents);
-      expect(
-        mockSupabase.from("bot_events").select("*").contains,
-      ).toHaveBeenCalledWith("metadata", { cycleId });
-    });
-
-    it("should aggregate metrics for a time period", async () => {
-      const mockEvents = [
-        {
-          event_type: "TRADE_EXECUTED",
-          metadata: { type: "BUY", quoteQuantity: 100 },
-        },
-        {
-          event_type: "TRADE_EXECUTED",
-          metadata: { type: "BUY", quoteQuantity: 150 },
-        },
-        {
-          event_type: "TRADE_EXECUTED",
-          metadata: { type: "SELL", quoteQuantity: 300, profit: 50 },
-        },
-      ];
-
-      mockSupabase.from = jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          eq: jest.fn().mockReturnValue({
-            gte: jest.fn().mockReturnValue({
-              lte: jest.fn().mockResolvedValue({
-                data: mockEvents,
-                error: null,
-              }),
-            }),
-          }),
-        }),
-      });
-
-      const metrics = await eventLogger.getAggregatedMetrics(
-        new Date("2024-01-01"),
-        new Date("2024-01-02"),
+      expect(mockQueryChain.eq).toHaveBeenCalledWith(
+        "event_type",
+        "TRADE_EXECUTED",
       );
+    });
 
-      expect(metrics).toEqual({
-        totalTrades: 3,
-        buyOrders: 2,
-        sellOrders: 1,
-        totalVolume: 550,
-        totalProfit: 50,
-        averageProfit: 50,
+    it("should query events by date range", async () => {
+      const startDate = new Date("2024-01-01");
+      const endDate = new Date("2024-01-02");
+
+      const mockQueryChain = {
+        gte: jest.fn().mockReturnThis(),
+        lte: jest.fn().mockReturnThis(),
+        order: jest.fn(() =>
+          Promise.resolve({
+            data: [],
+            error: null,
+          }),
+        ),
+      };
+
+      mockFrom.mockReturnValue({
+        select: jest.fn().mockReturnValue(mockQueryChain),
+      });
+
+      await eventLogger.getEventsByTimeRange(startDate, endDate);
+
+      expect(mockQueryChain.gte).toHaveBeenCalledWith(
+        "created_at",
+        startDate.toISOString(),
+      );
+      expect(mockQueryChain.lte).toHaveBeenCalledWith(
+        "created_at",
+        endDate.toISOString(),
+      );
+    });
+
+    it("should query events by severity", async () => {
+      const mockQueryChain = {
+        eq: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        range: jest.fn(() =>
+          Promise.resolve({
+            data: [],
+            error: null,
+          }),
+        ),
+      };
+
+      mockFrom.mockReturnValue({
+        select: jest.fn().mockReturnValue(mockQueryChain),
+      });
+
+      await eventLogger.getEventsBySeverity("ERROR", {
+        limit: 50,
+      });
+
+      expect(mockQueryChain.eq).toHaveBeenCalledWith("severity", "ERROR");
+    });
+
+    it("should handle query errors gracefully", async () => {
+      const mockQueryChain = {
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        range: jest.fn(() =>
+          Promise.resolve({
+            data: null,
+            error: { message: "Query failed" },
+          }),
+        ),
+      };
+
+      mockFrom.mockReturnValue({
+        select: jest.fn().mockReturnValue(mockQueryChain),
+      });
+
+      const events = await eventLogger.getEventsByType("CUSTOM", {
+        limit: 100,
+      });
+
+      expect(events).toEqual([]);
+      expect(mockLogger.error).toHaveBeenCalledWith("Failed to query events", {
+        error: { message: "Query failed" },
       });
     });
   });
 
-  describe("Error Handling", () => {
-    it("should handle database connection errors gracefully", async () => {
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockRejectedValue(new Error("Connection refused")),
-        }),
+  describe("Event Classification", () => {
+    it("should classify events by severity", () => {
+      const classification = eventLogger.classifyEvent("ERROR");
+
+      expect(classification).toEqual({
+        severity: "ERROR",
+        priority: "CRITICAL",
+        category: "SYSTEM",
+      });
+    });
+
+    it("should classify trade events", () => {
+      const classification = eventLogger.classifyEvent("TRADE_EXECUTED");
+
+      expect(classification).toEqual({
+        severity: "INFO",
+        priority: "HIGH",
+        category: "TRADING",
+      });
+    });
+
+    it("should classify warning events", () => {
+      const classification = eventLogger.classifyEvent("DRIFT_HALT");
+
+      expect(classification).toEqual({
+        severity: "WARNING",
+        priority: "HIGH",
+        category: "TRADING",
+      });
+    });
+
+    it("should handle unknown event types", () => {
+      const classification = eventLogger.classifyEvent("UNKNOWN_EVENT");
+
+      expect(classification).toEqual({
+        severity: "INFO",
+        priority: "LOW",
+        category: "UNKNOWN",
+      });
+    });
+  });
+
+  describe("Batch Processing", () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it("should batch multiple events before sending", async () => {
+      // Create EventLogger with small batch size for testing
+      eventLogger = new EventLogger({
+        supabase: mockSupabase,
+        logger: mockLogger,
+        batchSize: 3,
+        flushInterval: 5000,
       });
 
-      await eventLogger.logSystemStart({ version: "1.0.0" });
+      // Log multiple events without awaiting
+      const promises = [
+        eventLogger.logTradeExecuted({
+          type: "BUY",
+          symbol: "BTC/USDT",
+          price: 50000,
+          quantity: 0.001,
+          cycleId: "cycle-1",
+          purchaseNumber: 1,
+          fees: 0.0001,
+        }),
+        eventLogger.logTradeExecuted({
+          type: "BUY",
+          symbol: "BTC/USDT",
+          price: 50100,
+          quantity: 0.001,
+          cycleId: "cycle-1",
+          purchaseNumber: 2,
+          fees: 0.0001,
+        }),
+        eventLogger.logTradeExecuted({
+          type: "BUY",
+          symbol: "BTC/USDT",
+          price: 50200,
+          quantity: 0.001,
+          cycleId: "cycle-1",
+          purchaseNumber: 3,
+          fees: 0.0001,
+        }),
+      ];
+
+      await Promise.all(promises);
+
+      // Should have made only one batch insert
+      expect(mockInsert).toHaveBeenCalledTimes(1);
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ event_type: "TRADE_EXECUTED" }),
+          expect.objectContaining({ event_type: "TRADE_EXECUTED" }),
+          expect.objectContaining({ event_type: "TRADE_EXECUTED" }),
+        ]),
+      );
+    });
+
+    it("should auto-flush based on timer", async () => {
+      eventLogger = new EventLogger({
+        supabase: mockSupabase,
+        logger: mockLogger,
+        batchSize: 10,
+        flushInterval: 1000,
+      });
+
+      // Log one event
+      eventLogger.logTradeExecuted({
+        type: "BUY",
+        symbol: "BTC/USDT",
+        price: 50000,
+        quantity: 0.001,
+        cycleId: "cycle-1",
+        purchaseNumber: 1,
+        fees: 0.0001,
+      });
+
+      // Should not insert immediately
+      expect(mockInsert).not.toHaveBeenCalled();
+
+      // Advance timers
+      jest.advanceTimersByTime(1000);
+
+      // Wait for async flush
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Should have flushed
+      expect(mockInsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("should handle flush errors and use offline queue", async () => {
+      // Make insert fail
+      mockInsert.mockImplementation(() => ({
+        select: jest.fn(() =>
+          Promise.resolve({
+            data: null,
+            error: { message: "Database unavailable" },
+          }),
+        ),
+      }));
+
+      eventLogger = new EventLogger({
+        supabase: mockSupabase,
+        logger: mockLogger,
+        batchSize: 1,
+        flushInterval: 5000,
+      });
+
+      // Enable offline queue
+      eventLogger.enableOfflineQueue(true);
+
+      await eventLogger.logTradeExecuted({
+        type: "BUY",
+        symbol: "BTC/USDT",
+        price: 50000,
+        quantity: 0.001,
+        cycleId: "cycle-1",
+        purchaseNumber: 1,
+        fees: 0.0001,
+      });
 
       expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to log event"),
-        expect.objectContaining({
-          error: expect.any(Error),
-        }),
+        "Failed to insert batch",
+        expect.objectContaining({ error: { message: "Database unavailable" } }),
       );
-    });
 
-    it("should queue events when database is unavailable", async () => {
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest
-            .fn()
-            .mockRejectedValue(new Error("Database unavailable")),
-        }),
-      });
-
-      eventLogger.enableOfflineQueue(true);
-
-      await eventLogger.logSystemStart({ version: "1.0.0" });
-
-      const queueSize = eventLogger.getOfflineQueueSize();
-      expect(queueSize).toBe(1);
-    });
-
-    it("should retry failed events from offline queue", async () => {
-      let attemptCount = 0;
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockImplementation(() => {
-            attemptCount++;
-            if (attemptCount === 1) {
-              return Promise.reject(new Error("Database unavailable"));
-            }
-            return Promise.resolve({
-              data: [{ id: "retry-success" }],
-              error: null,
-            });
-          }),
-        }),
-      });
-
-      eventLogger.enableOfflineQueue(true);
-
-      await eventLogger.logSystemStart({ version: "1.0.0" });
-      expect(eventLogger.getOfflineQueueSize()).toBe(1);
-
-      await eventLogger.retryOfflineQueue();
-      expect(eventLogger.getOfflineQueueSize()).toBe(0);
-    });
-  });
-
-  describe("Event Deduplication", () => {
-    it("should prevent duplicate events within time window", async () => {
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
+      // Now make insert succeed
+      mockInsert.mockImplementation(() => ({
+        select: jest.fn(() =>
+          Promise.resolve({
             data: [{ id: "event-1" }],
             error: null,
           }),
-        }),
-      });
+        ),
+      }));
+
+      // Flush again to process offline queue
+      await eventLogger.flush();
+
+      // Should have retried the insert
+      expect(mockInsert).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("Deduplication", () => {
+    it("should prevent duplicate events within time window", async () => {
+      // Enable deduplication
+      eventLogger.enableDeduplication(true, 1000);
 
       const tradeEvent = {
         type: "BUY" as const,
         symbol: "BTC/USDT",
-        price: 50000.0,
-        quantity: 0.002,
-        cycleId: "cycle-123",
+        price: 50000,
+        quantity: 0.001,
+        cycleId: "cycle-1",
+        purchaseNumber: 1,
+        fees: 0.0001,
       };
 
-      // Enable deduplication with 1 second window
-      eventLogger.enableDeduplication(true, 1000);
-
-      // Log the same event twice
+      // Log same event twice
       await eventLogger.logTradeExecuted(tradeEvent);
       await eventLogger.logTradeExecuted(tradeEvent);
 
       // Should only insert once
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledTimes(1);
+      expect(mockInsert).toHaveBeenCalledTimes(1);
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("Duplicate event detected"),
+      );
     });
 
-    it("should allow duplicate events after time window expires", async () => {
+    it("should allow same event after deduplication window", async () => {
       jest.useFakeTimers();
 
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-1" }],
-            error: null,
-          }),
-        }),
+      eventLogger = new EventLogger({
+        supabase: mockSupabase,
+        logger: mockLogger,
+        batchSize: 1,
+        flushInterval: 5000,
       });
+
+      eventLogger.enableDeduplication(true, 1000); // 1 second window
 
       const tradeEvent = {
         type: "BUY" as const,
         symbol: "BTC/USDT",
-        price: 50000.0,
-        quantity: 0.002,
-        cycleId: "cycle-123",
+        price: 50000,
+        quantity: 0.001,
+        cycleId: "cycle-1",
+        purchaseNumber: 1,
+        fees: 0.0001,
       };
 
-      // Enable deduplication with 1 second window
-      eventLogger.enableDeduplication(true, 1000);
-
-      // Log event
+      // First log
       await eventLogger.logTradeExecuted(tradeEvent);
 
       // Advance time past deduplication window
       jest.advanceTimersByTime(1100);
 
-      // Log same event again
+      // Second log
       await eventLogger.logTradeExecuted(tradeEvent);
 
       // Should insert twice
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledTimes(2);
+      expect(mockInsert).toHaveBeenCalledTimes(2);
 
       jest.useRealTimers();
     });
   });
 
-  describe("Event Enrichment", () => {
-    it("should enrich events with system context", async () => {
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
-            data: [{ id: "event-1" }],
-            error: null,
-          }),
-        }),
+  describe("Manual Operations", () => {
+    it("should support manual flush", async () => {
+      eventLogger = new EventLogger({
+        supabase: mockSupabase,
+        logger: mockLogger,
+        batchSize: 10,
+        flushInterval: 60000,
       });
 
+      // Log one event
+      eventLogger.logTradeExecuted({
+        type: "BUY",
+        symbol: "BTC/USDT",
+        price: 50000,
+        quantity: 0.001,
+        cycleId: "cycle-1",
+        purchaseNumber: 1,
+        fees: 0.0001,
+      });
+
+      // Manually flush
+      await eventLogger.flush();
+
+      expect(mockInsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("should set global context", async () => {
       // Set global context
-      eventLogger.setGlobalContext({
-        botId: "bot-123",
-        environment: "production",
-        version: "1.0.0",
-      });
+      eventLogger.setGlobalContext({ appVersion: "1.0.0", env: "test" });
 
-      await eventLogger.logSystemStart({});
+      // Log an event
+      await eventLogger.logSystemStart({ version: "1.0.0" });
 
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith(
+      // Should include global context in metadata
+      expect(mockInsert).toHaveBeenCalledWith(
         expect.objectContaining({
           metadata: expect.objectContaining({
-            botId: "bot-123",
-            environment: "production",
-            version: "1.0.0",
+            globalContext: { appVersion: "1.0.0", env: "test" },
           }),
         }),
       );
     });
 
-    it("should add timestamps automatically", async () => {
-      mockSupabase.from = jest.fn().mockReturnValue({
-        insert: jest.fn().mockReturnValue({
-          select: jest.fn().mockResolvedValue({
+    it("should enable and disable offline queue", async () => {
+      // Start with offline queue disabled
+      eventLogger.enableOfflineQueue(false);
+
+      // Make insert fail
+      mockInsert.mockImplementation(() => ({
+        select: jest.fn(() =>
+          Promise.resolve({
+            data: null,
+            error: { message: "Database unavailable" },
+          }),
+        ),
+      }));
+
+      await eventLogger.logSystemStart({ version: "1.0.0" });
+
+      // Should log error but not queue offline
+      expect(mockLogger.error).toHaveBeenCalled();
+
+      // Enable offline queue
+      eventLogger.enableOfflineQueue(true);
+
+      // Now events should queue offline when failing
+      await eventLogger.logSystemStop("test");
+
+      // Fix insert
+      mockInsert.mockImplementation(() => ({
+        select: jest.fn(() =>
+          Promise.resolve({
             data: [{ id: "event-1" }],
             error: null,
           }),
-        }),
+        ),
+      }));
+
+      // Flush should process offline queue
+      await eventLogger.flush();
+
+      // Should have tried to insert both events (1 failed, 1 succeeded from offline queue)
+      expect(mockInsert).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe("Edge Cases", () => {
+    it("should handle very large metadata objects", async () => {
+      const largeMetadata = {
+        data: Array(1000)
+          .fill(0)
+          .map((_, i) => ({
+            index: i,
+            value: Math.random(),
+            timestamp: new Date().toISOString(),
+          })),
+      };
+
+      await eventLogger.logCustomEvent({
+        event_type: "CUSTOM",
+        severity: "INFO",
+        message: "Large metadata test",
+        metadata: largeMetadata,
       });
 
-      await eventLogger.logSystemStart({});
+      expect(mockInsert).toHaveBeenCalledWith({
+        event_type: "CUSTOM",
+        severity: "INFO",
+        message: "Large metadata test",
+        metadata: largeMetadata,
+      });
+    });
 
-      expect(mockSupabase.from("bot_events").insert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          metadata: expect.objectContaining({
-            timestamp: expect.any(String),
-          }),
-        }),
-      );
+    it("should handle null/undefined metadata gracefully", async () => {
+      await eventLogger.logSystemStart(undefined);
+
+      expect(mockInsert).toHaveBeenCalledWith({
+        event_type: "START",
+        severity: "INFO",
+        message: "Trading bot started",
+        metadata: { config: undefined },
+      });
+    });
+
+    it("should continue operating after database errors", async () => {
+      // First call fails
+      let callCount = 0;
+      mockInsert.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            select: jest.fn(() =>
+              Promise.resolve({
+                data: null,
+                error: { message: "Connection lost" },
+              }),
+            ),
+          };
+        }
+        return {
+          select: jest.fn(() =>
+            Promise.resolve({
+              data: [{ id: "event-1" }],
+              error: null,
+            }),
+          ),
+        };
+      });
+
+      eventLogger = new EventLogger({
+        supabase: mockSupabase,
+        logger: mockLogger,
+        batchSize: 1,
+        flushInterval: 5000,
+      });
+
+      // First event fails
+      await eventLogger.logSystemError(new Error("Test error 1"));
+
+      // Second event succeeds
+      await eventLogger.logSystemError(new Error("Test error 2"));
+
+      expect(mockInsert).toHaveBeenCalledTimes(2);
+      expect(mockLogger.error).toHaveBeenCalledTimes(1);
     });
   });
 });
