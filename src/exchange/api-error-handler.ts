@@ -69,6 +69,22 @@ export class BinanceApiErrorHandler {
 
     // Check for HTTP status codes
     const apiError = error as ApiError;
+
+    // Check for network error markers in message (for non-Error objects)
+    if (apiError.message) {
+      const message = apiError.message.toUpperCase();
+      if (
+        message.includes("ECONNREFUSED") ||
+        message.includes("ETIMEDOUT") ||
+        message.includes("ENOTFOUND") ||
+        message.includes("ECONNRESET") ||
+        message.includes("SOCKET") ||
+        message.includes("NETWORK")
+      ) {
+        return true;
+      }
+    }
+
     if (apiError.response?.status) {
       const status = apiError.response.status;
 

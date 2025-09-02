@@ -326,13 +326,6 @@ export class BinanceClient {
       if (!response.ok) {
         const error = (await response.json()) as BinanceError;
 
-        // Handle timestamp errors with automatic resync
-        if (error.code === -1021) {
-          await this.syncTime();
-          // Retry the request with new timestamp
-          throw new Error("TIMESTAMP_ERROR_RESYNCED");
-        }
-
         // Create structured error for the error handler
         const apiError = {
           response: {
@@ -347,6 +340,14 @@ export class BinanceClient {
         response.headers.forEach((value, key) => {
           apiError.response.headers[key] = value;
         });
+
+        // Handle timestamp errors with automatic resync
+        // This will be retried automatically by the error handler
+        if (error.code === -1021) {
+          await this.syncTime();
+          // Mark as retryable by making it look like a network error
+          apiError.message = "ETIMEDOUT: " + apiError.message;
+        }
 
         throw apiError;
       }

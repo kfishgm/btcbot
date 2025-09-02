@@ -153,17 +153,17 @@ describe("BinanceApiErrorHandler", () => {
         .fn<() => Promise<never>>()
         .mockRejectedValue(new Error("ECONNREFUSED"));
 
-      const promise = errorHandler.executeWithRetry(operation);
+      const promise = errorHandler.executeWithRetry(operation).catch((e) => e);
 
       // Fast-forward through all retries
       await jest.advanceTimersByTimeAsync(1000);
       await jest.advanceTimersByTimeAsync(2000);
       await jest.advanceTimersByTimeAsync(4000);
 
-      await expect(promise).rejects.toThrow(
-        "Maximum retry attempts (3) exceeded",
-      );
+      const error = await promise;
 
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe("Maximum retry attempts (3) exceeded");
       expect(operation).toHaveBeenCalledTimes(4); // Initial + 3 retries
     });
 
@@ -594,17 +594,21 @@ describe("BinanceApiErrorHandler", () => {
         .fn<() => Promise<never>>()
         .mockRejectedValue(new Error("ECONNREFUSED"));
 
-      const promise = errorHandler.executeWithRetry(operation, {
-        onFailure: cleanup,
-      });
+      const promise = errorHandler
+        .executeWithRetry(operation, {
+          onFailure: cleanup,
+        })
+        .catch((e) => e);
 
       // Advance timers for all retries
       await jest.advanceTimersByTimeAsync(1000);
       await jest.advanceTimersByTimeAsync(2000);
       await jest.advanceTimersByTimeAsync(4000);
 
-      await expect(promise).rejects.toThrow();
+      const error = await promise;
 
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe("Maximum retry attempts (3) exceeded");
       expect(cleanup).toHaveBeenCalledTimes(1);
     });
 
@@ -708,7 +712,7 @@ describe("BinanceApiErrorHandler", () => {
         .fn<() => Promise<never>>()
         .mockRejectedValue(new Error("ECONNREFUSED"));
 
-      const promise = customHandler.executeWithRetry(operation);
+      const promise = customHandler.executeWithRetry(operation).catch((e) => e);
 
       // Advance timers for all 5 retries
       await jest.advanceTimersByTimeAsync(1000);
@@ -717,10 +721,10 @@ describe("BinanceApiErrorHandler", () => {
       await jest.advanceTimersByTimeAsync(8000);
       await jest.advanceTimersByTimeAsync(16000);
 
-      await expect(promise).rejects.toThrow(
-        "Maximum retry attempts (5) exceeded",
-      );
+      const error = await promise;
 
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe("Maximum retry attempts (5) exceeded");
       expect(operation).toHaveBeenCalledTimes(6); // Initial + 5 retries
     });
 
