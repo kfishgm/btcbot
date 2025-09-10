@@ -51,10 +51,28 @@ export class BuyOrderStateUpdater extends EventEmitter {
       this.validateOrderResult(orderResult);
       this.validateCycleState(currentState, orderResult);
 
+      logger.info("Calculating state updates");
       // Calculate all updates
       const updates = this.calculateUpdates(currentState, orderResult);
 
+      logger.info("Calculated updates", {
+        btc_accumulated: updates.btc_accumulated,
+        reference_price: updates.reference_price,
+        capital_available: updates.capital_available,
+      });
+
       // Execute update atomically
+      logger.info("Executing atomic state update", {
+        id: currentState.id,
+        idType: typeof currentState.id,
+        hasId: !!currentState.id,
+        fullState: JSON.stringify(currentState),
+      });
+
+      if (!currentState.id) {
+        throw new Error("Current state has no ID - cannot update");
+      }
+
       const updatedState = await this.transactionManager.updateStateAtomic(
         currentState.id,
         updates,
@@ -91,7 +109,9 @@ export class BuyOrderStateUpdater extends EventEmitter {
       logger.error("Failed to update state after buy order", {
         cycleId: currentState.id,
         orderId: orderResult.orderId,
-        error,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        fullError: error,
       });
 
       this.emit("stateUpdateFailed", {
@@ -123,6 +143,12 @@ export class BuyOrderStateUpdater extends EventEmitter {
     if (orderResult.cummulativeQuoteQty.lte(0)) {
       throw new Error("Order has no cumulative quote quantity");
     }
+
+    logger.info("Order validation passed", {
+      status: orderResult.status,
+      executedQty: orderResult.executedQty.toString(),
+      cummulativeQuoteQty: orderResult.cummulativeQuoteQty.toString(),
+    });
   }
 
   private validateCycleState(
@@ -155,9 +181,24 @@ export class BuyOrderStateUpdater extends EventEmitter {
     // Calculate USDT amounts
     const usdtSpent = orderResult.cummulativeQuoteQty;
     const usdtFee = orderResult.feeUSDT;
-    const btcFeeInUsdt = btcFee.mul(orderResult.avgPrice);
-    // Per STRATEGY.md line 355-356: cost_accum_usdt += quote_quantity + fees_usdt + (fees_btc * avg_price)
-    const totalCostUsdt = usdtSpent.add(usdtFee).add(btcFeeInUsdt);
+    // For Binance: BUY orders only have BTC fees (deducted from received amount)
+    // The USDT cost is already the full amount paid (cummulativeQuoteQty)
+    // No need to add BTC fee value as it's already reflected in reduced BTC quantity
+    const totalCostUsdt = usdtSpent.add(usdtFee); // usdtFee is 0 for buys on Binance
+
+    // Debug logging for reference price calculation
+    logger.info("Reference price calculation inputs:", {
+      btcFilled: btcFilled.toString(),
+      btcFee: btcFee.toString(),
+      netBtcReceived: netBtcReceived.toString(),
+      usdtSpent: usdtSpent.toString(),
+      usdtFee: usdtFee.toString(),
+      totalCostUsdt: totalCostUsdt.toString(),
+      avgPrice: orderResult.avgPrice.toString(),
+      currentBtcAccum: currentState.btc_accumulated || 0,
+      currentCostAccum: currentState.cost_accum_usdt || 0,
+      currentBtcNet: currentState.btc_accum_net || 0,
+    });
 
     // Update accumulators
     const newBtcAccumulated = new Decimal(currentState.btc_accumulated || 0)
@@ -173,9 +214,9 @@ export class BuyOrderStateUpdater extends EventEmitter {
       .toNumber();
 
     // Update capital and purchases
-    // Per STRATEGY.md line 359: capital_available -= totalCostUSDT (which includes USDT fees)
+    // capital_available -= totalCostUSDT (the actual USDT spent)
     const newCapitalAvailable = new Decimal(currentState.capital_available)
-      .sub(usdtSpent.add(usdtFee))
+      .sub(totalCostUsdt)
       .toNumber();
 
     const newPurchasesRemaining = currentState.purchases_remaining - 1;
@@ -185,6 +226,41 @@ export class BuyOrderStateUpdater extends EventEmitter {
       newCostAccumUsdt,
       newBtcAccumNet,
     );
+
+    // More debug logging
+    logger.info("Reference price calculation results:", {
+      newBtcAccumulated,
+      newCostAccumUsdt,
+      newBtcAccumNet,
+      calculatedReferencePrice: referencePrice,
+      expectedWithFee: (
+        totalCostUsdt.toNumber() / netBtcReceived.toNumber()
+      ).toFixed(2),
+      avgPriceFromOrder: orderResult.avgPrice.toString(),
+    });
+
+    // Verify reference price accounts for fees
+    const avgPriceNumber = orderResult.avgPrice.toNumber();
+    const priceDifferencePercent =
+      (Math.abs(referencePrice - avgPriceNumber) / avgPriceNumber) * 100;
+
+    if (priceDifferencePercent < 0.05) {
+      logger.warn(
+        "⚠️ Reference price is suspiciously close to average price!",
+        {
+          referencePrice,
+          avgPrice: avgPriceNumber,
+          differencePercent: priceDifferencePercent.toFixed(4),
+          expectation: "Reference price should be ~0.1% higher due to BTC fees",
+        },
+      );
+    } else {
+      logger.info("✅ Reference price properly accounts for fees", {
+        referencePrice,
+        avgPrice: avgPriceNumber,
+        differencePercent: priceDifferencePercent.toFixed(4),
+      });
+    }
 
     // Determine status - only change from READY to HOLDING
     let newStatus: "READY" | "HOLDING" | "PAUSED";
@@ -210,12 +286,23 @@ export class BuyOrderStateUpdater extends EventEmitter {
     btcAccumNet: number,
   ): number {
     if (btcAccumNet === 0) {
+      logger.warn("btcAccumNet is 0, returning 0 for reference price");
       return 0;
     }
 
     // Calculate reference price and round to 2 decimal places
     const referencePrice = costAccumUsdt / btcAccumNet;
-    return Math.round(referencePrice * 100) / 100;
+    const rounded = Math.round(referencePrice * 100) / 100;
+
+    logger.info("calculateReferencePrice details:", {
+      costAccumUsdt,
+      btcAccumNet,
+      rawReferencePrice: referencePrice,
+      roundedReferencePrice: rounded,
+      formula: `${costAccumUsdt} / ${btcAccumNet} = ${referencePrice}`,
+    });
+
+    return rounded;
   }
 
   async getCycleState(cycleId: string): Promise<CycleState | null> {
