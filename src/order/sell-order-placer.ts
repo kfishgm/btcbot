@@ -10,6 +10,8 @@ import {
 } from "../exchange/types";
 import { Decimal } from "decimal.js";
 import { EventEmitter } from "events";
+import { logger } from "../utils/logger";
+import { SupabaseClient } from "@supabase/supabase-js";
 
 export interface OrderPrepareParams {
   symbol: string;
@@ -68,6 +70,18 @@ interface BinanceOrderFill {
   tradeId?: number;
 }
 
+interface BinanceTrade {
+  id: number;
+  price: string;
+  qty: string;
+  commission: string;
+  commissionAsset: string;
+  time: number;
+  isBuyer: boolean;
+  isMaker: boolean;
+  isBestMatch: boolean;
+}
+
 interface BinanceOrderWithFills {
   symbol: string;
   orderId: number;
@@ -92,6 +106,7 @@ interface ErrorWithCode extends Error {
 export class SellOrderPlacer extends EventEmitter {
   private binanceClient: BinanceClient;
   private tradingRules: TradingRules;
+  private supabaseClient: SupabaseClient;
   private symbol: string;
   private retryCount = 3;
   private retryDelay = 1000;
@@ -101,12 +116,13 @@ export class SellOrderPlacer extends EventEmitter {
   constructor(
     binanceClient: BinanceClient,
     tradingRules: TradingRules,
-    _supabaseClient: unknown,
+    supabaseClient: SupabaseClient,
     symbol: string,
   ) {
     super();
     this.binanceClient = binanceClient;
     this.tradingRules = tradingRules;
+    this.supabaseClient = supabaseClient;
     this.symbol = symbol;
   }
 
@@ -255,9 +271,18 @@ export class SellOrderPlacer extends EventEmitter {
         const executionTime = Date.now() - startTime;
         this.emit("orderExecuted", { order, executionTime });
 
-        // Process order result
+        // Verify order is complete and get final state
+        const finalOrder = await this.verifyOrderComplete(
+          order.orderId,
+          order.clientOrderId,
+        );
+
+        // Validate the response from Binance
+        this.validateBinanceResponse(finalOrder as BinanceOrderWithFills);
+
+        // Process order result with verified data
         const result = await this.processOrderResult(
-          order as BinanceOrderWithFills,
+          finalOrder as BinanceOrderWithFills,
         );
 
         // Save to database
@@ -374,6 +399,77 @@ export class SellOrderPlacer extends EventEmitter {
       }
     }
 
+    // Check if fees were paid in BNB (Binance Coin)
+    const bnbFee = feeOther["BNB"] || new Decimal(0);
+    if (!bnbFee.isZero()) {
+      // When fees are paid in BNB, we need to impute the USDT fee for SELL orders
+      // BNB gives 25% discount, so actual fee would be 0.075% instead of 0.1%
+      const bnbFeeRate = new Decimal(0.00075); // 0.075%
+      const imputedUSDTFee = cummulativeQuoteQty.mul(bnbFeeRate);
+
+      logger.info(
+        "📊 Fees paid in BNB, imputing USDT fee for profit calculation",
+        {
+          bnbFee: bnbFee.toString(),
+          imputedUSDTFee: imputedUSDTFee.toString(),
+          explanation: "BNB fee gives 25% discount, imputing 0.075% USDT fee",
+        },
+      );
+
+      // Use the imputed fee for profit calculation
+      feeUSDT = imputedUSDTFee;
+    }
+
+    // CRITICAL: Fallback fee calculation if no fees from Binance
+    // This ensures we always account for fees in profit calculation
+    if (
+      fills.length === 0 ||
+      (feeBTC.isZero() &&
+        feeUSDT.isZero() &&
+        Object.keys(feeOther).length === 0)
+    ) {
+      // Default Binance fee is 0.1% (0.001)
+      const defaultFeeRate = new Decimal(0.001);
+
+      // For SELL orders, fee is typically in USDT
+      feeUSDT = cummulativeQuoteQty.mul(defaultFeeRate);
+
+      logger.warn("⚠️ No fee data from Binance, using fallback calculation", {
+        cummulativeQuoteQty: cummulativeQuoteQty.toString(),
+        calculatedFeeUSDT: feeUSDT.toString(),
+        feeRate: "0.1%",
+        reason: "Fills array empty or no commission data",
+      });
+    }
+
+    // Final fee validation
+    if (feeBTC.isZero() && feeUSDT.isZero()) {
+      logger.error("🚨 CRITICAL: No fees captured or calculated for SELL!", {
+        cummulativeQuoteQty: cummulativeQuoteQty.toString(),
+        fills: fills.length,
+        feeOther: Object.keys(feeOther),
+      });
+
+      // Force a minimum fee to ensure profit calculation accounts for costs
+      const emergencyFeeRate = new Decimal(0.001);
+      feeUSDT = cummulativeQuoteQty.mul(emergencyFeeRate);
+
+      logger.warn("Applied emergency fee calculation", {
+        feeUSDT: feeUSDT.toString(),
+      });
+    }
+
+    // Perform consistency checks if we have fill data
+    if (fills.length > 0) {
+      this.performConsistencyChecks(
+        order,
+        avgPrice,
+        executedQty,
+        cummulativeQuoteQty,
+        fills,
+      );
+    }
+
     return {
       orderId: order.orderId,
       clientOrderId: order.clientOrderId,
@@ -386,6 +482,82 @@ export class SellOrderPlacer extends EventEmitter {
       feeUSDT,
       feeOther,
     };
+  }
+
+  private performConsistencyChecks(
+    order: BinanceOrderWithFills,
+    calculatedAvgPrice: Decimal,
+    executedQty: Decimal,
+    cummulativeQuoteQty: Decimal,
+    fills: OrderFill[],
+  ): void {
+    try {
+      // Check 1: Verify sum of fill quantities matches executedQty
+      const totalFillQty = fills.reduce(
+        (sum, fill) => sum.add(new Decimal(fill.qty)),
+        new Decimal(0),
+      );
+
+      const qtyDiff = executedQty.sub(totalFillQty).abs();
+      if (qtyDiff.gt(0.00000001)) {
+        logger.warn("Sell order fill quantity mismatch", {
+          orderId: order.orderId,
+          executedQty: executedQty.toString(),
+          sumOfFills: totalFillQty.toString(),
+          difference: qtyDiff.toString(),
+        });
+      }
+
+      // Check 2: Verify weighted average price calculation
+      let weightedSum = new Decimal(0);
+      let totalQty = new Decimal(0);
+
+      for (const fill of fills) {
+        const fillQty = new Decimal(fill.qty);
+        const fillPrice = new Decimal(fill.price);
+        weightedSum = weightedSum.add(fillQty.mul(fillPrice));
+        totalQty = totalQty.add(fillQty);
+      }
+
+      if (totalQty.gt(0)) {
+        const fillBasedAvgPrice = weightedSum.div(totalQty);
+        const priceDiff = calculatedAvgPrice.sub(fillBasedAvgPrice).abs();
+
+        // Allow small difference due to rounding
+        if (priceDiff.gt(0.01)) {
+          logger.warn("Sell order average price calculation mismatch", {
+            orderId: order.orderId,
+            calculatedAvgPrice: calculatedAvgPrice.toString(),
+            fillBasedAvgPrice: fillBasedAvgPrice.toString(),
+            difference: priceDiff.toString(),
+          });
+        }
+      }
+
+      // Check 3: Verify cumulative quote quantity
+      const calculatedQuoteQty = weightedSum;
+      const quoteDiff = cummulativeQuoteQty.sub(calculatedQuoteQty).abs();
+
+      // Allow small difference due to rounding (0.01 USDT)
+      if (quoteDiff.gt(0.01)) {
+        logger.warn("Sell order cumulative quote quantity mismatch", {
+          orderId: order.orderId,
+          binanceQuoteQty: cummulativeQuoteQty.toString(),
+          calculatedQuoteQty: calculatedQuoteQty.toString(),
+          difference: quoteDiff.toString(),
+        });
+      }
+
+      logger.debug("Sell order consistency checks passed", {
+        orderId: order.orderId,
+        fillCount: fills.length,
+      });
+    } catch (error) {
+      logger.warn("Error during sell order consistency checks", {
+        orderId: order.orderId,
+        error,
+      });
+    }
   }
 
   private async saveTradeRecord(result: OrderResult): Promise<void> {
@@ -404,7 +576,20 @@ export class SellOrderPlacer extends EventEmitter {
       tradeStatus = "PARTIAL";
     }
 
-    // Determine primary fee
+    // Build complete fee details object
+    const feeDetails: Record<string, number> = {};
+    if (result.feeBTC.gt(0)) {
+      feeDetails.BTC = result.feeBTC.toNumber();
+    }
+    if (result.feeUSDT.gt(0)) {
+      feeDetails.USDT = result.feeUSDT.toNumber();
+    }
+    // Add any other fees
+    for (const [asset, amount] of Object.entries(result.feeOther)) {
+      feeDetails[asset] = amount.toNumber();
+    }
+
+    // Determine primary fee for backward compatibility
     let feeAsset: string | undefined;
     let feeAmount: number | undefined;
     if (result.feeBTC.gt(0)) {
@@ -431,6 +616,7 @@ export class SellOrderPlacer extends EventEmitter {
       quote_quantity: result.cummulativeQuoteQty.toNumber(),
       fee_asset: feeAsset,
       fee_amount: feeAmount,
+      fee_details: Object.keys(feeDetails).length > 0 ? feeDetails : null,
       executed_at: new Date(),
     };
 
@@ -442,7 +628,35 @@ export class SellOrderPlacer extends EventEmitter {
           cycle_id: this.cycleId,
         };
 
-        // Emit event since DB types aren't generated
+        // Save trade to database and get the ID for fills
+        const { data: tradeData, error } = await this.supabaseClient
+          .from("trades")
+          .insert(dbRecord)
+          .select("id")
+          .single();
+
+        if (error) {
+          // Log error but don't throw - we don't want to fail the entire order
+          logger.error("Failed to save trade record to database", {
+            error: error.message,
+            tradeRecord: dbRecord,
+          });
+        } else {
+          logger.info("Trade record saved to database", {
+            orderId: result.orderId,
+            type: "SELL",
+            quantity: result.executedQty.toNumber(),
+            price: result.avgPrice.toNumber(),
+            feeDetails,
+          });
+
+          // Save individual fills if we have them and got a trade ID
+          if (tradeData?.id && result.fills.length > 0) {
+            await this.saveTradeFills(tradeData.id, result.fills);
+          }
+        }
+
+        // Always emit event for external systems
         this.emit("tradeRecordReady", dbRecord);
       } else {
         // Emit event for external systems
@@ -452,6 +666,45 @@ export class SellOrderPlacer extends EventEmitter {
       // Log error
       this.emit("databaseError", { error, tradeRecord: baseTradeRecord });
       throw error;
+    }
+  }
+
+  private async saveTradeFills(
+    tradeId: string,
+    fills: OrderFill[],
+  ): Promise<void> {
+    try {
+      const fillRecords = fills.map((fill, index) => ({
+        trade_id: tradeId,
+        fill_index: index,
+        price: parseFloat(fill.price),
+        quantity: parseFloat(fill.qty),
+        commission: parseFloat(fill.commission),
+        commission_asset: fill.commissionAsset,
+        binance_trade_id: fill.tradeId || null,
+      }));
+
+      const { error } = await this.supabaseClient
+        .from("trade_fills")
+        .insert(fillRecords);
+
+      if (error) {
+        logger.warn("Failed to save trade fills", {
+          error: error.message,
+          tradeId,
+          fillCount: fills.length,
+        });
+      } else {
+        logger.debug("Trade fills saved", {
+          tradeId,
+          fillCount: fills.length,
+        });
+      }
+    } catch (error) {
+      logger.warn("Error saving trade fills", {
+        error,
+        tradeId,
+      });
     }
   }
 
@@ -495,6 +748,115 @@ export class SellOrderPlacer extends EventEmitter {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Verify order is complete and get final state with fills
+  private async verifyOrderComplete(
+    orderId: number,
+    clientOrderId: string,
+  ): Promise<BinanceOrderWithFills> {
+    // Brief wait for fills to settle (especially for IOC orders)
+    await this.sleep(500);
+
+    try {
+      // First get the order status
+      const finalOrder = await this.binanceClient.getOrder(
+        this.symbol,
+        orderId,
+      );
+
+      // Now get the trades (fills) for this order to get fee information
+      // The trades endpoint provides commission details
+      const trades = await this.binanceClient.getMyTrades(this.symbol, orderId);
+
+      // Convert trades to fills format
+      const fills: BinanceOrderFill[] = trades.map((trade: BinanceTrade) => ({
+        price: trade.price,
+        qty: trade.qty,
+        commission: trade.commission,
+        commissionAsset: trade.commissionAsset,
+        tradeId: trade.id,
+      }));
+
+      logger.info("Sell order verification complete with fills", {
+        orderId,
+        status: finalOrder.status,
+        executedQty: finalOrder.executedQty,
+        fillCount: fills.length,
+        totalCommission: fills.reduce((sum, fill) => {
+          if (fill.commissionAsset === "USDT") {
+            return sum + parseFloat(fill.commission);
+          }
+          return sum;
+        }, 0),
+      });
+
+      // Combine order data with fills
+      return {
+        ...finalOrder,
+        fills,
+      } as BinanceOrderWithFills;
+    } catch (error) {
+      logger.error("Failed to verify sell order with fills", {
+        orderId,
+        clientOrderId,
+        error,
+      });
+
+      // If we can't get trades, at least return the order
+      // and we'll use fallback fee calculation
+      const order = await this.binanceClient.getOrder(this.symbol, orderId);
+
+      return {
+        ...order,
+        fills: [], // Empty fills will trigger fallback fee calculation
+      } as BinanceOrderWithFills;
+    }
+  }
+
+  // Validate Binance response has all required fields
+  private validateBinanceResponse(order: BinanceOrderWithFills): void {
+    // Check critical fields exist
+    if (order.executedQty === undefined || order.executedQty === null) {
+      throw new Error("Missing executedQty in Binance response");
+    }
+
+    if (
+      order.cummulativeQuoteQty === undefined ||
+      order.cummulativeQuoteQty === null
+    ) {
+      throw new Error("Missing cummulativeQuoteQty in Binance response");
+    }
+
+    if (!order.status) {
+      throw new Error("Missing order status in Binance response");
+    }
+
+    if (!order.orderId) {
+      throw new Error("Missing orderId in Binance response");
+    }
+
+    // Validate numeric values are valid
+    const executedQty = new Decimal(order.executedQty);
+    const cummulativeQuoteQty = new Decimal(order.cummulativeQuoteQty);
+
+    if (executedQty.isNaN() || executedQty.lt(0)) {
+      throw new Error(`Invalid executedQty: ${order.executedQty}`);
+    }
+
+    if (cummulativeQuoteQty.isNaN() || cummulativeQuoteQty.lt(0)) {
+      throw new Error(
+        `Invalid cummulativeQuoteQty: ${order.cummulativeQuoteQty}`,
+      );
+    }
+
+    // Log warning if fills are missing (not critical but good to know)
+    if (!order.fills || order.fills.length === 0) {
+      logger.warn("No fills data in Binance response", {
+        orderId: order.orderId,
+        status: order.status,
+      });
+    }
   }
 
   async getOrderStatus(clientOrderId: string): Promise<BinanceOrder> {
