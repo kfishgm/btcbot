@@ -3,7 +3,6 @@ import { EventEmitter } from "events";
 import type {
   WebSocketConfig,
   WebSocketState,
-  CandleData,
   ConnectionStats,
   KlineMessage,
   WebSocketError,
@@ -131,10 +130,10 @@ export class WebSocketManager extends EventEmitter {
   private buildWebSocketUrl(): string {
     const { symbol, timeframe, testnet } = this.config;
     const baseUrl = testnet
-      ? "wss://testnet.binance.vision"
+      ? "wss://stream.testnet.binance.vision:9443"
       : "wss://stream.binance.com:9443";
 
-    return `${baseUrl}/ws/${symbol}@kline_${timeframe}`;
+    return `${baseUrl}/ws/${symbol.toLowerCase()}@kline_${timeframe}`;
   }
 
   private setupEventHandlers(): void {
@@ -176,26 +175,8 @@ export class WebSocketManager extends EventEmitter {
       const parsed = JSON.parse(message) as KlineMessage;
 
       if (parsed.e === "kline" && parsed.k) {
-        const candle: CandleData = {
-          eventTime: parsed.E,
-          symbol: parsed.s,
-          openTime: parsed.k.t,
-          closeTime: parsed.k.T,
-          firstTradeId: parsed.k.f,
-          lastTradeId: parsed.k.L,
-          open: parsed.k.o,
-          high: parsed.k.h,
-          low: parsed.k.l,
-          close: parsed.k.c,
-          volume: parsed.k.v,
-          numberOfTrades: parsed.k.n,
-          isCandleClosed: parsed.k.x,
-          quoteAssetVolume: parsed.k.q,
-          takerBuyBaseAssetVolume: parsed.k.V,
-          takerBuyQuoteAssetVolume: parsed.k.Q,
-        };
-
-        this.emit("candle", candle);
+        // Emit raw kline message for CandleProcessor
+        this.emit("kline", parsed);
       }
     } catch (error) {
       this.handleError(new Error(`Failed to parse message: ${error}`));

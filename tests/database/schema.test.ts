@@ -313,6 +313,7 @@ describe("Database Schema", () => {
         reference_price: 50000.0,
         cost_accum_usdt: 0.0,
         btc_accum_net: 0.0,
+        btc_dust: 0,
         ath_price: 50000.0,
         buy_amount: 100.0,
       };

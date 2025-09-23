@@ -68,7 +68,7 @@ export class HistoricalCandleManager extends EventEmitter {
     this.symbol = symbol;
     this.interval = interval;
     this.config = {
-      maxCandles: config?.maxCandles ?? 20,
+      maxCandles: config?.maxCandles ?? 100,
       restPollingInterval: config?.restPollingInterval ?? 60000,
       websocketFailureThreshold: config?.websocketFailureThreshold ?? 5,
     };
@@ -241,8 +241,8 @@ export class HistoricalCandleManager extends EventEmitter {
       return 0;
     }
 
-    // Calculate max from the last 20 closed candles
-    const recentClosedCandles = candlesToUse.slice(-20);
+    // Calculate max from the configured number of closed candles
+    const recentClosedCandles = candlesToUse.slice(-this.config.maxCandles);
 
     let maxHigh = 0;
     for (const candle of recentClosedCandles) {

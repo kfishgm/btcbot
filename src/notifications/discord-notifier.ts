@@ -48,7 +48,15 @@ interface RateLimitInfo {
 
 interface QueuedMessage {
   id: string;
-  type: "alert" | "trade" | "cycle" | "pause" | "resume" | "error";
+  type:
+    | "alert"
+    | "trade"
+    | "cycle"
+    | "pause"
+    | "resume"
+    | "error"
+    | "buy"
+    | "sell";
   message: DiscordMessage;
   timestamp: number;
   retryCount: number;
@@ -289,6 +297,78 @@ export class DiscordNotifier {
       await this.sendToWebhook(message);
     } catch (error) {
       await this.queueMessage("trade", message);
+      throw error;
+    }
+  }
+
+  async sendBuyNotification(fields: DiscordField[]): Promise<void> {
+    const embed: DiscordEmbed = {
+      title: "🟢 BUY ORDER EXECUTED",
+      color: 5763719, // Green
+      fields,
+      timestamp: new Date().toISOString(),
+      footer: {
+        text: "BTC Trading Bot",
+      },
+    };
+
+    const message: DiscordMessage = {
+      embeds: [embed],
+      username: "BTC Trading Bot",
+    };
+
+    try {
+      await this.sendToWebhook(message);
+    } catch (error) {
+      await this.queueMessage("buy", message);
+      throw error;
+    }
+  }
+
+  async sendSellNotification(fields: DiscordField[]): Promise<void> {
+    const embed: DiscordEmbed = {
+      title: "🔴 SELL ORDER EXECUTED",
+      color: 15548997, // Red
+      fields,
+      timestamp: new Date().toISOString(),
+      footer: {
+        text: "BTC Trading Bot",
+      },
+    };
+
+    const message: DiscordMessage = {
+      embeds: [embed],
+      username: "BTC Trading Bot",
+    };
+
+    try {
+      await this.sendToWebhook(message);
+    } catch (error) {
+      await this.queueMessage("sell", message);
+      throw error;
+    }
+  }
+
+  async sendCycleCompleteNotification(fields: DiscordField[]): Promise<void> {
+    const embed: DiscordEmbed = {
+      title: "🟣 CYCLE COMPLETE",
+      color: 10181046, // Purple
+      fields,
+      timestamp: new Date().toISOString(),
+      footer: {
+        text: "BTC Trading Bot",
+      },
+    };
+
+    const message: DiscordMessage = {
+      embeds: [embed],
+      username: "BTC Trading Bot",
+    };
+
+    try {
+      await this.sendToWebhook(message);
+    } catch (error) {
+      await this.queueMessage("cycle", message);
       throw error;
     }
   }

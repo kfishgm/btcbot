@@ -29,7 +29,7 @@ interface RetryState {
   lastAttempt: number;
 }
 
-const CACHE_TTL = 1000; // 1 second
+const CACHE_TTL = 120000; // 2 minutes - handles gaps in candle processing
 const MAX_RETRIES = 3;
 const RATE_LIMIT_BACKOFF = 5000; // 5 seconds for rate limit errors
 
@@ -142,10 +142,13 @@ export class BalanceManager {
 
   private getCachedBalance(asset: string): Balance | null {
     const cached = this.cache.get(asset);
-    if (!cached) return null;
+    if (!cached) {
+      return null;
+    }
 
     const now = Date.now();
-    if (now - cached.timestamp <= CACHE_TTL) {
+    const age = now - cached.timestamp;
+    if (age <= CACHE_TTL) {
       return { ...cached.balance, fromCache: true };
     }
 

@@ -528,7 +528,7 @@ describe("CandleProcessor", () => {
       );
     });
 
-    it("should reject zero volume for closed candles", () => {
+    it("should allow zero volume for closed candles", () => {
       const zeroVolumeCandle: KlineMessage = {
         e: "kline",
         E: Date.now(),
@@ -554,10 +554,14 @@ describe("CandleProcessor", () => {
         },
       };
 
-      // This will fail - validateData method doesn't exist yet
-      expect(() => processor.validateData(zeroVolumeCandle)).toThrow(
-        "Invalid data: zero volume for closed candle",
-      );
+      // Zero volume on closed candles is allowed (warning logged but not rejected)
+      let errorEmitted = false;
+      processor.on("error", () => {
+        errorEmitted = true;
+      });
+
+      processor.processMessage(zeroVolumeCandle);
+      expect(errorEmitted).toBe(false);
     });
 
     it("should allow zero volume for open candles", () => {
@@ -834,13 +838,14 @@ describe("CandleProcessor", () => {
 
       const stats = processor.getStats();
       expect(stats.messagesProcessed).toBe(3);
-      expect(stats.errorsCount).toBe(3);
-      // Calculate error rate
+      // Zero volume closed candles are no longer errors, just warnings
+      expect(stats.errorsCount).toBe(2);
+      // Calculate error rate (2 errors out of 3 messages)
       const errorRate =
         stats.messagesProcessed > 0
           ? stats.errorsCount / stats.messagesProcessed
           : 0;
-      expect(errorRate).toBeCloseTo(1.0);
+      expect(errorRate).toBeCloseTo(0.667, 2);
     });
   });
 

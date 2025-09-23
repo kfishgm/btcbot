@@ -153,10 +153,13 @@ BEGIN
   -- Log as critical update
   UPDATE bot_events
   SET event_type = 'CRITICAL_UPDATE'
-  WHERE metadata->>'bot_id' = p_bot_id
-  AND event_type = 'STATE_UPDATE'
-  ORDER BY created_at DESC
-  LIMIT 1;
+  WHERE id = (
+    SELECT id FROM bot_events
+    WHERE metadata->>'bot_id' = p_bot_id
+    AND event_type = 'STATE_UPDATE'
+    ORDER BY created_at DESC
+    LIMIT 1
+  );
   
   RETURN v_result;
 END;

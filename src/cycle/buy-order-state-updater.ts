@@ -20,10 +20,15 @@ export interface StateUpdateData {
   btc_accumulated: number;
   cost_accum_usdt: number;
   btc_accum_net: number;
+  btc_dust?: number | null;
   capital_available: number;
   purchases_remaining: number;
   reference_price: number;
   status: "READY" | "HOLDING" | "PAUSED";
+  buy_index?: number;
+  buy_grid?: number[] | null;
+  buy_anchor_price?: number | null;
+  ath_price?: number | null;
 }
 
 export class BuyOrderStateUpdater extends EventEmitter {
@@ -39,6 +44,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
   async updateAfterBuyOrder(
     currentState: CycleState,
     orderResult: OrderResult,
+    levelsTriggered: number = 1,
   ): Promise<StateUpdateResult> {
     // Emit start event
     this.emit("stateUpdateStarted", {
@@ -51,9 +57,13 @@ export class BuyOrderStateUpdater extends EventEmitter {
       this.validateOrderResult(orderResult);
       this.validateCycleState(currentState, orderResult);
 
-      logger.info("Calculating state updates");
+      logger.info("Calculating state updates", { levelsTriggered });
       // Calculate all updates
-      const updates = this.calculateUpdates(currentState, orderResult);
+      const updates = this.calculateUpdates(
+        currentState,
+        orderResult,
+        levelsTriggered,
+      );
 
       logger.info("Calculated updates", {
         btc_accumulated: updates.btc_accumulated,
@@ -73,6 +83,19 @@ export class BuyOrderStateUpdater extends EventEmitter {
         throw new Error("Current state has no ID - cannot update");
       }
 
+      // Log the exact updates being sent
+      logger.info("Sending updates to updateStateAtomic", {
+        botId: currentState.id,
+        updates: JSON.stringify(updates),
+        updateKeys: Object.keys(updates),
+        buyGridType: Array.isArray(updates.buy_grid)
+          ? "array"
+          : typeof updates.buy_grid,
+        buyGridLength: Array.isArray(updates.buy_grid)
+          ? updates.buy_grid.length
+          : null,
+      });
+
       const updatedState = await this.transactionManager.updateStateAtomic(
         currentState.id,
         updates,
@@ -85,7 +108,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
           btcAdded: orderResult.executedQty.sub(orderResult.feeBTC).toNumber(),
           usdtSpent: orderResult.cummulativeQuoteQty.toNumber(),
           newReferencePrice: updates.reference_price,
-          purchasesUsed: 1,
+          purchasesUsed: levelsTriggered,
         },
       };
 
@@ -172,6 +195,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
   calculateUpdates(
     currentState: CycleState,
     orderResult: OrderResult,
+    levelsTriggered: number = 1,
   ): StateUpdateData {
     // Calculate BTC amounts
     const btcFilled = orderResult.executedQty;
@@ -183,8 +207,8 @@ export class BuyOrderStateUpdater extends EventEmitter {
     const usdtFee = orderResult.feeUSDT;
     // For Binance: BUY orders only have BTC fees (deducted from received amount)
     // The USDT cost is already the full amount paid (cummulativeQuoteQty)
-    // No need to add BTC fee value as it's already reflected in reduced BTC quantity
-    const totalCostUsdt = usdtSpent.add(usdtFee); // usdtFee is 0 for buys on Binance
+    // DO NOT add fees - they're already reflected in reduced BTC quantity
+    const totalCostUsdt = usdtSpent; // No fee addition - fees handled via reduced BTC
 
     // Debug logging for reference price calculation
     logger.info("Reference price calculation inputs:", {
@@ -198,19 +222,22 @@ export class BuyOrderStateUpdater extends EventEmitter {
       currentBtcAccum: currentState.btc_accumulated || 0,
       currentCostAccum: currentState.cost_accum_usdt || 0,
       currentBtcNet: currentState.btc_accum_net || 0,
+      currentDust: currentState.btc_dust || 0,
     });
 
     // Update accumulators
-    const newBtcAccumulated = new Decimal(currentState.btc_accumulated || 0)
+    // btc_accum_net only tracks BTC from current cycle (excludes dust)
+    const newBtcAccumNet = new Decimal(currentState.btc_accum_net || 0)
       .add(netBtcReceived)
+      .toNumber();
+
+    // Total BTC = current cycle BTC + dust from previous cycles
+    const newBtcAccumulated = new Decimal(newBtcAccumNet)
+      .add(currentState.btc_dust || 0)
       .toNumber();
 
     const newCostAccumUsdt = new Decimal(currentState.cost_accum_usdt || 0)
       .add(totalCostUsdt)
-      .toNumber();
-
-    const newBtcAccumNet = new Decimal(currentState.btc_accum_net || 0)
-      .add(netBtcReceived)
       .toNumber();
 
     // Update capital and purchases
@@ -219,12 +246,14 @@ export class BuyOrderStateUpdater extends EventEmitter {
       .sub(totalCostUsdt)
       .toNumber();
 
-    const newPurchasesRemaining = currentState.purchases_remaining - 1;
+    const newPurchasesRemaining =
+      currentState.purchases_remaining - levelsTriggered;
 
-    // Calculate new reference price
+    // Calculate new reference price using ONLY current cycle BTC (excludes dust)
+    // This ensures reference price reflects actual cost basis without dilution from dust
     const referencePrice = this.calculateReferencePrice(
       newCostAccumUsdt,
-      newBtcAccumNet,
+      newBtcAccumNet, // Excludes dust - only current cycle BTC
     );
 
     // More debug logging
@@ -232,11 +261,13 @@ export class BuyOrderStateUpdater extends EventEmitter {
       newBtcAccumulated,
       newCostAccumUsdt,
       newBtcAccumNet,
+      dustAmount: currentState.btc_dust || 0,
       calculatedReferencePrice: referencePrice,
       expectedWithFee: (
         totalCostUsdt.toNumber() / netBtcReceived.toNumber()
       ).toFixed(2),
       avgPriceFromOrder: orderResult.avgPrice.toString(),
+      note: "Reference price excludes dust for accurate cost basis",
     });
 
     // Verify reference price accounts for fees
@@ -248,15 +279,21 @@ export class BuyOrderStateUpdater extends EventEmitter {
       logger.warn(
         "⚠️ Reference price is suspiciously close to average price!",
         {
-          referencePrice,
+          new_reference_price: referencePrice,
+          cost_accum_usdt: newCostAccumUsdt,
+          btc_accum_net: newBtcAccumNet,
+          formula: `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
           avgPrice: avgPriceNumber,
           differencePercent: priceDifferencePercent.toFixed(4),
           expectation: "Reference price should be ~0.1% higher due to BTC fees",
         },
       );
     } else {
-      logger.info("✅ Reference price properly accounts for fees", {
-        referencePrice,
+      logger.info("✅ Reference price calculated with fee accounting", {
+        new_reference_price: referencePrice,
+        cost_accum_usdt: newCostAccumUsdt,
+        btc_accum_net: newBtcAccumNet,
+        formula: `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
         avgPrice: avgPriceNumber,
         differencePercent: priceDifferencePercent.toFixed(4),
       });
@@ -270,14 +307,50 @@ export class BuyOrderStateUpdater extends EventEmitter {
       newStatus = currentState.status as "READY" | "HOLDING" | "PAUSED";
     }
 
+    // Update buy_index if grid exists
+    const newBuyIndex =
+      currentState.buy_grid &&
+      currentState.buy_index !== null &&
+      currentState.buy_index !== undefined
+        ? currentState.buy_index + levelsTriggered
+        : (currentState.buy_index ?? 0);
+
+    // Set anchor price on first buy (when it's not set yet)
+    const isFirstBuy = !currentState.buy_anchor_price;
+
+    // Quantize anchor price to tickSize (0.01) using floor operation
+    const tickSize = 0.01;
+    const rawAnchorPrice = orderResult.avgPrice.toNumber();
+    const quantizedAnchorPrice =
+      Math.floor(rawAnchorPrice / tickSize) * tickSize;
+
+    const buyAnchorPrice = isFirstBuy
+      ? quantizedAnchorPrice
+      : currentState.buy_anchor_price;
+
+    if (isFirstBuy) {
+      logger.info("Setting buy anchor price on first buy (quantized)", {
+        rawExecutionPrice: rawAnchorPrice,
+        quantizedAnchorPrice: buyAnchorPrice,
+        tickSize,
+        athPrice: currentState.ath_price,
+        referencePrice: currentState.reference_price,
+      });
+    }
+
     return {
       btc_accumulated: newBtcAccumulated,
       cost_accum_usdt: newCostAccumUsdt,
       btc_accum_net: newBtcAccumNet,
+      btc_dust: currentState.btc_dust, // Preserve dust from previous cycles
       capital_available: newCapitalAvailable,
       purchases_remaining: newPurchasesRemaining,
       reference_price: referencePrice,
+      buy_anchor_price: buyAnchorPrice,
+      ath_price: currentState.ath_price, // Preserve ATH price
       status: newStatus,
+      buy_index: newBuyIndex,
+      buy_grid: currentState.buy_grid, // Preserve buy_grid
     };
   }
 

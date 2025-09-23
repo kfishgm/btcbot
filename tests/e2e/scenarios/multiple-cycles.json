@@ -1,0 +1,192 @@
+{
+  "name": "Multiple Cycles Test",
+  "description": "Tests multiple complete trading cycles with capital reinvestment and compound profits",
+  "symbol": "BTCUSDT",
+  "interval": "5m",
+  "candles": [
+    {
+      "openTime": 1704067200000,
+      "open": 100000,
+      "high": 100100,
+      "low": 99900,
+      "close": 100000,
+      "volume": 10,
+      "closeTime": 1704067559999,
+      "comment": "Initial setup"
+    },
+    {
+      "openTime": 1704067560000,
+      "open": 100000,
+      "high": 100000,
+      "low": 99650,
+      "close": 99700,
+      "volume": 15,
+      "closeTime": 1704068159999,
+      "comment": "Cycle 1: First buy at 99700"
+    },
+    {
+      "openTime": 1704068160000,
+      "open": 99700,
+      "high": 99750,
+      "low": 99350,
+      "close": 99400,
+      "volume": 18,
+      "closeTime": 1704068759999,
+      "comment": "Cycle 1: Second buy at 99400"
+    },
+    {
+      "openTime": 1704068760000,
+      "open": 99400,
+      "high": 100000,
+      "low": 99350,
+      "close": 99900,
+      "volume": 25,
+      "closeTime": 1704069359999,
+      "comment": "Cycle 1: Rise triggers sell at 99900"
+    },
+    {
+      "openTime": 1704069360000,
+      "open": 99900,
+      "high": 100500,
+      "low": 99850,
+      "close": 100400,
+      "volume": 30,
+      "closeTime": 1704069959999,
+      "comment": "Cycle 1 complete, new ATH at 100500"
+    },
+    {
+      "openTime": 1704069960000,
+      "open": 100400,
+      "high": 100450,
+      "low": 100050,
+      "close": 100200,
+      "volume": 12,
+      "closeTime": 1704070559999,
+      "comment": "Cycle 2: Waiting for drop from new ATH"
+    },
+    {
+      "openTime": 1704070560000,
+      "open": 100200,
+      "high": 100250,
+      "low": 99850,
+      "close": 100000,
+      "volume": 15,
+      "closeTime": 1704071159999,
+      "comment": "Cycle 2: Drop begins"
+    },
+    {
+      "openTime": 1704071160000,
+      "open": 100000,
+      "high": 100050,
+      "low": 99650,
+      "close": 99700,
+      "volume": 18,
+      "closeTime": 1704071759999,
+      "comment": "Cycle 2: First buy at 99700 from new grid"
+    },
+    {
+      "openTime": 1704071760000,
+      "open": 99700,
+      "high": 99750,
+      "low": 99350,
+      "close": 99400,
+      "volume": 20,
+      "closeTime": 1704072359999,
+      "comment": "Cycle 2: Second buy at 99400"
+    },
+    {
+      "openTime": 1704072360000,
+      "open": 99400,
+      "high": 99450,
+      "low": 99050,
+      "close": 99100,
+      "volume": 22,
+      "closeTime": 1704072959999,
+      "comment": "Cycle 2: Third buy at 99100"
+    },
+    {
+      "openTime": 1704072960000,
+      "open": 99100,
+      "high": 100000,
+      "low": 99050,
+      "close": 99900,
+      "volume": 28,
+      "closeTime": 1704073559999,
+      "comment": "Cycle 2: Rise triggers sell at 99900"
+    },
+    {
+      "openTime": 1704073560000,
+      "open": 99900,
+      "high": 101000,
+      "low": 99800,
+      "close": 100800,
+      "volume": 35,
+      "closeTime": 1704074159999,
+      "comment": "Cycle 2 complete, new ATH at 101000"
+    },
+    {
+      "openTime": 1704074160000,
+      "open": 100800,
+      "high": 100900,
+      "low": 100200,
+      "close": 100300,
+      "volume": 12,
+      "closeTime": 1704074759999,
+      "comment": "Cycle 3: Waiting for drop"
+    },
+    {
+      "openTime": 1704074760000,
+      "open": 100300,
+      "high": 100350,
+      "low": 99950,
+      "close": 100000,
+      "volume": 15,
+      "closeTime": 1704075359999,
+      "comment": "Cycle 3: First buy at 100000"
+    },
+    {
+      "openTime": 1704075360000,
+      "open": 100000,
+      "high": 100700,
+      "low": 99950,
+      "close": 100500,
+      "volume": 25,
+      "closeTime": 1704075959999,
+      "comment": "Cycle 3: Rise triggers sell at 100500"
+    }
+  ],
+  "expectedCycles": [
+    {
+      "number": 1,
+      "buys": 2,
+      "averageBuyPrice": 99550,
+      "sellPrice": 99900,
+      "profit": 1.0,
+      "capitalAfter": 1001.0
+    },
+    {
+      "number": 2,
+      "buys": 3,
+      "averageBuyPrice": 99400,
+      "sellPrice": 99900,
+      "profit": 1.5,
+      "capitalAfter": 1002.5
+    },
+    {
+      "number": 3,
+      "buys": 1,
+      "averageBuyPrice": 100000,
+      "sellPrice": 100500,
+      "profit": 0.5,
+      "capitalAfter": 1003.0
+    }
+  ],
+  "summary": {
+    "totalCycles": 3,
+    "totalProfit": 3.0,
+    "profitPercentage": 0.3,
+    "startingCapital": 1000,
+    "finalCapital": 1003.0
+  },
+  "notes": "Tests multiple complete cycles showing capital reinvestment and compound growth"
+}

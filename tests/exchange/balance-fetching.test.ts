@@ -171,8 +171,8 @@ describe("Balance Fetching (BIN-003)", () => {
     });
   });
 
-  describe("Caching Behavior (1 second TTL)", () => {
-    it("should return cached balance within 1 second", async () => {
+  describe("Caching Behavior (2 minute TTL)", () => {
+    it("should return cached balance within 2 minutes", async () => {
       const mockAccountInfo: BinanceAccountInfo = {
         makerCommission: 10,
         takerCommission: 10,
@@ -237,8 +237,10 @@ describe("Balance Fetching (BIN-003)", () => {
       expect(balance1.free.toString()).toBe("0.1");
       expect(balance1.fromCache).toBe(false);
 
-      // After cache expiry
-      jest.advanceTimersByTime(1001);
+      // After cache expiry (2 minutes)
+      jest.advanceTimersByTime(120001);
+      // Need to wait for async operations after timer advance
+      await Promise.resolve();
       const balance2 = await balanceManager.getBalance("BTC");
       expect(balance2.free.toString()).toBe("0.2");
       expect(balance2.fromCache).toBe(false);
@@ -387,8 +389,8 @@ describe("Balance Fetching (BIN-003)", () => {
       await jest.advanceTimersByTimeAsync(1000);
       await balance1Promise;
 
-      // Clear cache
-      await jest.advanceTimersByTimeAsync(1001);
+      // Clear cache (2 minute TTL)
+      await jest.advanceTimersByTimeAsync(120001);
 
       // Second request should also retry from 0
       mockClient.getAccountInfo
@@ -425,8 +427,9 @@ describe("Balance Fetching (BIN-003)", () => {
       const balance1 = await balanceManager.getBalance("BTC");
       expect(balance1.free.toString()).toBe("0.1");
 
-      // Clear cache
-      jest.advanceTimersByTime(1001);
+      // Clear cache (2 minute TTL)
+      jest.advanceTimersByTime(120001);
+      await Promise.resolve();
 
       // Now API fails
       mockClient.getAccountInfo.mockRejectedValue(new Error("API unavailable"));
@@ -470,15 +473,17 @@ describe("Balance Fetching (BIN-003)", () => {
       mockClient.getAccountInfo.mockResolvedValueOnce(mockAccountInfo1);
       await balanceManager.getBalance("BTC");
 
-      // Clear cache
-      jest.advanceTimersByTime(1001);
+      // Clear cache (2 minute TTL)
+      jest.advanceTimersByTime(120001);
+      await Promise.resolve();
 
       // Second successful fetch updates last known
       mockClient.getAccountInfo.mockResolvedValueOnce(mockAccountInfo2);
       await balanceManager.getBalance("BTC");
 
-      // Clear cache
-      jest.advanceTimersByTime(1001);
+      // Clear cache (2 minute TTL)
+      jest.advanceTimersByTime(120001);
+      await Promise.resolve();
 
       // Now API fails, should return new last known value
       mockClient.getAccountInfo.mockRejectedValue(new Error("API unavailable"));
@@ -514,8 +519,9 @@ describe("Balance Fetching (BIN-003)", () => {
       const originalBalance = await balanceManager.getBalance("BTC");
       const originalTime = originalBalance.lastUpdated;
 
-      // Clear cache
-      jest.advanceTimersByTime(1001);
+      // Clear cache (2 minute TTL)
+      jest.advanceTimersByTime(120001);
+      await Promise.resolve();
 
       // API fails
       mockClient.getAccountInfo.mockRejectedValue(new Error("API unavailable"));

@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import type { KlineMessage, CandleData } from "./websocket-types";
+import { logger } from "../utils/logger";
 
 export interface CandleProcessorOptions {
   maxTimestampDrift?: number;
@@ -131,7 +132,12 @@ export class CandleProcessor extends EventEmitter {
     if (k.x === true) {
       const volume = parseFloat(k.v);
       if (volume === 0) {
-        throw new Error("Invalid data: zero volume for closed candle");
+        logger.warn("Zero volume detected for closed candle", {
+          symbol: k.s,
+          timestamp: new Date(k.t).toISOString(),
+          module: "CandleProcessor",
+        });
+        // Continue processing - zero volume can happen on testnet
       }
     }
 

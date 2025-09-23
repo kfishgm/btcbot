@@ -146,8 +146,20 @@ export class Logger {
         format.colorize(),
         format.printf(({ timestamp, level, message, ...meta }) => {
           let output = `${timestamp} [${level}]: ${message}`;
-          if (Object.keys(meta).length > 0) {
-            output += ` ${JSON.stringify(meta, null, 2)}`;
+          // Only add metadata if there are actual properties (not empty object)
+          // Check if meta has properties and is a plain object
+          if (
+            meta &&
+            typeof meta === "object" &&
+            Object.keys(meta).length > 0
+          ) {
+            // Filter out undefined values and check if there's still content
+            const cleanMeta = Object.fromEntries(
+              Object.entries(meta).filter(([, v]) => v !== undefined),
+            );
+            if (Object.keys(cleanMeta).length > 0) {
+              output += ` ${JSON.stringify(cleanMeta, null, 2)}`;
+            }
           }
           return output;
         }),

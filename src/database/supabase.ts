@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { Database } from "../../types/database.js";
+import { Database } from "../../types/supabase.js";
 
 export function getSupabaseClient() {
   const supabaseUrl =

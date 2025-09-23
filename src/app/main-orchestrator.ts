@@ -337,7 +337,7 @@ export class MainOrchestrator extends EventEmitter {
       if (!workingState.btc_accumulated || workingState.btc_accumulated === 0) {
         logger.info("Not holding BTC, updating ATH");
 
-        // Calculate ATH from last 20 candles (as per STRATEGY.md)
+        // Calculate ATH from configured window (database-controlled, default 20 candles)
         const athPrice = this.config.historicalCandleManager.calculateATH({
           excludeUnclosed: true,
         });
@@ -530,6 +530,10 @@ export class MainOrchestrator extends EventEmitter {
             capital_available: workingState.capital_available,
             buy_amount: workingState.buy_amount,
             btc_accumulated: workingState.btc_accumulated || 0,
+            buy_grid: workingState.buy_grid,
+            buy_index: workingState.buy_index || 0,
+            buy_anchor_price: workingState.buy_anchor_price,
+            btc_dust: workingState.btc_dust || undefined,
           },
           {
             dropPercentage: this.strategyConfig?.dropPercentage || 0.03,
@@ -537,6 +541,7 @@ export class MainOrchestrator extends EventEmitter {
             minBuyUSDT: this.strategyConfig?.minBuyUsdt || 10,
             exchangeMinNotional: 10,
             driftThresholdPct: 0.005,
+            maxPurchases: this.strategyConfig?.maxPurchases || 10,
           },
           {
             close: closePrice,

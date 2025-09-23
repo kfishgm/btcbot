@@ -8,7 +8,9 @@ jest.mock("../../src/exchange/binance-client");
 
 describe("TradingRules", () => {
   let tradingRules: TradingRules;
-  let mockClient: { getExchangeInfo: jest.Mock };
+  let mockClient: {
+    getExchangeInfo: jest.Mock;
+  };
   const TEST_SYMBOL = "BTCUSDT";
 
   const mockExchangeInfo: BinanceExchangeInfo = {
@@ -57,10 +59,8 @@ describe("TradingRules", () => {
     jest.clearAllMocks();
 
     // Create a mock client with properly typed mock
-    const mockFn = jest.fn<() => Promise<BinanceExchangeInfo>>();
-    mockFn.mockResolvedValue(mockExchangeInfo);
     mockClient = {
-      getExchangeInfo: mockFn,
+      getExchangeInfo: jest.fn(() => Promise.resolve(mockExchangeInfo)),
     };
 
     // Create TradingRules instance with mock client
@@ -221,6 +221,90 @@ describe("TradingRules", () => {
       expect(result.valid).toBe(false);
       expect(result.suggestedMinQuantity).toBeDefined();
       expect(result.suggestedMinQuantity).toBeGreaterThanOrEqual(0.0002);
+    });
+  });
+
+  describe("Minimum Sellable Quantity (Dust Handling)", () => {
+    beforeEach(async () => {
+      await tradingRules.getRules(TEST_SYMBOL);
+    });
+
+    it("should calculate minimum sellable quantity based on notional value", () => {
+      // At $50,000 per BTC, minimum $10 notional requires 0.0002 BTC
+      const minQty = tradingRules.getMinimumSellableQuantity(
+        50000,
+        TEST_SYMBOL,
+      );
+      expect(minQty).toBe(0.0002);
+    });
+
+    it("should round up to step size for minimum sellable quantity", () => {
+      // At $115,000 per BTC, $10 notional = 0.00008695... BTC
+      // Should round up to 0.00009 (9 * stepSize of 0.00001)
+      const minQty = tradingRules.getMinimumSellableQuantity(
+        115000,
+        TEST_SYMBOL,
+      );
+      expect(minQty).toBe(0.00009);
+    });
+
+    it("should respect minQty even if notional allows less", () => {
+      // At very high price, notional might allow < minQty
+      // But result should still be at least minQty
+      const minQty = tradingRules.getMinimumSellableQuantity(
+        10000000,
+        TEST_SYMBOL,
+      );
+      expect(minQty).toBeGreaterThanOrEqual(0.00001);
+    });
+
+    it("should handle NOTIONAL filter type (Binance spot trading)", async () => {
+      // Create exchange info with NOTIONAL instead of MIN_NOTIONAL
+      const spotExchangeInfo: BinanceExchangeInfo = {
+        ...mockExchangeInfo,
+        symbols: [
+          {
+            ...mockExchangeInfo.symbols[0],
+            filters: [
+              {
+                filterType: "PRICE_FILTER",
+                minPrice: "0.01",
+                maxPrice: "1000000.00",
+                tickSize: "0.01",
+              },
+              {
+                filterType: "LOT_SIZE",
+                minQty: "0.00001",
+                maxQty: "9000.00",
+                stepSize: "0.00001",
+              },
+              {
+                filterType: "NOTIONAL",
+                minNotional: "5.00",
+                applyToMarket: true,
+                avgPriceMins: 5,
+              },
+            ],
+          },
+        ],
+      };
+
+      mockClient.getExchangeInfo = jest.fn(() =>
+        Promise.resolve(spotExchangeInfo),
+      );
+
+      // Force refresh to get new rules
+      const rules = await tradingRules.getRules(TEST_SYMBOL, true);
+
+      // Should parse NOTIONAL filter correctly
+      expect(rules.minNotional).toBe(5);
+
+      // At $100,000 per BTC, $5 notional = 0.00005 BTC
+      const minQty = tradingRules.getMinimumSellableQuantity(
+        100000,
+        TEST_SYMBOL,
+      );
+      expect(minQty).toBe(0.00005);
     });
   });
 });

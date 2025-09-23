@@ -40,6 +40,23 @@ export class CycleStateManager {
         .select("*")
         .single();
 
+      console.log("DEBUG: Queried cycle state from database");
+      console.log(
+        "DEBUG: existingState =",
+        JSON.stringify(existingState, null, 2),
+      );
+      console.log("DEBUG: error =", error);
+      console.log("DEBUG: existingState?.id =", existingState?.id);
+
+      logger.info("Queried cycle state from database", {
+        hasData: !!existingState,
+        hasId: existingState ? !!existingState.id : false,
+        id: existingState?.id,
+        keys: existingState ? Object.keys(existingState) : [],
+        fullState: JSON.stringify(existingState),
+        error: error?.message,
+      });
+
       if (error && error.code === "PGRST116") {
         await this.createInitialState();
         return;
@@ -54,6 +71,7 @@ export class CycleStateManager {
         if (isValid) {
           this.currentState = existingState;
           logger.info("Recovered existing cycle state", {
+            id: existingState.id,
             status: existingState.status,
             capital_available: existingState.capital_available,
             btc_accumulated: existingState.btc_accumulated,
@@ -79,6 +97,7 @@ export class CycleStateManager {
       reference_price: null,
       cost_accum_usdt: 0,
       btc_accum_net: 0,
+      btc_dust: 0,
       ath_price: null,
       buy_amount: buyAmount,
     };
@@ -268,6 +287,19 @@ export class CycleStateManager {
 
   getCurrentState(): CycleState | null {
     return this.currentState ? { ...this.currentState } : null;
+  }
+
+  /**
+   * Updates the cached state with new values.
+   * This is needed when external components (like BuyOrderStateUpdater) modify the database.
+   */
+  updateCachedState(newState: CycleState): void {
+    this.currentState = newState;
+    logger.info("Updated cached state", {
+      btc_accumulated: newState.btc_accumulated,
+      reference_price: newState.reference_price,
+      status: newState.status,
+    });
   }
 
   validateState(state: CycleState): boolean {

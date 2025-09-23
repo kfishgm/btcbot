@@ -48,21 +48,23 @@ export class StateTransactionManager {
     botId: string,
     updates: Partial<CycleState>,
   ): Promise<CycleState> {
-    const { data, error } = await this.supabase.rpc("update_state_atomic", {
-      p_bot_id: botId,
-      p_updates: updates,
-      p_expected_version: null,
-    });
+    // Use RPC for atomic state updates
+    const { data: rpcData, error: rpcError } = await this.supabase.rpc(
+      "update_state_atomic",
+      {
+        p_bot_id: botId,
+        p_updates: updates,
+        p_expected_version: undefined,
+      },
+    );
 
-    if (error) {
-      throw new Error(`State update failed: ${error.message}`);
+    if (rpcError || !rpcData) {
+      throw new Error(
+        `RPC update_state_atomic failed: ${rpcError?.message || "No data returned"}`,
+      );
     }
 
-    if (!data) {
-      throw new Error("No data returned from state update");
-    }
-
-    return data as CycleState;
+    return rpcData as CycleState;
   }
 
   /**

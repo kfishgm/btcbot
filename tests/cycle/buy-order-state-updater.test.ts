@@ -47,11 +47,16 @@ describe("BuyOrderStateUpdater", () => {
       btc_accumulated: 0,
       purchases_remaining: 5,
       reference_price: null,
+      buy_anchor_price: null,
       cost_accum_usdt: 0,
       btc_accum_net: 0,
+      btc_dust: 0,
       ath_price: 50000.0,
       buy_amount: 200.0,
       updated_at: new Date().toISOString(),
+      buy_grid: null,
+      buy_index: 0,
+      version: 1,
     };
 
     // Setup mock order result
@@ -93,6 +98,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: expectedBtcAccumulated,
         cost_accum_usdt: 500.5,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -122,6 +128,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: expectedCostAccum,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -148,6 +155,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5,
         btc_accum_net: expectedBtcAccumNet,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -174,6 +182,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: expectedCapital,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -200,6 +209,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: expectedPurchasesRemaining,
         reference_price: 50150.15,
@@ -225,6 +235,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -254,6 +265,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: expectedReferencePrice,
@@ -346,6 +358,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 502.0, // 500 + 1.50 + (0.00001 * 50000) = 502.00
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 498.5, // 1000 - 500 - 1.50 (includes USDT fee)
         purchases_remaining: 4,
         reference_price: 50250.25,
@@ -377,6 +390,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00000099,
         cost_accum_usdt: 0.0505, // 0.05 + (0.00000001 * 50000)
         btc_accum_net: 0.00000099,
+        btc_dust: 0,
         capital_available: 999.95,
         purchases_remaining: 4,
         reference_price: 51010.1,
@@ -437,6 +451,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00499, // 0.005 - 0.00001
         cost_accum_usdt: 250.5, // 250 + (0.00001 * 50000)
         btc_accum_net: 0.00499,
+        btc_dust: 0,
         capital_available: 750.0, // 1000 - 250
         purchases_remaining: 4, // Still count as one purchase used
         reference_price: 50200.4,
@@ -464,6 +479,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -490,6 +506,78 @@ describe("BuyOrderStateUpdater", () => {
       ).rejects.toThrow("Database error");
     });
 
+    it("should set anchor price on first buy", async () => {
+      // Arrange - first buy (no anchor price set)
+      mockCycleState.buy_anchor_price = null;
+      mockOrderResult.avgPrice = new Decimal("48500.00");
+
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        btc_dust: 0,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        buy_anchor_price: 48500.0, // Should be set to execution price
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
+
+      // Act
+      const result = await updater.updateAfterBuyOrder(
+        mockCycleState,
+        mockOrderResult,
+      );
+
+      // Assert
+      expect(result.buy_anchor_price).toBe(48500.0);
+      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
+        "test-cycle-id",
+        expect.objectContaining({
+          buy_anchor_price: 48500.0,
+        }),
+      );
+    });
+
+    it("should preserve anchor price on subsequent buys", async () => {
+      // Arrange - subsequent buy (anchor already set)
+      mockCycleState.buy_anchor_price = 49000.0;
+      mockOrderResult.avgPrice = new Decimal("47500.00");
+
+      const expectedUpdatedState = {
+        ...mockCycleState,
+        btc_accumulated: 0.00999,
+        cost_accum_usdt: 500.5,
+        btc_accum_net: 0.00999,
+        btc_dust: 0,
+        capital_available: 500.0,
+        purchases_remaining: 4,
+        reference_price: 50150.15,
+        buy_anchor_price: 49000.0, // Should remain unchanged
+        status: "HOLDING" as const,
+      };
+
+      mockUpdateStateAtomic.mockResolvedValue(expectedUpdatedState);
+
+      // Act
+      const result = await updater.updateAfterBuyOrder(
+        mockCycleState,
+        mockOrderResult,
+      );
+
+      // Assert
+      expect(result.buy_anchor_price).toBe(49000.0);
+      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
+        "test-cycle-id",
+        expect.objectContaining({
+          buy_anchor_price: 49000.0,
+        }),
+      );
+    });
+
     it("should preserve other cycle state fields unchanged", async () => {
       // Arrange
       const expectedUpdatedState = {
@@ -497,6 +585,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -529,6 +618,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5, // Should still update correctly, ignoring non-BTC/USDT fees
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -560,6 +650,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.003333,
         cost_accum_usdt: 166.683, // 166.6665 + (0.00000033 * 50000)
         btc_accum_net: 0.003333,
+        btc_dust: 0,
         capital_available: 833.3335,
         purchases_remaining: 4,
         reference_price: expectedReferencePrice,
@@ -586,6 +677,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accumulated: 0.00999,
         cost_accum_usdt: 500.5,
         btc_accum_net: 0.00999,
+        btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
         reference_price: 50150.15,
@@ -669,11 +761,11 @@ describe("BuyOrderStateUpdater", () => {
 
       // Assert
       expect(updates.btc_accumulated).toBe(0.00999);
-      expect(updates.cost_accum_usdt).toBe(500.5);
+      expect(updates.cost_accum_usdt).toBe(500.0); // cummulativeQuoteQty, no USDT fee for buys
       expect(updates.btc_accum_net).toBe(0.00999);
       expect(updates.capital_available).toBe(500.0);
       expect(updates.purchases_remaining).toBe(4);
-      expect(updates.reference_price).toBe(50100.1);
+      expect(updates.reference_price).toBe(50050.05); // 500 / 0.00999
       expect(updates.status).toBe("HOLDING");
     });
 
@@ -682,14 +774,16 @@ describe("BuyOrderStateUpdater", () => {
       mockCycleState.btc_accumulated = 0.01;
       mockCycleState.cost_accum_usdt = 500.0;
       mockCycleState.btc_accum_net = 0.0099;
+      mockCycleState.btc_dust = 0.0001; // btc_accumulated = btc_accum_net + btc_dust
 
       // Act
       const updates = updater.calculateUpdates(mockCycleState, mockOrderResult);
 
       // Assert
-      expect(updates.btc_accumulated).toBe(0.01999); // 0.01 + 0.00999
-      expect(updates.cost_accum_usdt).toBe(1000.5); // 500 + 500.5
+      expect(updates.btc_accumulated).toBe(0.01999); // btc_accum_net (0.01989) + dust (0.0001)
+      expect(updates.cost_accum_usdt).toBe(1000.0); // 500 + 500 (no USDT fee)
       expect(updates.btc_accum_net).toBe(0.01989); // 0.0099 + 0.00999
+      expect(updates.btc_dust).toBe(0.0001); // Dust is preserved
     });
   });
 });

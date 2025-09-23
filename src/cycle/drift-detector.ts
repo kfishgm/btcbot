@@ -4,8 +4,10 @@
  * Implements SAF-001: Detect when balances drift from expected state
  *
  * Formulas from STRATEGY.md Section 7:
- * - drift_usdt = |USDT_SPOT - capital_available| / max(capital_available, 1)
+ * - drift_usdt = max(0, (capital_available - USDT_SPOT) / max(capital_available, 1))
+ *   Only triggers when insufficient funds (allows excess)
  * - drift_btc = |BTC_SPOT - btc_accumulated| / max(btc_accumulated, 0.00000001)
+ *   Must match exactly
  *
  * Pauses strategy if drift >= 0.5% (configurable threshold)
  * Handles edge cases with zero balances using max(value, epsilon) approach
@@ -55,7 +57,9 @@ export class DriftDetector {
 
   /**
    * Check USDT balance drift
-   * Formula: drift_usdt = |USDT_SPOT - capital_available| / max(capital_available, 1)
+   * Formula: drift_usdt = max(0, (capital_available - USDT_SPOT) / max(capital_available, 1))
+   * Only triggers when insufficient funds (spot < capital_available)
+   * Allows excess funds in account (spot > capital_available is OK)
    */
   checkUSDTDrift(params: USDTDriftParams): DriftResult {
     let { spotBalance, capitalAvailable } = params;
@@ -76,12 +80,11 @@ export class DriftDetector {
       };
     }
 
-    // Allow negative values but still calculate drift
-    // This shouldn't happen in production but handle gracefully
-    // Calculate drift using formula from STRATEGY.md
-    const difference = Math.abs(spotBalance - capitalAvailable);
+    // Calculate drift using updated formula from STRATEGY.md
+    // Only triggers drift when insufficient funds (allows excess)
+    const insufficientAmount = Math.max(0, capitalAvailable - spotBalance);
     const denominator = Math.max(capitalAvailable, DriftDetector.USDT_EPSILON);
-    const driftPercentage = difference / denominator;
+    const driftPercentage = insufficientAmount / denominator;
 
     return {
       asset: "USDT",
@@ -93,7 +96,9 @@ export class DriftDetector {
 
   /**
    * Check BTC balance drift
-   * Formula: drift_btc = |BTC_SPOT - btc_accumulated| / max(btc_accumulated, 0.00000001)
+   * Formula: drift_btc = max(0, (btc_accumulated - BTC_SPOT)) / max(btc_accumulated, 0.00000001)
+   * Only triggers when insufficient BTC (spot < btc_accumulated)
+   * Allows excess BTC (dust amounts) without triggering drift
    */
   checkBTCDrift(params: BTCDriftParams): DriftResult {
     let { spotBalance, btcAccumulated } = params;
@@ -107,10 +112,11 @@ export class DriftDetector {
     if (!Number.isFinite(spotBalance)) {
       // For Infinity inputs, return Infinity drift percentage
       if (spotBalance === Infinity) {
+        // Infinity spot balance means excess, which is OK
         return {
           asset: "BTC",
-          driftPercentage: Infinity,
-          status: "exceeded",
+          driftPercentage: 0,
+          status: "ok",
           threshold: this.threshold,
         };
       }
@@ -133,12 +139,11 @@ export class DriftDetector {
       };
     }
 
-    // Allow negative values but still calculate drift
-    // This shouldn't happen in production but handle gracefully
-    // Calculate drift using formula from STRATEGY.md
-    const difference = Math.abs(spotBalance - btcAccumulated);
+    // Calculate drift using tolerance formula (like USDT)
+    // Only triggers drift when insufficient BTC (allows excess/dust)
+    const insufficientAmount = Math.max(0, btcAccumulated - spotBalance);
     const denominator = Math.max(btcAccumulated, DriftDetector.BTC_EPSILON);
-    const driftPercentage = difference / denominator;
+    const driftPercentage = insufficientAmount / denominator;
 
     return {
       asset: "BTC",

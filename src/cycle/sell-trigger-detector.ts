@@ -1,17 +1,19 @@
 /**
  * Sell Trigger Detector
  *
- * Implements TRD-004: Detect when market conditions trigger a sell order
- *
- * Formula from STRATEGY.md:
- * - SELL CONDITION: if (btc_accumulated > 0 AND Close >= reference_price * (1 + %Rise))
+ * Implements sell trigger logic from STRATEGY_UPDATED.md:
+ * - SELL CONDITION: if (btc_accumulated > 0 AND Close >= avg_cost * (1 + %Rise))
+ * - avg_cost = cost_accum_usdt / btc_accum_net
+ * - IMPORTANT: avg_cost is the economic reference, NOT the same as reference_price
+ *   - reference_price = ATH when no BTC held (for grid anchoring)
+ *   - reference_price = avg_cost when BTC held (for sell trigger)
  * - Drift check: drift_btc = |BTC_SPOT - btc_accumulated| / max(btc_accumulated, 0.00000001)
  * - Must be < 0.005 (0.5%)
  *
  * Pre-sell validations:
  * 1. Strategy is not PAUSED
  * 2. BTC accumulated > 0
- * 3. Price meets sell threshold
+ * 3. Price meets sell threshold (above avg_cost * (1 + %Rise))
  * 4. BTC balance >= btc_accumulated
  * 5. Drift < 0.5%
  *
@@ -108,11 +110,11 @@ export class SellTriggerDetector {
       };
     }
 
-    // 3. Check if reference price is set
+    // 3. Check if average cost is set (stored as reference_price)
     if (state.reference_price === null || state.reference_price === undefined) {
       return {
         shouldSell: false,
-        reason: "Reference price is not set",
+        reason: "Average cost is not set",
         validations,
       };
     }
@@ -219,7 +221,7 @@ export class SellTriggerDetector {
 
   /**
    * Calculate the sell threshold price
-   * @param referencePrice Reference price for calculations
+   * @param referencePrice Average cost (reference_price = cost_accum_usdt / btc_accum_net)
    * @param risePercentage Rise percentage (e.g., 0.03 for 3%)
    * @returns Sell threshold price
    */
@@ -227,7 +229,8 @@ export class SellTriggerDetector {
     referencePrice: number,
     risePercentage: number,
   ): number {
-    // Formula from STRATEGY.md: reference_price * (1 + %Rise)
+    // Formula from STRATEGY_UPDATED.md: avg_cost * (1 + %Rise)
+    // where avg_cost is stored as reference_price
     return referencePrice * (1 + risePercentage);
   }
 
@@ -280,7 +283,7 @@ export class SellTriggerDetector {
    * Log sell decision
    * @param shouldSell Whether sell was triggered
    * @param currentPrice Current market price
-   * @param threshold Sell threshold price
+   * @param threshold Sell threshold price (avg_cost * (1 + %Rise))
    * @param amount BTC amount to sell
    */
   private logSellDecision(
@@ -293,9 +296,9 @@ export class SellTriggerDetector {
       logger.info("SELL TRIGGERED", {
         module: "SellTriggerDetector",
         price: currentPrice,
-        threshold: threshold,
+        sellThreshold: threshold,
         amount: amount,
-        message: `Price ${this.formatPrice(currentPrice)} >= Threshold ${this.formatPrice(threshold)}, Amount: ${this.formatBTC(amount)} BTC`,
+        message: `Price ${this.formatPrice(currentPrice)} >= Sell Threshold ${this.formatPrice(threshold)} (avg_cost * rise%), Amount: ${this.formatBTC(amount)} BTC`,
       });
     }
     // Don't log when not triggered to avoid spam

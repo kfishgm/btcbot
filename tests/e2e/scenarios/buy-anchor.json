@@ -1,0 +1,96 @@
+{
+  "name": "Buy Anchor Mechanism Test",
+  "description": "Tests that first buy sets buy_anchor_price and subsequent grid is rebuilt from anchor",
+  "symbol": "BTCUSDT",
+  "interval": "5m",
+  "candles": [
+    {
+      "openTime": 1704067200000,
+      "open": 100000,
+      "high": 100100,
+      "low": 99900,
+      "close": 100000,
+      "volume": 10,
+      "closeTime": 1704067559999,
+      "comment": "Initial candle, establishes baseline"
+    },
+    {
+      "openTime": 1704067560000,
+      "open": 100000,
+      "high": 100000,
+      "low": 99650,
+      "close": 99700,
+      "volume": 15,
+      "closeTime": 1704068159999,
+      "comment": "Drop to 99700 (-0.3%), triggers first buy which sets anchor"
+    },
+    {
+      "openTime": 1704068160000,
+      "open": 99700,
+      "high": 99850,
+      "low": 99700,
+      "close": 99750,
+      "volume": 12,
+      "closeTime": 1704068759999,
+      "comment": "Small rise to 99750, no action"
+    },
+    {
+      "openTime": 1704068760000,
+      "open": 99750,
+      "high": 99800,
+      "low": 99700,
+      "close": 99720,
+      "volume": 10,
+      "closeTime": 1704069359999,
+      "comment": "Stays around anchor level"
+    },
+    {
+      "openTime": 1704069360000,
+      "open": 99720,
+      "high": 99750,
+      "low": 99350,
+      "close": 99400,
+      "volume": 20,
+      "closeTime": 1704069959999,
+      "comment": "Drop to 99400, should trigger from anchor-based grid (99700 * 0.997 = 99401)"
+    },
+    {
+      "openTime": 1704069960000,
+      "open": 99400,
+      "high": 99450,
+      "low": 99050,
+      "close": 99100,
+      "volume": 22,
+      "closeTime": 1704070559999,
+      "comment": "Drop to 99100, triggers next grid level from anchor (99700 * 0.994 = 99102)"
+    }
+  ],
+  "expectedBuys": 3,
+  "expectedEvents": [
+    {
+      "type": "first_buy",
+      "price": 99700,
+      "sets_anchor": true,
+      "comment": "First buy sets buy_anchor_price to execution price"
+    },
+    {
+      "type": "grid_rebuild",
+      "anchor": 99700,
+      "grid_levels": [99401, 99102, 98803, 98504],
+      "comment": "Grid rebuilds from anchor with 0.3% intervals"
+    },
+    {
+      "type": "second_buy",
+      "price": 99400,
+      "from_anchor": true,
+      "comment": "Buy triggers from anchor-based grid level"
+    },
+    {
+      "type": "third_buy",
+      "price": 99100,
+      "from_anchor": true,
+      "comment": "Another buy from anchor-based grid"
+    }
+  ],
+  "notes": "Tests buy_anchor_price mechanism where first buy sets anchor and grid rebuilds from that point"
+}

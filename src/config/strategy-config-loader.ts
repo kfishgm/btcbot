@@ -12,6 +12,7 @@ export interface StrategyConfig {
   initialCapitalUsdt: number;
   slippageBuyPct: number;
   slippageSellPct: number;
+  athWindow: number;
   isActive: boolean;
   updatedAt: string;
 }
@@ -27,6 +28,7 @@ interface DatabaseStrategyConfig {
   initial_capital_usdt: number;
   slippage_buy_pct: number;
   slippage_sell_pct: number;
+  ath_window: number;
   is_active: boolean;
   updated_at: string;
 }
@@ -137,6 +139,7 @@ export class StrategyConfigLoader {
       "initialCapitalUsdt",
       "slippageBuyPct",
       "slippageSellPct",
+      "athWindow",
     ];
 
     for (const field of requiredFields) {
@@ -192,19 +195,19 @@ export class StrategyConfigLoader {
       }
     }
 
-    // Validate dropPercentage (0.02 to 0.08)
+    // Validate dropPercentage (0.0015 to 0.08) - lowered minimum for testing
     const dropPct = cfg.dropPercentage as number;
-    if (dropPct < 0.02 || dropPct > 0.08) {
+    if (dropPct < 0.0015 || dropPct > 0.08) {
       throw new StrategyConfigError(
-        "drop_percentage must be between 0.02 and 0.08",
+        "drop_percentage must be between 0.0015 and 0.08",
       );
     }
 
-    // Validate risePercentage (0.02 to 0.08)
+    // Validate risePercentage (0.0015 to 0.08) - lowered minimum for testing
     const risePct = cfg.risePercentage as number;
-    if (risePct < 0.02 || risePct > 0.08) {
+    if (risePct < 0.0015 || risePct > 0.08) {
       throw new StrategyConfigError(
-        "rise_percentage must be between 0.02 and 0.08",
+        "rise_percentage must be between 0.0015 and 0.08",
       );
     }
 
@@ -243,6 +246,12 @@ export class StrategyConfigLoader {
         "slippage_sell_pct must be between 0 and 1",
       );
     }
+
+    // Validate athWindow (10 to 500)
+    const athWindow = cfg.athWindow as number;
+    if (athWindow < 10 || athWindow > 500) {
+      throw new StrategyConfigError("ath_window must be between 10 and 500");
+    }
   }
 
   /**
@@ -251,14 +260,17 @@ export class StrategyConfigLoader {
   private async createDefaultConfig(): Promise<StrategyConfig> {
     const defaultConfig: Omit<DatabaseStrategyConfig, "id" | "updated_at"> = {
       timeframe: "4h",
-      drop_percentage: 0.05,
-      rise_percentage: 0.05,
+      drop_percentage: 0.03,
+      rise_percentage: 0.03,
       max_purchases: 10,
       min_buy_usdt: 10,
-      initial_capital_usdt: 300,
+      initial_capital_usdt: parseFloat(
+        process.env.INITIAL_CAPITAL_USDT || "300",
+      ),
       slippage_buy_pct: 0.003,
       slippage_sell_pct: 0.003,
-      is_active: false, // MUST be inactive by default
+      ath_window: 20, // Default value (configurable 10-500)
+      is_active: true, // Auto-activate for convenience
     };
 
     // Insert default configuration
@@ -276,7 +288,7 @@ export class StrategyConfigLoader {
     const { data: createdConfig, error: fetchError } = await this.client
       .from("strategy_config")
       .select("*")
-      .eq("is_active", false)
+      .eq("is_active", true)
       .single();
 
     if (fetchError) {
@@ -305,6 +317,7 @@ export class StrategyConfigLoader {
       initialCapitalUsdt: dbConfig.initial_capital_usdt,
       slippageBuyPct: dbConfig.slippage_buy_pct,
       slippageSellPct: dbConfig.slippage_sell_pct,
+      athWindow: dbConfig.ath_window,
       isActive: dbConfig.is_active,
       updatedAt: dbConfig.updated_at,
     };

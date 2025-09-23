@@ -1,15 +1,24 @@
 /**
  * Reference Price Calculator
  *
- * Implements TRD-001: Calculate weighted average reference price including fees
+ * Calculates the average cost (avg_cost) for accumulated BTC positions.
+ *
+ * IMPORTANT: This calculates avg_cost, which is the economic reference price.
+ * The operational reference_price is a separate concept:
+ * - reference_price = ATH when no BTC held (for grid anchoring)
+ * - reference_price = avg_cost when BTC held (for sell trigger)
  *
  * Formula from STRATEGY.md:
- * - reference_price = cost_accum_usdt / btc_accum_net
- * - cost_accum_usdt = Σ(usdt_spent + fee_usdt + fee_btc * fill_price)
- * - btc_accum_net = Σ(btc_filled - fee_btc)
+ * - avg_cost = cost_accum_usdt / btc_accum_net
+ * - cost_accum_usdt = Σ(usdt_spent)  // No fee addition - fees already reflected
+ * - btc_accum_net = Σ(btc_filled - fee_btc)  // BTC fees reduce net amount
  *
- * When no BTC is held (btc_accum_net = 0), returns the ATH price.
- * Tracks fees in both BTC and USDT currencies.
+ * Fee handling:
+ * - Buy fees in BTC: Reduce btc_accum_net (denominator)
+ * - Sell fees in USDT: Reduce proceeds (not added to cost)
+ * - NO double-counting: fee_btc * fill_price should NOT be added to cost
+ *
+ * When no BTC is held (btc_accum_net = 0), returns the ATH price for grid anchoring.
  */
 
 export interface Purchase {

@@ -137,15 +137,16 @@ describe("StrategyConfigLoader", () => {
       const defaultConfig = {
         id: "generated-id",
         timeframe: "4h",
-        drop_percentage: 0.05,
-        rise_percentage: 0.05,
+        drop_percentage: 0.03,
+        rise_percentage: 0.03,
         max_purchases: 10,
         min_buy_usdt: 10,
         initial_capital_usdt: 300,
         slippage_buy_pct: 0.003,
         slippage_sell_pct: 0.003,
-        is_active: false, // MUST be false for default
+        is_active: true, // Default is created with is_active: true
         updated_at: "2025-01-01T00:00:00Z",
+        ath_window: 20,
       };
 
       // Mock the insert - it doesn't return data, just error status
@@ -165,17 +166,18 @@ describe("StrategyConfigLoader", () => {
       expect(mockSupabaseClient.insert).toHaveBeenCalledWith(
         expect.objectContaining({
           timeframe: "4h",
-          drop_percentage: 0.05,
-          rise_percentage: 0.05,
+          drop_percentage: 0.03,
+          rise_percentage: 0.03,
           max_purchases: 10,
           min_buy_usdt: 10,
           initial_capital_usdt: 300,
           slippage_buy_pct: 0.003,
           slippage_sell_pct: 0.003,
-          is_active: false,
+          ath_window: 20,
+          is_active: true,
         }),
       );
-      expect(config.isActive).toBe(false);
+      expect(config.isActive).toBe(true);
     });
 
     it("should fail startup if configuration values are invalid", async () => {
@@ -189,6 +191,7 @@ describe("StrategyConfigLoader", () => {
         initial_capital_usdt: 300,
         slippage_buy_pct: 0.003,
         slippage_sell_pct: 0.003,
+        ath_window: 20,
         is_active: true,
         updated_at: "2025-01-01T00:00:00Z",
       };
@@ -199,7 +202,7 @@ describe("StrategyConfigLoader", () => {
       });
 
       await expect(loader.loadConfig()).rejects.toThrow(
-        /drop_percentage must be between 0.02 and 0.08/,
+        /drop_percentage must be between 0.0015 and 0.08/,
       );
     });
 
@@ -214,7 +217,7 @@ describe("StrategyConfigLoader", () => {
   });
 
   describe("validateConfig()", () => {
-    it("should validate dropPercentage is between 0.02 and 0.08", async () => {
+    it("should validate dropPercentage is between 0.0015 and 0.08", async () => {
       const validConfig = {
         timeframe: "4h",
         dropPercentage: 0.05,
@@ -224,22 +227,23 @@ describe("StrategyConfigLoader", () => {
         initialCapitalUsdt: 300,
         slippageBuyPct: 0.003,
         slippageSellPct: 0.003,
+        athWindow: 20,
       };
 
       expect(() => loader.validateConfig(validConfig)).not.toThrow();
 
-      const tooLow = { ...validConfig, dropPercentage: 0.019 };
+      const tooLow = { ...validConfig, dropPercentage: 0.0014 };
       expect(() => loader.validateConfig(tooLow)).toThrow(
-        /drop_percentage must be between 0.02 and 0.08/,
+        /drop_percentage must be between 0.0015 and 0.08/,
       );
 
       const tooHigh = { ...validConfig, dropPercentage: 0.081 };
       expect(() => loader.validateConfig(tooHigh)).toThrow(
-        /drop_percentage must be between 0.02 and 0.08/,
+        /drop_percentage must be between 0.0015 and 0.08/,
       );
     });
 
-    it("should validate risePercentage is between 0.02 and 0.08", async () => {
+    it("should validate risePercentage is between 0.0015 and 0.08", async () => {
       const validConfig = {
         timeframe: "4h",
         dropPercentage: 0.05,
@@ -249,18 +253,19 @@ describe("StrategyConfigLoader", () => {
         initialCapitalUsdt: 300,
         slippageBuyPct: 0.003,
         slippageSellPct: 0.003,
+        athWindow: 20,
       };
 
       expect(() => loader.validateConfig(validConfig)).not.toThrow();
 
-      const tooLow = { ...validConfig, risePercentage: 0.019 };
+      const tooLow = { ...validConfig, risePercentage: 0.0014 };
       expect(() => loader.validateConfig(tooLow)).toThrow(
-        /rise_percentage must be between 0.02 and 0.08/,
+        /rise_percentage must be between 0.0015 and 0.08/,
       );
 
       const tooHigh = { ...validConfig, risePercentage: 0.081 };
       expect(() => loader.validateConfig(tooHigh)).toThrow(
-        /rise_percentage must be between 0.02 and 0.08/,
+        /rise_percentage must be between 0.0015 and 0.08/,
       );
     });
 
@@ -274,6 +279,7 @@ describe("StrategyConfigLoader", () => {
         initialCapitalUsdt: 300,
         slippageBuyPct: 0.003,
         slippageSellPct: 0.003,
+        athWindow: 20,
       };
 
       expect(() => loader.validateConfig(validConfig)).not.toThrow();
@@ -299,6 +305,7 @@ describe("StrategyConfigLoader", () => {
         initialCapitalUsdt: 300,
         slippageBuyPct: 0.003,
         slippageSellPct: 0.003,
+        athWindow: 20,
       };
 
       expect(() => loader.validateConfig(validConfig)).not.toThrow();
@@ -319,6 +326,7 @@ describe("StrategyConfigLoader", () => {
         initialCapitalUsdt: 300,
         slippageBuyPct: 0.003,
         slippageSellPct: 0.003,
+        athWindow: 20,
       };
 
       expect(() => loader.validateConfig(validConfig)).not.toThrow();
@@ -333,6 +341,7 @@ describe("StrategyConfigLoader", () => {
         "initialCapitalUsdt",
         "slippageBuyPct",
         "slippageSellPct",
+        "athWindow",
       ];
 
       for (const field of requiredFields) {
@@ -355,8 +364,8 @@ describe("StrategyConfigLoader", () => {
       );
     });
 
-    it("should prevent configuration of constants", async () => {
-      const configWithConstants = {
+    it("should validate athWindow range", async () => {
+      const validConfig = {
         timeframe: "4h",
         dropPercentage: 0.05,
         risePercentage: 0.05,
@@ -365,11 +374,19 @@ describe("StrategyConfigLoader", () => {
         initialCapitalUsdt: 300,
         slippageBuyPct: 0.003,
         slippageSellPct: 0.003,
-        ATH_WINDOW: 30, // Should not be configurable
+        athWindow: 100, // Valid range: 10-500
       };
 
-      expect(() => loader.validateConfig(configWithConstants)).toThrow(
-        /ATH_WINDOW is a constant and cannot be configured/,
+      expect(() => loader.validateConfig(validConfig)).not.toThrow();
+
+      const tooLow = { ...validConfig, athWindow: 9 };
+      expect(() => loader.validateConfig(tooLow)).toThrow(
+        /ath_window must be between 10 and 500/,
+      );
+
+      const tooHigh = { ...validConfig, athWindow: 501 };
+      expect(() => loader.validateConfig(tooHigh)).toThrow(
+        /ath_window must be between 10 and 500/,
       );
     });
   });

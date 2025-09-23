@@ -1,0 +1,125 @@
+{
+  "name": "Sell Trigger Precision Test",
+  "description": "Tests that sell triggers at exactly 0.5% rise from reference price, not before",
+  "symbol": "BTCUSDT",
+  "interval": "5m",
+  "candles": [
+    {
+      "openTime": 1704067200000,
+      "open": 100000,
+      "high": 100100,
+      "low": 99900,
+      "close": 100000,
+      "volume": 10,
+      "closeTime": 1704067559999,
+      "comment": "Initial candle"
+    },
+    {
+      "openTime": 1704067560000,
+      "open": 100000,
+      "high": 100000,
+      "low": 99650,
+      "close": 99700,
+      "volume": 15,
+      "closeTime": 1704068159999,
+      "comment": "Drop to trigger buy at 99700"
+    },
+    {
+      "openTime": 1704068160000,
+      "open": 99700,
+      "high": 99750,
+      "low": 99650,
+      "close": 99700,
+      "volume": 10,
+      "closeTime": 1704068759999,
+      "comment": "Consolidation at buy level, reference price = 99700"
+    },
+    {
+      "openTime": 1704068760000,
+      "open": 99700,
+      "high": 100150,
+      "low": 99700,
+      "close": 100100,
+      "volume": 18,
+      "closeTime": 1704069359999,
+      "comment": "Rise to 100100 (+0.401% from 99700), NO SELL YET"
+    },
+    {
+      "openTime": 1704069360000,
+      "open": 100100,
+      "high": 100190,
+      "low": 100050,
+      "close": 100150,
+      "volume": 20,
+      "closeTime": 1704069959999,
+      "comment": "Rise to 100150 (+0.451% from 99700), NO SELL YET"
+    },
+    {
+      "openTime": 1704069960000,
+      "open": 100150,
+      "high": 100195,
+      "low": 100100,
+      "close": 100190,
+      "volume": 15,
+      "closeTime": 1704070559999,
+      "comment": "Rise to 100190 (+0.491% from 99700), NO SELL YET"
+    },
+    {
+      "openTime": 1704070560000,
+      "open": 100190,
+      "high": 100250,
+      "low": 100180,
+      "close": 100199,
+      "volume": 22,
+      "closeTime": 1704071159999,
+      "comment": "Rise to 100199 (+0.500% from 99700), SELL TRIGGERS"
+    },
+    {
+      "openTime": 1704071160000,
+      "open": 100199,
+      "high": 100300,
+      "low": 100150,
+      "close": 100250,
+      "volume": 25,
+      "closeTime": 1704071759999,
+      "comment": "Continue rising after sell"
+    }
+  ],
+  "expectedEvents": [
+    {
+      "type": "buy",
+      "price": 99700,
+      "candle": 2,
+      "comment": "Buy triggers on drop"
+    },
+    {
+      "type": "no_sell",
+      "price": 100100,
+      "rise_percentage": 0.401,
+      "candle": 4,
+      "comment": "0.401% rise - no sell"
+    },
+    {
+      "type": "no_sell",
+      "price": 100150,
+      "rise_percentage": 0.451,
+      "candle": 5,
+      "comment": "0.451% rise - no sell"
+    },
+    {
+      "type": "no_sell",
+      "price": 100190,
+      "rise_percentage": 0.491,
+      "candle": 6,
+      "comment": "0.491% rise - no sell"
+    },
+    {
+      "type": "sell",
+      "price": 100199,
+      "rise_percentage": 0.5,
+      "candle": 7,
+      "comment": "Exactly 0.5% rise - SELL TRIGGERS"
+    }
+  ],
+  "notes": "Demonstrates precise 0.5% sell trigger threshold. Reference price is 99700, sell should occur at 99700 * 1.005 = 100198.5"
+}

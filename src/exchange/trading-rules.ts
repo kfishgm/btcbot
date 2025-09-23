@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { BinanceClient } from "./binance-client";
 import type {
   BinanceExchangeInfo,
@@ -109,29 +110,55 @@ export class TradingRules {
     const lotSizeFilter = symbolInfo.filters.find(
       (f) => f.filterType === "LOT_SIZE",
     ) as BinanceSymbolFilter;
+    // Check for both NOTIONAL and MIN_NOTIONAL (Binance uses NOTIONAL for spot)
     const minNotionalFilter = symbolInfo.filters.find(
-      (f) => f.filterType === "MIN_NOTIONAL",
+      (f) => f.filterType === "NOTIONAL" || f.filterType === "MIN_NOTIONAL",
     ) as BinanceSymbolFilter;
 
-    return {
+    // Require all critical filters to be present
+    if (
+      !priceFilter ||
+      !priceFilter.minPrice ||
+      !priceFilter.maxPrice ||
+      !priceFilter.tickSize
+    ) {
+      throw new Error(`Missing PRICE_FILTER for ${symbolInfo.symbol}`);
+    }
+    if (
+      !lotSizeFilter ||
+      !lotSizeFilter.minQty ||
+      !lotSizeFilter.maxQty ||
+      !lotSizeFilter.stepSize
+    ) {
+      throw new Error(`Missing LOT_SIZE filter for ${symbolInfo.symbol}`);
+    }
+    if (!minNotionalFilter || !minNotionalFilter.minNotional) {
+      throw new Error(`Missing MIN_NOTIONAL filter for ${symbolInfo.symbol}`);
+    }
+
+    const rules = {
       symbol: symbolInfo.symbol,
-      minPrice: priceFilter?.minPrice ? parseFloat(priceFilter.minPrice) : 0,
-      maxPrice: priceFilter?.maxPrice
-        ? parseFloat(priceFilter.maxPrice)
-        : Number.MAX_SAFE_INTEGER,
-      tickSize: priceFilter?.tickSize ? parseFloat(priceFilter.tickSize) : 0.01,
-      minQty: lotSizeFilter?.minQty ? parseFloat(lotSizeFilter.minQty) : 0,
-      maxQty: lotSizeFilter?.maxQty
-        ? parseFloat(lotSizeFilter.maxQty)
-        : Number.MAX_SAFE_INTEGER,
-      stepSize: lotSizeFilter?.stepSize
-        ? parseFloat(lotSizeFilter.stepSize)
-        : 0.00001,
-      minNotional: minNotionalFilter?.minNotional
-        ? parseFloat(minNotionalFilter.minNotional)
-        : 10,
+      minPrice: parseFloat(priceFilter.minPrice),
+      maxPrice: parseFloat(priceFilter.maxPrice),
+      tickSize: parseFloat(priceFilter.tickSize),
+      minQty: parseFloat(lotSizeFilter.minQty),
+      maxQty: parseFloat(lotSizeFilter.maxQty),
+      stepSize: parseFloat(lotSizeFilter.stepSize),
+      minNotional: parseFloat(minNotionalFilter.minNotional),
       lastUpdated: Date.now(),
     };
+
+    // Log the actual stepSize being used for BTCUSDT
+    if (symbolInfo.symbol === "BTCUSDT") {
+      logger.info("BTCUSDT trading rules loaded:", {
+        stepSize: rules.stepSize,
+        minQty: rules.minQty,
+        minNotional: rules.minNotional,
+        rawStepSize: lotSizeFilter?.stepSize,
+      });
+    }
+
+    return rules;
   }
 
   private isExpired(rules: SymbolTradingRules): boolean {
@@ -181,10 +208,107 @@ export class TradingRules {
     const stepSize = rules.stepSize;
     // Use parseFloat and toFixed to handle precision issues
     const stepCount = Math.floor(quantity / stepSize);
-    const rounded = parseFloat((stepCount * stepSize).toFixed(8));
+    const rawProduct = stepCount * stepSize;
+    const fixedString = rawProduct.toFixed(8);
+    const rounded = parseFloat(fixedString);
+
+    // Log the quantization for debugging
+    if (quantity !== rounded) {
+      const quantizationDiff = quantity - rounded;
+      logger.info(`Quantity quantization for ${symbol}:`, {
+        original: quantity,
+        stepSize,
+        stepCount,
+        rawProduct,
+        fixedString,
+        rounded,
+        difference: quantizationDiff,
+        differencePercent:
+          ((quantizationDiff / quantity) * 100).toFixed(4) + "%",
+        minQty: rules.minQty,
+        maxQty: rules.maxQty,
+      });
+
+      // Warn if we're losing significant amount due to quantization
+      if (quantizationDiff > stepSize) {
+        logger.warn(
+          `Quantization removed ${quantizationDiff.toFixed(8)} BTC (more than one step size)`,
+          {
+            symbol,
+            stepSize,
+            quantizationDiff,
+          },
+        );
+      }
+    }
 
     // Clamp to min/max bounds
     return Math.max(rules.minQty, Math.min(rules.maxQty, rounded));
+  }
+
+  /**
+   * Smart rounding for buy orders to maximize capital utilization
+   * Rounds UP when it results in better spend efficiency
+   * @param availableCapital Optional - if provided, ensures we don't exceed this amount
+   */
+  roundQuantityForBuyOrder(
+    quantity: number,
+    targetSpendUSDT: number,
+    currentPriceBTC: number,
+    symbol: string,
+    availableCapital?: number,
+  ): number {
+    const rules = this.rulesCache.get(symbol);
+    if (!rules) {
+      throw new Error(
+        `No trading rules cached for ${symbol}. Call getRules() first.`,
+      );
+    }
+
+    const stepSize = rules.stepSize;
+
+    // Calculate both rounding options
+    const stepCountDown = Math.floor(quantity / stepSize);
+    const stepCountUp = Math.ceil(quantity / stepSize);
+
+    const roundedDown = parseFloat((stepCountDown * stepSize).toFixed(8));
+    const roundedUp = parseFloat((stepCountUp * stepSize).toFixed(8));
+
+    // Calculate actual spend for each option
+    const spendDown = roundedDown * currentPriceBTC;
+    const spendUp = roundedUp * currentPriceBTC;
+
+    // Calculate efficiency (how close to target)
+    const efficiencyUp = spendUp / targetSpendUSDT;
+
+    // Decision logic:
+    // 1. If availableCapital is provided, never exceed it
+    // 2. If rounding up exceeds target by less than 0.5%, do it
+    // 3. Otherwise, round down to avoid overspending
+    const maxOverspendRatio = 1.005; // Allow up to 0.5% overspend
+
+    let finalQuantity: number;
+
+    // Check if rounding up would exceed available capital
+    const exceedsAvailableCapital =
+      availableCapital && spendUp > availableCapital;
+
+    if (!exceedsAvailableCapital && efficiencyUp <= maxOverspendRatio) {
+      // Round UP for better capital utilization
+      finalQuantity = roundedUp;
+      logger.debug(
+        `Smart rounding UP: ${quantity.toFixed(8)} -> ${roundedUp.toFixed(8)} BTC (spend: $${spendUp.toFixed(2)})`,
+      );
+    } else {
+      // Round DOWN to avoid excessive overspend or exceeding capital
+      finalQuantity = roundedDown;
+      logger.debug(
+        `Smart rounding DOWN: ${quantity.toFixed(8)} -> ${roundedDown.toFixed(8)} BTC (spend: $${spendDown.toFixed(2)})${exceedsAvailableCapital ? " (capital limit)" : ""}`,
+      );
+    }
+
+    // Clamp to min/max bounds
+    return Math.max(rules.minQty, Math.min(rules.maxQty, finalQuantity));
   }
 
   validateMinNotional(
@@ -217,6 +341,44 @@ export class TradingRules {
 
     // Return the larger of minQty rule or calculated minimum
     return Math.max(rules.minQty, minQtyForNotional);
+  }
+
+  // Calculate the minimum quantity that can be sold at current price
+  // This considers both minQty and minNotional requirements
+  getMinimumSellableQuantity(price: number, symbol: string): number {
+    const rules = this.rulesCache.get(symbol);
+    if (!rules) {
+      throw new Error(
+        `No trading rules cached for ${symbol}. Call getRules() first.`,
+      );
+    }
+
+    // Log the trading rules for transparency
+    logger.info("Calculating minimum sellable quantity", {
+      symbol,
+      price,
+      minQty: rules.minQty,
+      minNotional: rules.minNotional,
+      stepSize: rules.stepSize,
+    });
+
+    // Minimum based on notional value requirement
+    const minQtyForNotional = rules.minNotional / price;
+
+    // Must meet both minQty and minNotional requirements
+    const minSellableQty = Math.max(rules.minQty, minQtyForNotional);
+
+    // Round up to nearest step size to ensure it's valid
+    const steps = Math.ceil(minSellableQty / rules.stepSize);
+    const result = parseFloat((steps * rules.stepSize).toFixed(8));
+
+    logger.info("Minimum sellable quantity calculated", {
+      minQtyForNotional,
+      minSellableQty,
+      rounded: result,
+    });
+
+    return result;
   }
 
   validateOrder(

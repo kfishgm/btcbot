@@ -20,6 +20,29 @@ describe("CycleStateManager", () => {
   let cycleStateManager: CycleStateManager;
   let config: CycleStateManagerConfig;
 
+  // Helper to create valid CycleState with all required fields
+  const createValidCycleState = (
+    overrides?: Partial<CycleState>,
+  ): CycleState => ({
+    id: "test-id",
+    status: "READY",
+    capital_available: 300,
+    btc_accumulated: 0,
+    purchases_remaining: 10,
+    reference_price: null,
+    cost_accum_usdt: 0,
+    btc_accum_net: 0,
+        btc_dust: 0,
+    ath_price: null,
+    buy_amount: 30,
+    buy_anchor_price: null,
+    buy_grid: null,
+    buy_index: 0,
+    version: 1,
+    updated_at: new Date().toISOString(),
+    ...overrides,
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
 
@@ -37,19 +60,7 @@ describe("CycleStateManager", () => {
   describe("initialize()", () => {
     describe("when no cycle state exists", () => {
       beforeEach(() => {
-        const insertData: CycleState = {
-          id: "test-id",
-          status: "READY",
-          capital_available: 300,
-          btc_accumulated: 0,
-          purchases_remaining: 10,
-          reference_price: null,
-          cost_accum_usdt: 0,
-          btc_accum_net: 0,
-          ath_price: null,
-          buy_amount: 30,
-          updated_at: new Date().toISOString(),
-        };
+        const insertData = createValidCycleState();
 
         mockSupabase = createMockSupabaseClient({
           cycle_state: {
@@ -95,19 +106,11 @@ describe("CycleStateManager", () => {
             minBuyUSDT: 10,
           };
 
-          const insertData: CycleState = {
-            id: "test-id",
-            status: "READY",
+          const insertData = createValidCycleState({
             capital_available: testConfig.capital,
-            btc_accumulated: 0,
             purchases_remaining: testConfig.purchases,
-            reference_price: null,
-            cost_accum_usdt: 0,
-            btc_accum_net: 0,
-            ath_price: null,
             buy_amount: testConfig.expected,
-            updated_at: new Date().toISOString(),
-          };
+          });
 
           const localMockSupabase = createMockSupabaseClient({
             cycle_state: {
@@ -137,6 +140,7 @@ describe("CycleStateManager", () => {
           btc_accumulated: 0,
           cost_accum_usdt: 0,
           btc_accum_net: 0,
+        btc_dust: 0,
         });
       });
 
@@ -164,7 +168,7 @@ describe("CycleStateManager", () => {
       let existingState: CycleState;
 
       beforeEach(() => {
-        existingState = {
+        existingState = createValidCycleState({
           id: "existing-id",
           status: "HOLDING",
           capital_available: 150,
@@ -173,10 +177,10 @@ describe("CycleStateManager", () => {
           reference_price: 30000,
           cost_accum_usdt: 150,
           btc_accum_net: 0.005,
+        btc_dust: 0,
           ath_price: 31000,
           buy_amount: 30,
-          updated_at: new Date().toISOString(),
-        };
+        });
 
         mockSupabase = createMockSupabaseClient({
           cycle_state: {
@@ -226,19 +230,10 @@ describe("CycleStateManager", () => {
 
     describe("when corrupted cycle state exists", () => {
       it("should detect negative capital_available", async () => {
-        const corruptedState: CycleState = {
+        const corruptedState = createValidCycleState({
           id: "corrupt-id",
-          status: "READY",
           capital_available: -100,
-          btc_accumulated: 0,
-          purchases_remaining: 10,
-          reference_price: null,
-          cost_accum_usdt: 0,
-          btc_accum_net: 0,
-          ath_price: null,
-          buy_amount: 30,
-          updated_at: new Date().toISOString(),
-        };
+        });
 
         mockSupabase = createMockSupabaseClient({
           cycle_state: {
@@ -262,19 +257,10 @@ describe("CycleStateManager", () => {
       });
 
       it("should detect purchases_remaining exceeding max_purchases", async () => {
-        const corruptedState: CycleState = {
+        const corruptedState = createValidCycleState({
           id: "corrupt-id",
-          status: "READY",
-          capital_available: 300,
-          btc_accumulated: 0,
           purchases_remaining: 15,
-          reference_price: null,
-          cost_accum_usdt: 0,
-          btc_accum_net: 0,
-          ath_price: null,
-          buy_amount: 30,
-          updated_at: new Date().toISOString(),
-        };
+        });
 
         mockSupabase = createMockSupabaseClient({
           cycle_state: {
@@ -307,6 +293,7 @@ describe("CycleStateManager", () => {
           reference_price: null,
           cost_accum_usdt: 0,
           btc_accum_net: 0,
+        btc_dust: 0,
           ath_price: null,
           buy_amount: 30,
           updated_at: new Date().toISOString(),
@@ -334,7 +321,7 @@ describe("CycleStateManager", () => {
       });
 
       it("should detect missing reference_price when holding", async () => {
-        const corruptedState: CycleState = {
+        const corruptedState = createValidCycleState({
           id: "corrupt-id",
           status: "HOLDING",
           capital_available: 150,
@@ -343,10 +330,10 @@ describe("CycleStateManager", () => {
           reference_price: null,
           cost_accum_usdt: 150,
           btc_accum_net: 0.005,
+        btc_dust: 0,
           ath_price: null,
           buy_amount: 30,
-          updated_at: new Date().toISOString(),
-        };
+        });
 
         mockSupabase = createMockSupabaseClient({
           cycle_state: {
@@ -370,19 +357,10 @@ describe("CycleStateManager", () => {
       });
 
       it("should log bot event for corruption detection", async () => {
-        const corruptedState: CycleState = {
+        const corruptedState = createValidCycleState({
           id: "corrupt-id",
-          status: "READY",
           capital_available: -100,
-          btc_accumulated: 0,
-          purchases_remaining: 10,
-          reference_price: null,
-          cost_accum_usdt: 0,
-          btc_accum_net: 0,
-          ath_price: null,
-          buy_amount: 30,
-          updated_at: new Date().toISOString(),
-        };
+        });
 
         mockSupabase = createMockSupabaseClient({
           cycle_state: {
@@ -449,19 +427,7 @@ describe("CycleStateManager", () => {
     });
 
     it("should return immutable copy of state", async () => {
-      const state: CycleState = {
-        id: "test-id",
-        status: "READY",
-        capital_available: 300,
-        btc_accumulated: 0,
-        purchases_remaining: 10,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
-        ath_price: null,
-        buy_amount: 30,
-        updated_at: new Date().toISOString(),
-      };
+      const state = createValidCycleState();
 
       mockSupabase = createMockSupabaseClient({
         cycle_state: {
@@ -487,19 +453,9 @@ describe("CycleStateManager", () => {
     });
 
     it("should validate capital_available is non-negative", () => {
-      const validState: CycleState = {
-        id: "test-id",
-        status: "READY",
+      const validState = createValidCycleState({
         capital_available: 0,
-        btc_accumulated: 0,
-        purchases_remaining: 10,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
-        ath_price: null,
-        buy_amount: 30,
-        updated_at: new Date().toISOString(),
-      };
+      });
 
       expect(cycleStateManager.validateState(validState)).toBe(true);
 
@@ -508,19 +464,7 @@ describe("CycleStateManager", () => {
     });
 
     it("should validate btc_accumulated is non-negative", () => {
-      const validState: CycleState = {
-        id: "test-id",
-        status: "READY",
-        capital_available: 300,
-        btc_accumulated: 0,
-        purchases_remaining: 10,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
-        ath_price: null,
-        buy_amount: 30,
-        updated_at: new Date().toISOString(),
-      };
+      const validState = createValidCycleState();
 
       expect(cycleStateManager.validateState(validState)).toBe(true);
 
@@ -529,19 +473,7 @@ describe("CycleStateManager", () => {
     });
 
     it("should validate purchases_remaining does not exceed max_purchases", () => {
-      const validState: CycleState = {
-        id: "test-id",
-        status: "READY",
-        capital_available: 300,
-        btc_accumulated: 0,
-        purchases_remaining: 10,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
-        ath_price: null,
-        buy_amount: 30,
-        updated_at: new Date().toISOString(),
-      };
+      const validState = createValidCycleState();
 
       expect(cycleStateManager.validateState(validState)).toBe(true);
 
@@ -553,43 +485,21 @@ describe("CycleStateManager", () => {
       const validStatuses = ["READY", "HOLDING", "PAUSED"];
 
       for (const status of validStatuses) {
-        const state: CycleState = {
-          id: "test-id",
-          status,
-          capital_available: 300,
-          btc_accumulated: 0,
-          purchases_remaining: 10,
-          reference_price: null,
-          cost_accum_usdt: 0,
-          btc_accum_net: 0,
-          ath_price: null,
-          buy_amount: 30,
-          updated_at: new Date().toISOString(),
-        };
+        const state = createValidCycleState({ status });
 
         expect(cycleStateManager.validateState(state)).toBe(true);
       }
 
       const invalidState = {
-        id: "test-id",
+        ...createValidCycleState(),
         status: "INVALID",
-        capital_available: 300,
-        btc_accumulated: 0,
-        purchases_remaining: 10,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
-        ath_price: null,
-        buy_amount: 30,
-        updated_at: new Date().toISOString(),
       } as CycleState;
 
       expect(cycleStateManager.validateState(invalidState)).toBe(false);
     });
 
     it("should validate reference_price exists when holding", () => {
-      const holdingWithPrice: CycleState = {
-        id: "test-id",
+      const holdingWithPrice = createValidCycleState({
         status: "HOLDING",
         capital_available: 150,
         btc_accumulated: 0.005,
@@ -597,10 +507,10 @@ describe("CycleStateManager", () => {
         reference_price: 30000,
         cost_accum_usdt: 150,
         btc_accum_net: 0.005,
+        btc_dust: 0,
         ath_price: null,
         buy_amount: 30,
-        updated_at: new Date().toISOString(),
-      };
+      });
 
       expect(cycleStateManager.validateState(holdingWithPrice)).toBe(true);
 
@@ -612,19 +522,7 @@ describe("CycleStateManager", () => {
     });
 
     it("should validate buy_amount meets min_buy_usdt requirement", () => {
-      const validState: CycleState = {
-        id: "test-id",
-        status: "READY",
-        capital_available: 300,
-        btc_accumulated: 0,
-        purchases_remaining: 10,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
-        ath_price: null,
-        buy_amount: 30,
-        updated_at: new Date().toISOString(),
-      };
+      const validState = createValidCycleState();
 
       expect(cycleStateManager.validateState(validState)).toBe(true);
 

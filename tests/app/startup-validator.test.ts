@@ -1,25 +1,26 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { StartupValidator } from "../../src/app/startup-validator";
+import { DiscordNotifier } from "../../src/notifications/discord-notifier";
+import { BalanceManager } from "../../src/exchange/balance-manager";
+import { CycleStateManager } from "../../src/cycle/cycle-state-manager";
+import { StrategyConfigLoader } from "../../src/config/strategy-config-loader";
+import { BinanceClient } from "../../src/exchange/binance-client";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "../../types/supabase";
 import { Decimal } from "decimal.js";
 
+// Only mock external dependencies
 jest.mock("../../src/exchange/binance-client");
 jest.mock("@supabase/supabase-js");
-jest.mock("../../src/notifications/discord-notifier");
-jest.mock("../../src/exchange/balance-manager");
-jest.mock("../../src/cycle/cycle-state-manager");
-jest.mock("../../src/config/strategy-config-loader");
-jest.mock("../../src/utils/logger");
 
 describe("StartupValidator", () => {
   let validator: StartupValidator;
-  let mockBinanceClient: { ping: ReturnType<typeof jest.fn> };
-  let mockSupabaseClient: {
-    from: ReturnType<typeof jest.fn>;
-  };
-  let mockDiscordNotifier: { sendAlert: ReturnType<typeof jest.fn> };
-  let mockBalanceManager: { getBalance: ReturnType<typeof jest.fn> };
-  let mockCycleStateManager: { getCurrentState: ReturnType<typeof jest.fn> };
-  let mockStrategyConfigLoader: { loadConfig: ReturnType<typeof jest.fn> };
+  let mockBinanceClient: jest.Mocked<BinanceClient>;
+  let mockSupabaseClient: SupabaseClient<Database>;
+  let discordNotifier: DiscordNotifier;
+  let balanceManager: BalanceManager;
+  let cycleStateManager: CycleStateManager;
+  let strategyConfigLoader: StrategyConfigLoader;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -35,54 +36,90 @@ describe("StartupValidator", () => {
       INITIAL_CAPITAL_USDT: "1000",
     };
 
-    // Create mocks
+    // Create mock Binance client
     mockBinanceClient = {
-      ping: jest.fn().mockResolvedValue(true as never),
-    };
-
-    mockSupabaseClient = {
-      from: jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          limit: jest.fn().mockResolvedValue({ error: null } as never),
+      ping: jest.fn(() => Promise.resolve(true)),
+      getAccountStatus: jest.fn(() =>
+        Promise.resolve({
+          canTrade: true,
+          canWithdraw: false,
+          canDeposit: false,
         }),
-      }),
-    };
+      ),
+      getAllOrders: jest.fn(() => Promise.resolve([])),
+      getOpenOrders: jest.fn(() => Promise.resolve([])),
+      getExchangeInfo: jest.fn(() => Promise.resolve({ symbols: [] })),
+    } as unknown as jest.Mocked<BinanceClient>;
 
-    mockDiscordNotifier = {
-      sendAlert: jest.fn().mockResolvedValue(undefined as never),
-    };
+    // Create mock Supabase client
+    mockSupabaseClient = {
+      from: jest.fn(() => ({
+        select: jest.fn(() => ({
+          limit: jest.fn(() => Promise.resolve({ error: null })),
+          eq: jest.fn(() => ({
+            single: jest.fn(() =>
+              Promise.resolve({
+                data: {
+                  id: "test-config",
+                  timeframe: "5m",
+                  drop_percentage: 3,
+                  rise_percentage: 3,
+                  max_purchases: 10,
+                  min_buy_usdt: 10,
+                  initial_capital_usdt: 1000,
+                  slippage_buy_pct: 0.003,
+                  slippage_sell_pct: 0.003,
+                  is_active: true,
+                  updated_at: new Date().toISOString(),
+                },
+                error: null,
+              }),
+            ),
+          })),
+        })),
+      })),
+    } as unknown as SupabaseClient<Database>;
 
-    mockBalanceManager = {
-      getBalance: jest.fn(),
-    };
+    // Create real instances with mocked dependencies
+    discordNotifier = new DiscordNotifier({
+      webhookUrl:
+        process.env.DISCORD_WEBHOOK_URL ||
+        "https://discord.com/api/webhooks/test",
+    });
+    // Spy on sendAlert method
+    jest.spyOn(discordNotifier, "sendAlert").mockResolvedValue(undefined);
 
-    mockCycleStateManager = {
-      getCurrentState: jest.fn(),
-    };
+    balanceManager = new BalanceManager(mockBinanceClient as never);
+    cycleStateManager = new CycleStateManager(mockSupabaseClient as never, {
+      initialCapitalUSDT: 1000,
+      maxPurchases: 10,
+      minBuyUSDT: 10,
+    });
+    strategyConfigLoader = new StrategyConfigLoader();
 
-    mockStrategyConfigLoader = {
-      loadConfig: jest.fn().mockResolvedValue({
-        id: "test-config",
-        timeframe: "5m",
-        dropPercentage: 3,
-        risePercentage: 3,
-        maxPurchases: 10,
-        minBuyUsdt: 10,
-        initialCapitalUsdt: 1000,
-        slippageBuyPct: 0.003,
-        slippageSellPct: 0.003,
-        isActive: true,
-        updatedAt: new Date().toISOString(),
-      } as never),
-    };
+    // Mock the loadConfig method by default to return a valid config
+    jest.spyOn(strategyConfigLoader, "loadConfig").mockResolvedValue({
+      id: "test-config",
+      timeframe: "5m",
+      dropPercentage: 0.03,
+      risePercentage: 0.03,
+      maxPurchases: 10,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 1000,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 20,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    });
 
     validator = new StartupValidator({
       binanceClient: mockBinanceClient as never,
       supabaseClient: mockSupabaseClient as never,
-      discordNotifier: mockDiscordNotifier as never,
-      balanceManager: mockBalanceManager as never,
-      cycleStateManager: mockCycleStateManager as never,
-      strategyConfigLoader: mockStrategyConfigLoader as never,
+      discordNotifier,
+      balanceManager,
+      cycleStateManager,
+      strategyConfigLoader,
     });
   });
 
@@ -217,8 +254,6 @@ describe("StartupValidator", () => {
 
     describe("API Credentials", () => {
       it("should validate Binance API credentials", async () => {
-        mockBinanceClient.ping.mockResolvedValue(true);
-
         const result = await validator.validateConfiguration();
 
         expect(result.success).toBe(true);
@@ -240,7 +275,7 @@ describe("StartupValidator", () => {
       });
 
       it("should validate Supabase credentials", async () => {
-        mockSupabaseClient.from.mockReturnValue({
+        (mockSupabaseClient.from as jest.Mock).mockReturnValue({
           select: jest.fn().mockReturnValue({
             limit: jest.fn().mockResolvedValue({ error: null } as never),
           }),
@@ -253,7 +288,7 @@ describe("StartupValidator", () => {
       });
 
       it("should fail when Supabase credentials are invalid", async () => {
-        mockSupabaseClient.from.mockReturnValue({
+        (mockSupabaseClient.from as jest.Mock).mockReturnValue({
           select: jest.fn().mockReturnValue({
             limit: jest.fn().mockResolvedValue({
               error: { message: "Invalid API key" },
@@ -275,7 +310,7 @@ describe("StartupValidator", () => {
 
     describe("Strategy Configuration", () => {
       it("should validate strategy configuration", async () => {
-        mockStrategyConfigLoader.loadConfig.mockResolvedValue({
+        (strategyConfigLoader.loadConfig as jest.Mock).mockResolvedValue({
           id: "test-config",
           timeframe: "5m",
           dropPercentage: 3,
@@ -292,11 +327,13 @@ describe("StartupValidator", () => {
         const result = await validator.validateConfiguration();
 
         expect(result.success).toBe(true);
-        expect(mockStrategyConfigLoader.loadConfig).toHaveBeenCalled();
+        expect(strategyConfigLoader.loadConfig).toHaveBeenCalled();
       });
 
       it("should fail when no strategy config exists", async () => {
-        mockStrategyConfigLoader.loadConfig.mockResolvedValue(null as never);
+        (strategyConfigLoader.loadConfig as jest.Mock).mockResolvedValue(
+          null as never,
+        );
 
         const result = await validator.validateConfiguration();
 
@@ -310,7 +347,7 @@ describe("StartupValidator", () => {
       });
 
       it("should fail when drop_percentage is invalid", async () => {
-        mockStrategyConfigLoader.loadConfig.mockResolvedValue({
+        (strategyConfigLoader.loadConfig as jest.Mock).mockResolvedValue({
           id: "test-config",
           timeframe: "5m",
           dropPercentage: 0, // Invalid - must be > 0
@@ -336,7 +373,7 @@ describe("StartupValidator", () => {
       });
 
       it("should fail when rise_percentage is invalid", async () => {
-        mockStrategyConfigLoader.loadConfig.mockResolvedValue({
+        (strategyConfigLoader.loadConfig as jest.Mock).mockResolvedValue({
           id: "test-config",
           timeframe: "5m",
           dropPercentage: 3,
@@ -365,31 +402,35 @@ describe("StartupValidator", () => {
 
   describe("Balance Validation", () => {
     beforeEach(() => {
-      mockBalanceManager.getBalance.mockImplementation((asset: string) => {
-        if (asset === "USDT") {
-          return Promise.resolve({
-            asset: "USDT",
-            free: new Decimal(1500),
-            locked: new Decimal(0),
-            total: new Decimal(1500),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        if (asset === "BTC") {
-          return Promise.resolve({
-            asset: "BTC",
-            free: new Decimal(0),
-            locked: new Decimal(0),
-            total: new Decimal(0),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        throw new Error(`Unknown asset: ${asset}`);
-      });
+      jest
+        .spyOn(balanceManager, "getBalance")
+        .mockImplementation((asset: string) => {
+          if (asset === "USDT") {
+            return Promise.resolve({
+              asset: "USDT",
+              free: new Decimal(1500),
+              locked: new Decimal(0),
+              total: new Decimal(1500),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          if (asset === "BTC") {
+            return Promise.resolve({
+              asset: "BTC",
+              free: new Decimal(0),
+              locked: new Decimal(0),
+              total: new Decimal(0),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          throw new Error(`Unknown asset: ${asset}`);
+        });
 
-      mockCycleStateManager.getCurrentState.mockResolvedValue(null as never);
+      jest
+        .spyOn(cycleStateManager, "getCurrentState")
+        .mockResolvedValue(null as never);
     });
 
     it("should pass when USDT balance is sufficient", async () => {
@@ -416,29 +457,31 @@ describe("StartupValidator", () => {
     });
 
     it("should warn when BTC balance exists", async () => {
-      mockBalanceManager.getBalance.mockImplementation((asset: string) => {
-        if (asset === "USDT") {
-          return Promise.resolve({
-            asset: "USDT",
-            free: new Decimal(1500),
-            locked: new Decimal(0),
-            total: new Decimal(1500),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        if (asset === "BTC") {
-          return Promise.resolve({
-            asset: "BTC",
-            free: new Decimal(0.5),
-            locked: new Decimal(0),
-            total: new Decimal(0.5),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        throw new Error(`Unknown asset: ${asset}`);
-      });
+      jest
+        .spyOn(balanceManager, "getBalance")
+        .mockImplementation((asset: string) => {
+          if (asset === "USDT") {
+            return Promise.resolve({
+              asset: "USDT",
+              free: new Decimal(1500),
+              locked: new Decimal(0),
+              total: new Decimal(1500),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          if (asset === "BTC") {
+            return Promise.resolve({
+              asset: "BTC",
+              free: new Decimal(0.5),
+              locked: new Decimal(0),
+              total: new Decimal(0.5),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          throw new Error(`Unknown asset: ${asset}`);
+        });
 
       const result = await validator.validateBalances();
 
@@ -452,29 +495,31 @@ describe("StartupValidator", () => {
     });
 
     it("should not warn for dust BTC amounts", async () => {
-      mockBalanceManager.getBalance.mockImplementation((asset: string) => {
-        if (asset === "USDT") {
-          return Promise.resolve({
-            asset: "USDT",
-            free: new Decimal(1500),
-            locked: new Decimal(0),
-            total: new Decimal(1500),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        if (asset === "BTC") {
-          return Promise.resolve({
-            asset: "BTC",
-            free: new Decimal(0.000001),
-            locked: new Decimal(0),
-            total: new Decimal(0.000001),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        throw new Error(`Unknown asset: ${asset}`);
-      });
+      jest
+        .spyOn(balanceManager, "getBalance")
+        .mockImplementation((asset: string) => {
+          if (asset === "USDT") {
+            return Promise.resolve({
+              asset: "USDT",
+              free: new Decimal(1500),
+              locked: new Decimal(0),
+              total: new Decimal(1500),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          if (asset === "BTC") {
+            return Promise.resolve({
+              asset: "BTC",
+              free: new Decimal(0.000001),
+              locked: new Decimal(0),
+              total: new Decimal(0.000001),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          throw new Error(`Unknown asset: ${asset}`);
+        });
 
       const result = await validator.validateBalances();
 
@@ -483,13 +528,14 @@ describe("StartupValidator", () => {
     });
 
     it("should detect USDT drift from last state", async () => {
-      mockCycleStateManager.getCurrentState.mockResolvedValue({
+      jest.spyOn(cycleStateManager, "getCurrentState").mockResolvedValue({
         id: "test-id",
         status: "READY",
         ath_price: 50000,
         reference_price: 50000,
         btc_accumulated: 0,
         btc_accum_net: 0,
+        btc_dust: 0,
         capital_available: 1000, // Expected 1000 but have 1500
         cost_accum_usdt: 0,
         purchases_remaining: 10,
@@ -509,37 +555,40 @@ describe("StartupValidator", () => {
     });
 
     it("should detect BTC drift from last state", async () => {
-      mockBalanceManager.getBalance.mockImplementation((asset: string) => {
-        if (asset === "USDT") {
-          return Promise.resolve({
-            asset: "USDT",
-            free: new Decimal(1500),
-            locked: new Decimal(0),
-            total: new Decimal(1500),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        if (asset === "BTC") {
-          return Promise.resolve({
-            asset: "BTC",
-            free: new Decimal(0.5),
-            locked: new Decimal(0),
-            total: new Decimal(0.5),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        throw new Error(`Unknown asset: ${asset}`);
-      });
+      jest
+        .spyOn(balanceManager, "getBalance")
+        .mockImplementation((asset: string) => {
+          if (asset === "USDT") {
+            return Promise.resolve({
+              asset: "USDT",
+              free: new Decimal(1500),
+              locked: new Decimal(0),
+              total: new Decimal(1500),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          if (asset === "BTC") {
+            return Promise.resolve({
+              asset: "BTC",
+              free: new Decimal(0.5),
+              locked: new Decimal(0),
+              total: new Decimal(0.5),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          throw new Error(`Unknown asset: ${asset}`);
+        });
 
-      mockCycleStateManager.getCurrentState.mockResolvedValue({
+      jest.spyOn(cycleStateManager, "getCurrentState").mockResolvedValue({
         id: "test-id",
         status: "HOLDING",
         ath_price: 50000,
         reference_price: 50000,
         btc_accumulated: 1.0, // Expected 1.0 but have 0.5
         btc_accum_net: 1.0,
+        btc_dust: 0,
         capital_available: 1500,
         cost_accum_usdt: 50000,
         purchases_remaining: 0,
@@ -561,13 +610,11 @@ describe("StartupValidator", () => {
 
   describe("Connectivity Validation", () => {
     it("should pass when all services are connected", async () => {
-      mockBinanceClient.ping.mockResolvedValue(true);
-      mockSupabaseClient.from.mockReturnValue({
+      (mockSupabaseClient.from as jest.Mock).mockReturnValue({
         select: jest.fn().mockReturnValue({
           limit: jest.fn().mockResolvedValue({ error: null } as never),
         }),
       });
-      mockDiscordNotifier.sendAlert.mockResolvedValue(undefined);
 
       const result = await validator.validateConnectivity();
 
@@ -609,7 +656,7 @@ describe("StartupValidator", () => {
     });
 
     it("should fail when Supabase connection fails", async () => {
-      mockSupabaseClient.from.mockReturnValue({
+      (mockSupabaseClient.from as jest.Mock).mockReturnValue({
         select: jest.fn().mockReturnValue({
           limit: jest.fn().mockResolvedValue({
             error: { message: "Connection timeout" },
@@ -629,19 +676,15 @@ describe("StartupValidator", () => {
     });
 
     it("should warn when Discord webhook fails", async () => {
-      mockDiscordNotifier.sendAlert.mockRejectedValue(
-        new Error("Webhook failed"),
-      );
+      jest.spyOn(discordNotifier, "isWebhookHealthy").mockReturnValue(false);
 
       const result = await validator.validateConnectivity();
 
       expect(result.success).toBe(true); // Discord is not critical
       expect(result.warnings).toContainEqual(
         expect.objectContaining({
-          code: "DISCORD_CONNECTION_FAILED",
-          message: expect.stringContaining(
-            "Failed to connect to Discord webhook",
-          ),
+          code: "DISCORD_WEBHOOK_UNHEALTHY",
+          message: expect.stringContaining("Discord webhook may be unhealthy"),
         }),
       );
     });
@@ -652,44 +695,46 @@ describe("StartupValidator", () => {
       const result = await validator.validateConnectivity();
 
       expect(result.success).toBe(true);
-      expect(mockDiscordNotifier.sendAlert).not.toHaveBeenCalled();
+      expect(discordNotifier.sendAlert).not.toHaveBeenCalled();
     });
   });
 
   describe("Full Validation", () => {
     beforeEach(() => {
       // Setup all mocks for successful validation
-      mockBinanceClient.ping.mockResolvedValue(true);
-      mockSupabaseClient.from.mockReturnValue({
+      (mockSupabaseClient.from as jest.Mock).mockReturnValue({
         select: jest.fn().mockReturnValue({
           limit: jest.fn().mockResolvedValue({ error: null } as never),
         }),
       });
-      mockDiscordNotifier.sendAlert.mockResolvedValue(undefined);
-      mockBalanceManager.getBalance.mockImplementation((asset: string) => {
-        if (asset === "USDT") {
-          return Promise.resolve({
-            asset: "USDT",
-            free: new Decimal(1500),
-            locked: new Decimal(0),
-            total: new Decimal(1500),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        if (asset === "BTC") {
-          return Promise.resolve({
-            asset: "BTC",
-            free: new Decimal(0),
-            locked: new Decimal(0),
-            total: new Decimal(0),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        throw new Error(`Unknown asset: ${asset}`);
-      });
-      mockCycleStateManager.getCurrentState.mockResolvedValue(null as never);
+      jest
+        .spyOn(balanceManager, "getBalance")
+        .mockImplementation((asset: string) => {
+          if (asset === "USDT") {
+            return Promise.resolve({
+              asset: "USDT",
+              free: new Decimal(1500),
+              locked: new Decimal(0),
+              total: new Decimal(1500),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          if (asset === "BTC") {
+            return Promise.resolve({
+              asset: "BTC",
+              free: new Decimal(0),
+              locked: new Decimal(0),
+              total: new Decimal(0),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          throw new Error(`Unknown asset: ${asset}`);
+        });
+      jest
+        .spyOn(cycleStateManager, "getCurrentState")
+        .mockResolvedValue(null as never);
     });
 
     it("should run all validations in sequence", async () => {
@@ -710,7 +755,7 @@ describe("StartupValidator", () => {
       expect(report.overallSuccess).toBe(false);
       expect(report.configuration.success).toBe(false);
       // Should not have run balance or connectivity checks
-      expect(mockBalanceManager.getBalance).not.toHaveBeenCalled();
+      expect(balanceManager.getBalance).not.toHaveBeenCalled();
     });
 
     it("should fail fast on critical connectivity errors", async () => {
@@ -724,8 +769,8 @@ describe("StartupValidator", () => {
       expect(report.overallSuccess).toBe(false);
       expect(report.connectivity.success).toBe(false);
       // Should have run configuration but not balance (fail-fast after connectivity)
-      expect(mockStrategyConfigLoader.loadConfig).toHaveBeenCalled();
-      expect(mockBalanceManager.getBalance).not.toHaveBeenCalled();
+      expect(strategyConfigLoader.loadConfig).toHaveBeenCalled();
+      expect(balanceManager.getBalance).not.toHaveBeenCalled();
       // Verify Binance was called 1 time in config + 3 retries in connectivity = 4 total
       expect(mockBinanceClient.ping).toHaveBeenCalledTimes(4);
     });
@@ -734,29 +779,31 @@ describe("StartupValidator", () => {
       delete process.env.DISCORD_WEBHOOK_URL;
 
       // Add BTC balance to trigger warning
-      mockBalanceManager.getBalance.mockImplementation((asset: string) => {
-        if (asset === "USDT") {
-          return Promise.resolve({
-            asset: "USDT",
-            free: new Decimal(1500),
-            locked: new Decimal(0),
-            total: new Decimal(1500),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        if (asset === "BTC") {
-          return Promise.resolve({
-            asset: "BTC",
-            free: new Decimal(0.1),
-            locked: new Decimal(0),
-            total: new Decimal(0.1),
-            lastUpdated: new Date(),
-            fromCache: false,
-          });
-        }
-        throw new Error(`Unknown asset: ${asset}`);
-      });
+      jest
+        .spyOn(balanceManager, "getBalance")
+        .mockImplementation((asset: string) => {
+          if (asset === "USDT") {
+            return Promise.resolve({
+              asset: "USDT",
+              free: new Decimal(1500),
+              locked: new Decimal(0),
+              total: new Decimal(1500),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          if (asset === "BTC") {
+            return Promise.resolve({
+              asset: "BTC",
+              free: new Decimal(0.1),
+              locked: new Decimal(0),
+              total: new Decimal(0.1),
+              lastUpdated: new Date(),
+              fromCache: false,
+            });
+          }
+          throw new Error(`Unknown asset: ${asset}`);
+        });
 
       const report = await validator.validate();
 

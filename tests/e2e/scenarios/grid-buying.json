@@ -1,0 +1,71 @@
+{
+  "name": "Grid Buying Test",
+  "description": "Tests that price drops through multiple 0.3% grid levels trigger appropriate buy orders",
+  "symbol": "BTCUSDT",
+  "interval": "5m",
+  "candles": [
+    {
+      "openTime": 1704067200000,
+      "open": 100000,
+      "high": 100100,
+      "low": 99900,
+      "close": 100000,
+      "volume": 10,
+      "closeTime": 1704067559999,
+      "comment": "Initial candle, establishes ATH at 100100"
+    },
+    {
+      "openTime": 1704067560000,
+      "open": 100000,
+      "high": 100000,
+      "low": 99650,
+      "close": 99700,
+      "volume": 15,
+      "closeTime": 1704068159999,
+      "comment": "Drop to 99700 (-0.3% from 100000), triggers first grid buy"
+    },
+    {
+      "openTime": 1704068160000,
+      "open": 99700,
+      "high": 99750,
+      "low": 99350,
+      "close": 99400,
+      "volume": 18,
+      "closeTime": 1704068759999,
+      "comment": "Drop to 99400 (-0.6% from 100000), triggers second grid buy"
+    },
+    {
+      "openTime": 1704068760000,
+      "open": 99400,
+      "high": 99450,
+      "low": 99050,
+      "close": 99100,
+      "volume": 20,
+      "closeTime": 1704069359999,
+      "comment": "Drop to 99100 (-0.9% from 100000), triggers third grid buy"
+    },
+    {
+      "openTime": 1704069360000,
+      "open": 99100,
+      "high": 99150,
+      "low": 98750,
+      "close": 98800,
+      "volume": 22,
+      "closeTime": 1704069959999,
+      "comment": "Drop to 98800 (-1.2% from 100000), triggers fourth grid buy"
+    },
+    {
+      "openTime": 1704069960000,
+      "open": 98800,
+      "high": 98900,
+      "low": 98450,
+      "close": 98500,
+      "volume": 25,
+      "closeTime": 1704070559999,
+      "comment": "Drop to 98500 (-1.5% from 100000), triggers fifth grid buy"
+    }
+  ],
+  "expectedBuys": 5,
+  "expectedBuyPrices": [99700, 99400, 99100, 98800, 98500],
+  "notes": "Each 0.3% drop from the initial price should trigger a buy at the corresponding grid level"
+}

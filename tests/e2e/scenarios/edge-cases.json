@@ -1,0 +1,179 @@
+{
+  "name": "Edge Cases Test",
+  "description": "Tests edge conditions like dust amounts, maximum purchases, insufficient capital",
+  "symbol": "BTCUSDT",
+  "interval": "5m",
+  "scenarios": [
+    {
+      "name": "Maximum Purchases Reached",
+      "candles": [
+        {
+          "openTime": 1704067200000,
+          "close": 100000,
+          "comment": "Initial"
+        },
+        {
+          "openTime": 1704067500000,
+          "close": 99700,
+          "comment": "Buy 1 of 10"
+        },
+        {
+          "openTime": 1704067800000,
+          "close": 99400,
+          "comment": "Buy 2 of 10"
+        },
+        {
+          "openTime": 1704068100000,
+          "close": 99100,
+          "comment": "Buy 3 of 10"
+        },
+        {
+          "openTime": 1704068400000,
+          "close": 98800,
+          "comment": "Buy 4 of 10"
+        },
+        {
+          "openTime": 1704068700000,
+          "close": 98500,
+          "comment": "Buy 5 of 10"
+        },
+        {
+          "openTime": 1704069000000,
+          "close": 98200,
+          "comment": "Buy 6 of 10"
+        },
+        {
+          "openTime": 1704069300000,
+          "close": 97900,
+          "comment": "Buy 7 of 10"
+        },
+        {
+          "openTime": 1704069600000,
+          "close": 97600,
+          "comment": "Buy 8 of 10"
+        },
+        {
+          "openTime": 1704069900000,
+          "close": 97300,
+          "comment": "Buy 9 of 10"
+        },
+        {
+          "openTime": 1704070200000,
+          "close": 97000,
+          "comment": "Buy 10 of 10 - MAX REACHED"
+        },
+        {
+          "openTime": 1704070500000,
+          "close": 96700,
+          "comment": "NO BUY - max purchases reached"
+        },
+        {
+          "openTime": 1704070800000,
+          "close": 96400,
+          "comment": "NO BUY - max purchases reached"
+        }
+      ],
+      "expectedBuys": 10,
+      "expectNoBuysAfter": 10
+    },
+    {
+      "name": "Dust Amount After Partial Sell",
+      "candles": [
+        {
+          "openTime": 1704071200000,
+          "close": 100000,
+          "comment": "Reset"
+        },
+        {
+          "openTime": 1704071500000,
+          "close": 99700,
+          "comment": "Buy small amount"
+        },
+        {
+          "openTime": 1704071800000,
+          "close": 100200,
+          "comment": "Sell most but leave dust"
+        }
+      ],
+      "expectedEvents": [
+        {
+          "type": "buy",
+          "amount": 100,
+          "btc": 0.001003
+        },
+        {
+          "type": "sell",
+          "btcSold": 0.001,
+          "btcRemaining": 0.000003,
+          "comment": "Dust remains below minimum trade size"
+        }
+      ]
+    },
+    {
+      "name": "Insufficient Capital",
+      "startingCapital": 50,
+      "candles": [
+        {
+          "openTime": 1704072200000,
+          "close": 100000,
+          "comment": "Initial"
+        },
+        {
+          "openTime": 1704072500000,
+          "close": 99700,
+          "comment": "Buy with 50 USDT"
+        },
+        {
+          "openTime": 1704072800000,
+          "close": 99400,
+          "comment": "NO BUY - insufficient capital (< minBuyUSDT)"
+        },
+        {
+          "openTime": 1704073100000,
+          "close": 100200,
+          "comment": "Sell to recover capital"
+        },
+        {
+          "openTime": 1704073400000,
+          "close": 99700,
+          "comment": "Can buy again after capital recovered"
+        }
+      ],
+      "expectedBuys": 2,
+      "expectedCapitalBlocked": true
+    },
+    {
+      "name": "Rapid Price Oscillation",
+      "candles": [
+        {
+          "openTime": 1704074000000,
+          "close": 100000,
+          "comment": "Initial"
+        },
+        {
+          "openTime": 1704074300000,
+          "close": 99700,
+          "comment": "Buy trigger"
+        },
+        {
+          "openTime": 1704074600000,
+          "close": 100200,
+          "comment": "Sell trigger"
+        },
+        {
+          "openTime": 1704074900000,
+          "close": 99700,
+          "comment": "Buy trigger again"
+        },
+        {
+          "openTime": 1704075200000,
+          "close": 100200,
+          "comment": "Sell trigger again"
+        }
+      ],
+      "expectedCycles": 2,
+      "comment": "Tests rapid buy-sell cycles"
+    }
+  ],
+  "notes": "Comprehensive edge case testing for robustness"
+}

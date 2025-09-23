@@ -455,12 +455,24 @@ export class BinanceClient {
 
   async getMyTrades(
     symbol: string,
+    orderId?: number,
     limit: number = 500,
   ): Promise<BinanceTrade[]> {
+    const params: {
+      symbol: string;
+      limit: number;
+      orderId?: number;
+    } = { symbol, limit };
+
+    // Add orderId to params if provided to filter trades by order
+    if (orderId !== undefined) {
+      params.orderId = orderId;
+    }
+
     return this.makeRequest<BinanceTrade[]>(
       "/api/v3/myTrades",
       "GET",
-      { symbol, limit },
+      params,
       true,
     );
   }

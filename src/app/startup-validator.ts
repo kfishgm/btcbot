@@ -351,17 +351,22 @@ export class StartupValidator {
     }
 
     // Test Discord webhook if configured (warning only)
+    // Note: We only check if webhook is healthy, no test message is sent
     if (process.env.DISCORD_WEBHOOK_URL && this.config.discordNotifier) {
       try {
-        // Send a test message
-        await this.config.discordNotifier.sendAlert(
-          "Startup validation test",
-          "info",
-        );
+        // Just check the webhook health status without sending any message
+        const webhookHealthy = this.config.discordNotifier.isWebhookHealthy();
+        if (!webhookHealthy) {
+          warnings.push({
+            code: "DISCORD_WEBHOOK_UNHEALTHY",
+            message: "Discord webhook may be unhealthy from previous failures",
+            details: null,
+          });
+        }
       } catch (error) {
         warnings.push({
           code: "DISCORD_CONNECTION_FAILED",
-          message: `Failed to connect to Discord webhook: ${error instanceof Error ? error.message : String(error)}`,
+          message: `Failed to check Discord webhook status: ${error instanceof Error ? error.message : String(error)}`,
           details: error,
         });
       }

@@ -25,6 +25,7 @@ describe("StateTransactionManager", () => {
   >;
   let mockFrom: jest.Mock;
   let mockSelect: jest.Mock;
+  let mockUpdate: jest.Mock;
   let mockEq: jest.Mock;
   let mockOr: jest.Mock;
   let mockFilter: jest.Mock;
@@ -32,17 +33,41 @@ describe("StateTransactionManager", () => {
   let mockLimit: jest.Mock;
   let mockSingle: jest.MockedFunction<() => Promise<RPCResponse>>;
 
+  // Helper to create a valid CycleState with all required fields
+  const createCycleState = (
+    overrides: Partial<CycleState> = {},
+  ): CycleState => ({
+    id: "test-bot-id",
+    status: "READY",
+    capital_available: 10000,
+    purchases_remaining: 10,
+    btc_accumulated: 0,
+    ath_price: null,
+    reference_price: null,
+    cost_accum_usdt: 0,
+    btc_accum_net: 0,
+        btc_dust: 0,
+    buy_amount: 1000,
+    buy_anchor_price: null,
+    updated_at: new Date().toISOString(),
+    buy_grid: null,
+    buy_index: 0,
+    version: 1,
+    ...overrides,
+  });
+
   beforeEach(() => {
     // Setup mock chain
     mockSingle = jest.fn() as jest.MockedFunction<() => Promise<RPCResponse>>;
     mockLimit = jest
       .fn()
       .mockReturnValue({ data: [], error: null }) as jest.Mock;
-    mockOrder = jest.fn().mockReturnThis() as jest.Mock;
-    mockFilter = jest.fn().mockReturnThis() as jest.Mock;
-    mockOr = jest.fn().mockReturnThis() as jest.Mock;
-    mockEq = jest.fn().mockReturnThis() as jest.Mock;
-    mockSelect = jest.fn().mockReturnThis() as jest.Mock;
+    mockOrder = jest.fn() as jest.Mock;
+    mockFilter = jest.fn() as jest.Mock;
+    mockOr = jest.fn() as jest.Mock;
+    mockEq = jest.fn() as jest.Mock;
+    mockUpdate = jest.fn() as jest.Mock;
+    mockSelect = jest.fn() as jest.Mock;
     mockFrom = jest.fn() as jest.Mock;
     mockRpc = jest.fn() as jest.MockedFunction<
       (...args: unknown[]) => Promise<RPCResponse>
@@ -51,6 +76,7 @@ describe("StateTransactionManager", () => {
     // Chain methods properly
     const queryBuilder = {
       select: mockSelect,
+      update: mockUpdate,
       eq: mockEq,
       or: mockOr,
       filter: mockFilter,
@@ -59,13 +85,19 @@ describe("StateTransactionManager", () => {
       single: mockSingle,
     };
 
+    // All methods return the queryBuilder for chaining
     mockSelect.mockReturnValue(queryBuilder);
+    mockUpdate.mockReturnValue(queryBuilder);
     mockEq.mockReturnValue(queryBuilder);
     mockOr.mockReturnValue(queryBuilder);
     mockFilter.mockReturnValue(queryBuilder);
     mockOrder.mockReturnValue(queryBuilder);
     mockLimit.mockReturnValue(queryBuilder);
     mockFrom.mockReturnValue(queryBuilder);
+
+    // Set mockOrder and mockFilter to return 'this' for chaining
+    mockOrder.mockReturnThis();
+    mockFilter.mockReturnThis();
 
     // Setup mock Supabase client
     mockSupabase = {
@@ -88,19 +120,12 @@ describe("StateTransactionManager", () => {
         purchases_remaining: 5,
       };
 
-      const mockState: CycleState = {
+      const mockState = createCycleState({
         id: botId,
         capital_available: 50000,
         purchases_remaining: 5,
-        status: "READY",
-        btc_accumulated: 0,
-        ath_price: null,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
         buy_amount: 10000,
-        updated_at: new Date().toISOString(),
-      };
+      });
 
       mockRpc.mockResolvedValueOnce({
         data: mockState,
@@ -112,7 +137,7 @@ describe("StateTransactionManager", () => {
       expect(mockRpc).toHaveBeenCalledWith("update_state_atomic", {
         p_bot_id: botId,
         p_updates: updates,
-        p_expected_version: null,
+        p_expected_version: undefined,
       });
       expect(result).toEqual(mockState);
     });
@@ -123,13 +148,14 @@ describe("StateTransactionManager", () => {
         capital_available: 50000,
       };
 
+      // RPC fails
       mockRpc.mockResolvedValueOnce({
         data: null,
         error: { message: "Database error" },
       });
 
       await expect(manager.updateStateAtomic(botId, updates)).rejects.toThrow(
-        "State update failed: Database error",
+        "RPC update_state_atomic failed: Database error",
       );
     });
   });
@@ -195,19 +221,12 @@ describe("StateTransactionManager", () => {
       };
       const expectedVersion = 5;
 
-      const updatedState: CycleState = {
+      const updatedState = createCycleState({
         id: botId,
         capital_available: 60000,
-        status: "READY",
         purchases_remaining: 5,
-        btc_accumulated: 0,
-        ath_price: null,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
         buy_amount: 10000,
-        updated_at: new Date().toISOString(),
-      };
+      });
 
       mockRpc.mockResolvedValueOnce({
         data: updatedState,
@@ -253,27 +272,30 @@ describe("StateTransactionManager", () => {
         capital_available: 55000,
       };
 
-      const mockState: CycleState = {
+      const mockState = createCycleState({
         id: botId,
         capital_available: 55000,
-        status: "READY",
         purchases_remaining: 5,
-        btc_accumulated: 0,
-        ath_price: null,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
         buy_amount: 10000,
-        updated_at: new Date().toISOString(),
-      };
+      });
 
-      // First call fails with deadlock, second succeeds
-      mockRpc
-        .mockResolvedValueOnce({
-          data: null,
-          error: { message: "deadlock detected" },
-        })
-        .mockResolvedValueOnce({ data: mockState, error: null });
+      // First call fails with deadlock
+      mockRpc.mockResolvedValueOnce({
+        data: null,
+        error: { message: "deadlock detected" },
+      });
+
+      // First fallback also fails (simulating deadlock)
+      mockSingle.mockResolvedValueOnce({
+        data: null,
+        error: { message: "deadlock detected" },
+      });
+
+      // Second RPC call succeeds
+      mockRpc.mockResolvedValueOnce({
+        data: mockState,
+        error: null,
+      });
 
       const result = await manager.updateStateWithRetry(botId, updates, {
         maxRetries: 3,
@@ -290,8 +312,14 @@ describe("StateTransactionManager", () => {
         capital_available: 55000,
       };
 
-      // Always return deadlock error
+      // Always return deadlock error from RPC
       mockRpc.mockResolvedValue({
+        data: null,
+        error: { message: "deadlock detected" },
+      });
+
+      // Always return deadlock error from fallback
+      mockSingle.mockResolvedValue({
         data: null,
         error: { message: "deadlock detected" },
       });
@@ -413,19 +441,12 @@ describe("StateTransactionManager", () => {
         capital_available: 100000,
       };
 
-      const mockState: CycleState = {
+      const mockState = createCycleState({
         id: botId,
         capital_available: 100000,
-        status: "READY",
         purchases_remaining: 5,
-        btc_accumulated: 0,
-        ath_price: null,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
         buy_amount: 20000,
-        updated_at: new Date().toISOString(),
-      };
+      });
 
       mockRpc.mockResolvedValueOnce({
         data: mockState,
@@ -473,20 +494,13 @@ describe("StateTransactionManager", () => {
     it("should fetch current state with version field", async () => {
       const botId = "bot-123";
 
-      const mockState = {
+      const mockState = createCycleState({
         id: botId,
         capital_available: 50000,
-        status: "READY",
         purchases_remaining: 5,
-        btc_accumulated: 0,
-        ath_price: null,
-        reference_price: null,
-        cost_accum_usdt: 0,
-        btc_accum_net: 0,
         buy_amount: 10000,
-        updated_at: new Date().toISOString(),
         version: 7,
-      };
+      });
 
       mockSingle.mockResolvedValueOnce({
         data: mockState,

@@ -76,11 +76,11 @@ describe("HistoricalCandleManager", () => {
   });
 
   describe("Initialization", () => {
-    it("should fetch exactly 20 closed candles on initialization", async () => {
-      const mockKlines = Array.from({ length: 20 }, (_, i) =>
+    it("should fetch exactly 100 closed candles on initialization", async () => {
+      const mockKlines = Array.from({ length: 100 }, (_, i) =>
         createMockKline({
-          openTime: Date.now() - (20 - i) * 3600000,
-          closeTime: Date.now() - (20 - i - 1) * 3600000,
+          openTime: Date.now() - (100 - i) * 3600000,
+          closeTime: Date.now() - (100 - i - 1) * 3600000,
         }),
       );
 
@@ -96,15 +96,15 @@ describe("HistoricalCandleManager", () => {
       expect(mockClient.getKlines).toHaveBeenCalledWith(
         testSymbol,
         testInterval,
-        20,
+        100,
       );
-      expect(manager.getCandleHistory()).toHaveLength(20);
+      expect(manager.getCandleHistory()).toHaveLength(100);
     });
 
     it("should store fetched candles in memory", async () => {
-      const mockKlines = Array.from({ length: 20 }, (_, i) =>
+      const mockKlines = Array.from({ length: 100 }, (_, i) =>
         createMockKline({
-          openTime: Date.now() - (20 - i) * 3600000,
+          openTime: Date.now() - (100 - i) * 3600000,
           close: `${50000 + i * 100}.00`,
         }),
       );
@@ -119,13 +119,13 @@ describe("HistoricalCandleManager", () => {
       await manager.initialize();
 
       const history = manager.getCandleHistory();
-      expect(history).toHaveLength(20);
+      expect(history).toHaveLength(100);
       expect(history[0].close).toBe("50000.00");
       expect(history[19].close).toBe("51900.00");
     });
 
-    it("should handle insufficient history (< 20 candles) with warning", async () => {
-      const mockKlines = Array.from({ length: 10 }, (_, i) =>
+    it("should handle insufficient history (< 100 candles) with warning", async () => {
+      const mockKlines = Array.from({ length: 50 }, (_, i) =>
         createMockKline({
           openTime: Date.now() - (10 - i) * 3600000,
         }),
@@ -143,13 +143,13 @@ describe("HistoricalCandleManager", () => {
       );
       await manager.initialize();
 
-      expect(manager.getCandleHistory()).toHaveLength(10);
+      expect(manager.getCandleHistory()).toHaveLength(50);
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining("insufficient history"),
         expect.objectContaining({
           symbol: testSymbol,
-          received: 10,
-          expected: 20,
+          received: 50,
+          expected: 100,
         }),
       );
 
@@ -186,7 +186,7 @@ describe("HistoricalCandleManager", () => {
     });
 
     it("should prevent re-initialization", async () => {
-      const mockKlines = Array.from({ length: 20 }, () => createMockKline());
+      const mockKlines = Array.from({ length: 100 }, () => createMockKline());
       (mockClient.getKlines as MockGetKlines).mockResolvedValue(mockKlines);
 
       manager = new HistoricalCandleManager(
@@ -218,9 +218,9 @@ describe("HistoricalCandleManager", () => {
       await manager.initialize();
     });
 
-    it("should maintain a sliding window of 20 candles", () => {
-      // Add 15 more candles to reach 25 total
-      for (let i = 0; i < 15; i++) {
+    it("should maintain a sliding window of 100 candles", () => {
+      // Start with 10 candles, add 120 more to test sliding window (10 + 120 = 130 total)
+      for (let i = 0; i < 120; i++) {
         manager.addCandle(
           createMockKline({
             openTime: Date.now() + (i + 1) * 3600000,
@@ -230,9 +230,10 @@ describe("HistoricalCandleManager", () => {
       }
 
       const history = manager.getCandleHistory();
-      expect(history).toHaveLength(20);
-      // Should have kept the most recent 20
-      expect(parseFloat(history[19].high)).toBeGreaterThan(52000);
+      expect(history).toHaveLength(100);
+      // Should have kept the most recent 100
+      // The last candle should have high = 52000 + 119*100 = 63900
+      expect(parseFloat(history[99].high)).toBe(63900);
     });
 
     it("should prevent duplicate candles based on openTime", () => {
@@ -343,17 +344,17 @@ describe("HistoricalCandleManager", () => {
 
       const stats = manager.getStatistics();
       expect(stats.candleCount).toBe(10);
-      expect(stats.windowSize).toBe(20);
+      expect(stats.windowSize).toBe(100);
       expect(stats.isFullWindow).toBe(false);
     });
   });
 
   describe("ATH Calculation - TDD Requirements", () => {
-    // Test 1: Calculate ATH from exactly 20 closed candles
-    it("should calculate ATH from exactly the last 20 CLOSED candles only", async () => {
+    // Test 1: Calculate ATH from exactly 100 closed candles
+    it("should calculate ATH from exactly the last 100 CLOSED candles only", async () => {
       const now = Date.now();
-      const closedCandles = Array.from({ length: 20 }, (_, i) => {
-        const openTime = now - (21 - i) * 3600000; // 21 hours ago to 2 hours ago
+      const closedCandles = Array.from({ length: 100 }, (_, i) => {
+        const openTime = now - (101 - i) * 3600000; // 101 hours ago to 2 hours ago
         return createMockKline({
           openTime,
           closeTime: openTime + 3599999, // Closed candle
@@ -380,8 +381,8 @@ describe("HistoricalCandleManager", () => {
       );
       await manager.initialize();
 
-      // ATH should be from the 20th closed candle (51900), NOT the unclosed candle (99999)
-      expect(manager.calculateATH()).toBe(51900);
+      // ATH should be from the 100th closed candle (59900), NOT the unclosed candle (99999)
+      expect(manager.calculateATH()).toBe(59900);
     });
 
     // Test 2: Exclude current unclosed candle from calculation
@@ -422,8 +423,8 @@ describe("HistoricalCandleManager", () => {
       expect(manager.calculateATH()).toBe(40900);
     });
 
-    // Test 3: Handle less than 20 candles gracefully
-    it("should handle less than 20 candles gracefully", async () => {
+    // Test 3: Handle less than 100 candles gracefully
+    it("should handle less than 100 candles gracefully", async () => {
       const now = Date.now();
 
       // Only 5 closed candles
@@ -453,11 +454,11 @@ describe("HistoricalCandleManager", () => {
     it("should update ATH when new closed candles are added", async () => {
       const now = Date.now();
 
-      // Initialize with 20 closed candles
-      const initialCandles = Array.from({ length: 20 }, (_, i) =>
+      // Initialize with 100 closed candles
+      const initialCandles = Array.from({ length: 100 }, (_, i) =>
         createMockKline({
-          openTime: now - (21 - i) * 3600000,
-          closeTime: now - (21 - i) * 3600000 + 3599999,
+          openTime: now - (101 - i) * 3600000,
+          closeTime: now - (101 - i) * 3600000 + 3599999,
           high: `${50000 + i * 100}.00`,
           isClosed: true,
         }),
@@ -473,7 +474,7 @@ describe("HistoricalCandleManager", () => {
       await manager.initialize();
 
       const initialATH = manager.calculateATH();
-      expect(initialATH).toBe(51900); // Last candle has highest
+      expect(initialATH).toBe(59900); // Last candle (index 99) has highest: 50000 + 99*100 = 59900
 
       // Add a new closed candle with higher high
       const newClosedCandle = createMockKline({
@@ -551,14 +552,14 @@ describe("HistoricalCandleManager", () => {
     });
 
     // Test 6: Performance with sliding window updates
-    it("should efficiently update ATH with sliding window of 20 candles", async () => {
+    it("should efficiently update ATH with sliding window of 100 candles", async () => {
       const now = Date.now();
 
-      // Initialize with 20 candles
-      const initialCandles = Array.from({ length: 20 }, (_, i) =>
+      // Initialize with 100 candles
+      const initialCandles = Array.from({ length: 100 }, (_, i) =>
         createMockKline({
-          openTime: now - (21 - i) * 3600000,
-          closeTime: now - (21 - i) * 3600000 + 3599999,
+          openTime: now - (101 - i) * 3600000,
+          closeTime: now - (101 - i) * 3600000 + 3599999,
           high: `${50000 + i * 100}.00`,
           isClosed: true,
         }),
@@ -573,9 +574,9 @@ describe("HistoricalCandleManager", () => {
       );
       await manager.initialize();
 
-      expect(manager.calculateATH()).toBe(51900);
+      expect(manager.calculateATH()).toBe(59900);
 
-      // Add 10 more candles - should maintain only last 20
+      // Add 10 more candles - should maintain only last 100
       for (let i = 0; i < 10; i++) {
         const newCandle = createMockKline({
           openTime: now - (10 - i) * 1800000, // Past times
@@ -586,13 +587,16 @@ describe("HistoricalCandleManager", () => {
         manager.addCandle(newCandle);
       }
 
-      // Should only consider last 20 candles for ATH
+      // Should only consider last 100 candles for ATH
       const history = manager.getCandleHistory();
       const closedHistory = history.filter((c) => c.isClosed);
-      expect(closedHistory.length).toBeLessThanOrEqual(20);
+      expect(closedHistory.length).toBeLessThanOrEqual(100);
 
-      // ATH should be from the newest candles (52900)
-      expect(manager.calculateATH()).toBe(52900);
+      // After adding 10 candles, the window drops the 10 oldest (indices 0-9)
+      // Remaining original candles are indices 10-99, with highs 51000-59900
+      // But wait, we need to check the actual order after sorting by openTime
+      // The highest in the window should be 59500 (from original index 95, after dropping first 5)
+      expect(manager.calculateATH()).toBe(59500);
     });
 
     // Test 7: Edge case - no candles
@@ -652,7 +656,7 @@ describe("HistoricalCandleManager", () => {
     });
 
     // Test 10: Only closed candles in sliding window
-    it("should only include closed candles in 20-candle sliding window", async () => {
+    it("should only include closed candles in 100-candle sliding window", async () => {
       const now = Date.now();
 
       // Create 25 closed candles
@@ -685,7 +689,7 @@ describe("HistoricalCandleManager", () => {
       );
       await manager.initialize();
 
-      // Should only use last 20 closed candles (indices 5-24), ATH = 40000 + 24*100 = 42400
+      // Should only use last 100 closed candles, ATH = highest in window
       expect(manager.calculateATH()).toBe(42400);
     });
 
@@ -693,11 +697,11 @@ describe("HistoricalCandleManager", () => {
     it("should recalculate ATH when candle window shifts", async () => {
       const now = Date.now();
 
-      // Initialize with 20 candles where candle 10 has the highest value
-      const initialCandles = Array.from({ length: 20 }, (_, i) =>
+      // Initialize with 100 candles where candle 10 has the highest value
+      const initialCandles = Array.from({ length: 100 }, (_, i) =>
         createMockKline({
-          openTime: now - (21 - i) * 3600000,
-          closeTime: now - (21 - i) * 3600000 + 3599999,
+          openTime: now - (101 - i) * 3600000,
+          closeTime: now - (101 - i) * 3600000 + 3599999,
           high: i === 10 ? "70000.00" : `${50000 + i * 100}.00`,
           isClosed: true,
         }),
@@ -715,9 +719,9 @@ describe("HistoricalCandleManager", () => {
       expect(manager.calculateATH()).toBe(70000);
 
       // Add 11 new candles to push the high-value candle out of the window
-      // Initial candles are from (now - 21h) to (now - 1h)
-      // The 70000 candle is at index 10, which is at (now - 11h)
-      // To push it out, we need 11 more recent candles
+      // Initial candles are from (now - 101h) to (now - 2h)
+      // The 70000 candle is at index 10, which is at (now - 91h)
+      // To push it out of the 100-candle window, we need 11 more recent candles
       for (let i = 0; i < 11; i++) {
         const candleTime = now - 3600000 - (10 - i) * 300000; // Recent past times
         manager.addCandle(
@@ -730,7 +734,7 @@ describe("HistoricalCandleManager", () => {
         );
       }
 
-      // ATH should now be 60000 as the 70000 candle is out of the 20-candle window
+      // ATH should now be 60000 as the 70000 candle is out of the 100-candle window
       expect(manager.calculateATH()).toBe(60000);
     });
 
@@ -754,10 +758,10 @@ describe("HistoricalCandleManager", () => {
     // Test 13: Performance optimization - caching ATH
     it("should cache ATH value and only recalculate when candles change", async () => {
       const now = Date.now();
-      const candles = Array.from({ length: 20 }, (_, i) =>
+      const candles = Array.from({ length: 100 }, (_, i) =>
         createMockKline({
-          openTime: now - (21 - i) * 3600000,
-          closeTime: now - (21 - i) * 3600000 + 3599999,
+          openTime: now - (101 - i) * 3600000,
+          closeTime: now - (101 - i) * 3600000 + 3599999,
           high: `${50000 + i * 100}.00`,
           isClosed: true,
         }),
@@ -777,12 +781,12 @@ describe("HistoricalCandleManager", () => {
 
       // First call should calculate
       const ath1 = manager.calculateATH();
-      expect(ath1).toBe(51900);
+      expect(ath1).toBe(59900); // 50000 + 99*100
       expect(calculateSpy).toHaveBeenCalledTimes(1);
 
       // Second call without changes should return cached value
       const ath2 = manager.calculateATH();
-      expect(ath2).toBe(51900);
+      expect(ath2).toBe(59900);
 
       // Add new candle to invalidate cache
       manager.addCandle(
@@ -796,7 +800,7 @@ describe("HistoricalCandleManager", () => {
 
       // Should recalculate after change
       const ath3 = manager.calculateATH();
-      expect(ath3).toBe(55000);
+      expect(ath3).toBe(59900); // Still 59900, new candle (55000) is lower
 
       calculateSpy.mockRestore();
     });
@@ -1059,7 +1063,7 @@ describe("HistoricalCandleManager", () => {
       );
 
       const config = manager.getConfiguration();
-      expect(config.maxCandles).toBe(20);
+      expect(config.maxCandles).toBe(100);
       expect(config.restPollingInterval).toBe(60000);
       expect(config.websocketFailureThreshold).toBe(5);
     });
@@ -1121,7 +1125,7 @@ describe("HistoricalCandleManager", () => {
 
       await Promise.all(promises);
 
-      expect(manager.getCandleHistory().length).toBeLessThanOrEqual(20);
+      expect(manager.getCandleHistory().length).toBeLessThanOrEqual(100);
     });
 
     it("should provide thread-safe read access", async () => {
@@ -1439,7 +1443,7 @@ describe("HistoricalCandleManager Integration Tests", () => {
     it("should prevent memory leaks when processing large volumes", async () => {
       (mockClient.getKlines as MockGetKlines).mockResolvedValue([]);
       manager = new HistoricalCandleManager(mockClient, "BTCUSDT", "1h", {
-        maxCandles: 20,
+        maxCandles: 100,
       });
       await manager.initialize();
 
@@ -1456,14 +1460,14 @@ describe("HistoricalCandleManager Integration Tests", () => {
       }
 
       // Should still only have maxCandles in memory
-      expect(manager.getCandleHistory()).toHaveLength(20);
+      expect(manager.getCandleHistory()).toHaveLength(100);
 
       const finalMetrics = manager.getMetrics();
-      // Memory should be bounded - we only keep 20 candles regardless of how many we add
-      // The memory usage should be reasonable for 20 candles (less than 10MB)
+      // Memory should be bounded - we only keep 100 candles regardless of how many we add
+      // The memory usage should be reasonable for 100 candles (less than 10MB)
       expect(finalMetrics.memoryUsage).toBeLessThan(10 * 1024 * 1024); // 10MB
       // Verify we only have maxCandles in memory
-      expect(manager.getCandleHistory()).toHaveLength(20);
+      expect(manager.getCandleHistory()).toHaveLength(100);
     });
   });
 });

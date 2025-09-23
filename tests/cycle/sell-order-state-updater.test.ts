@@ -22,12 +22,17 @@ describe("SellOrderStateUpdater", () => {
     status: "HOLDING",
     btc_accumulated: 0.01,
     btc_accum_net: 0.01,
+    btc_dust: 0,
     cost_accum_usdt: 500,
     capital_available: 500,
     purchases_remaining: 4,
     reference_price: 50000,
     buy_amount: 200,
+    buy_anchor_price: null,
     ath_price: 52000,
+    buy_grid: null,
+    buy_index: 0,
+    version: 1,
     updated_at: new Date().toISOString(),
     ...overrides,
   });
@@ -61,6 +66,7 @@ describe("SellOrderStateUpdater", () => {
           status: "READY",
           btc_accumulated: 0,
           btc_accum_net: 0,
+          btc_dust: 0,
           cost_accum_usdt: 0,
           capital_available: 1025,
           purchases_remaining: 5,
@@ -77,6 +83,7 @@ describe("SellOrderStateUpdater", () => {
       const currentState = createCycleState({
         btc_accumulated: 0.02, // Has 0.02 BTC
         btc_accum_net: 0.02,
+        btc_dust: 0,
         cost_accum_usdt: 1000,
         reference_price: 50000,
       });
@@ -122,6 +129,7 @@ describe("SellOrderStateUpdater", () => {
       const currentState = createCycleState({
         btc_accumulated: 0.01,
         btc_accum_net: 0.01,
+        btc_dust: 0,
         cost_accum_usdt: 500,
         reference_price: 50000, // Bought at avg 50k
         capital_available: 500,
@@ -146,6 +154,7 @@ describe("SellOrderStateUpdater", () => {
         expect.objectContaining({
           btc_accumulated: 0,
           btc_accum_net: 0,
+          btc_dust: 0,
           cost_accum_usdt: 0,
           // principal = 50000 * 0.01 = 500
           // net_received = 525 - 0.525 = 524.475
@@ -173,6 +182,7 @@ describe("SellOrderStateUpdater", () => {
       const currentState = createCycleState({
         btc_accumulated: 0.01,
         btc_accum_net: 0.01,
+        btc_dust: 0,
         cost_accum_usdt: 500,
         reference_price: 50000,
         capital_available: 500,
@@ -347,16 +357,16 @@ describe("SellOrderStateUpdater", () => {
       );
     });
 
-    it("should handle BTC fees correctly", async () => {
-      // Arrange
+    it("should handle USDT fees correctly on sell orders", async () => {
+      // Arrange - Binance charges fees in USDT for sell orders
       const currentState = createCycleState({
         btc_accumulated: 0.01,
       });
       const orderResult = createOrderResult({
         executedQty: new Decimal(0.01),
         cummulativeQuoteQty: new Decimal(525),
-        feeBTC: new Decimal(0.00001), // Fee in BTC
-        feeUSDT: new Decimal(0),
+        feeBTC: new Decimal(0), // No BTC fee on sell orders
+        feeUSDT: new Decimal(0.525), // Fee in USDT
       });
 
       // Act
@@ -366,7 +376,8 @@ describe("SellOrderStateUpdater", () => {
       expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
         "test-cycle-id",
         expect.objectContaining({
-          btc_accumulated: 0.00001, // Should account for BTC fee (0.01 - 0.01 + 0.00001)
+          btc_accumulated: 0, // 0.01 - 0.01 = 0 (cycle complete)
+          capital_available: 1024.475, // 500 + 525 - 0.525 = 1024.475
         }),
       );
     });
@@ -454,6 +465,7 @@ describe("SellOrderStateUpdater", () => {
       const currentState = createCycleState({
         btc_accumulated: 0.000001,
         btc_accum_net: 0.000001,
+        btc_dust: 0,
         cost_accum_usdt: 0.05,
         reference_price: 50000,
       });
@@ -499,8 +511,8 @@ describe("SellOrderStateUpdater", () => {
       );
     });
 
-    it("should handle mixed fee assets correctly", async () => {
-      // Arrange
+    it("should handle USDT fees and ignore other fee assets", async () => {
+      // Arrange - Binance sell orders only have USDT fees that matter
       const currentState = createCycleState({
         btc_accumulated: 0.01,
       });
@@ -508,9 +520,9 @@ describe("SellOrderStateUpdater", () => {
       const orderResult = createOrderResult({
         executedQty: new Decimal(0.01),
         cummulativeQuoteQty: new Decimal(525),
-        feeBTC: new Decimal(0.00001),
+        feeBTC: new Decimal(0), // No BTC fees on sell orders
         feeUSDT: new Decimal(0.525),
-        feeOther: { BNB: new Decimal(0.001) },
+        feeOther: { BNB: new Decimal(0.001) }, // Other fees are ignored
       });
 
       // Act
@@ -520,49 +532,62 @@ describe("SellOrderStateUpdater", () => {
       expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
         "test-cycle-id",
         expect.objectContaining({
-          btc_accumulated: 0.00001, // Account for BTC fee
-          // capital should account for USDT fee but not other fees
+          btc_accumulated: 0, // 0.01 - 0.01 = 0
+          capital_available: 1024.475, // 500 + 525 - 0.525
         }),
       );
     });
 
-    it("should detect when cycle is complete (btc_accumulated < 0.00000001)", async () => {
+    it("should detect when cycle is complete (btc_accumulated < 0.00001)", async () => {
       // Arrange
       const currentState = createCycleState({
         btc_accumulated: 0.01,
+        ath_price: 55000,
+        reference_price: 50000,
       });
 
       const orderResult = createOrderResult({
-        executedQty: new Decimal(0.009999995), // Will leave 0.000000005 which is < 0.00000001
+        executedQty: new Decimal(0.009995), // Will leave 0.000005 which is < 0.00001 (dust threshold)
         feeBTC: new Decimal(0),
+        cummulativeQuoteQty: new Decimal(549.725), // 0.009995 * 55000
+        feeUSDT: new Decimal(0.549725),
       });
 
       // Act
       await updater.updateAfterSellOrder(currentState, orderResult);
 
-      // Assert - Should reset cycle because remaining is < 0.00000001
+      // Assert - Should reset cycle because remaining is < 0.00001 (dust threshold)
       expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
         "test-cycle-id",
         expect.objectContaining({
-          btc_accumulated: 0,
+          btc_accumulated: 0.000005, // Preserves dust amount (will be btc_dust + btc_accum_net)
+          btc_accum_net: 0, // Reset to 0 for new cycle
+          btc_dust: 0.000005, // Dust moved here for next cycle
+          cost_accum_usdt: 0, // Reset cost accumulator
+          purchases_remaining: 5, // Reset to max purchases (from config)
+          reference_price: 55000, // Reset to ATH price
+          ath_price: 55000, // Preserve ATH
           status: "READY",
+          buy_grid: null, // Reset grid
+          buy_index: 0, // Reset index
         }),
       );
     });
 
-    it("should not reset cycle if btc_accumulated >= 0.00000001", async () => {
+    it("should not reset cycle if btc_accumulated >= 0.00001", async () => {
       // Arrange
       const currentState = createCycleState({
         btc_accumulated: 0.01,
+        status: "HOLDING",
       });
 
       const orderResult = createOrderResult({
-        executedQty: new Decimal(0.00999999),
+        executedQty: new Decimal(0.0099), // Will leave 0.0001 which is >= 0.00001
       });
 
       mockUpdateStateAtomic.mockResolvedValue(
         createCycleState({
-          btc_accumulated: 0.00000001,
+          btc_accumulated: 0.0001,
           status: "HOLDING",
         }),
       );
@@ -570,11 +595,11 @@ describe("SellOrderStateUpdater", () => {
       // Act
       await updater.updateAfterSellOrder(currentState, orderResult);
 
-      // Assert - Should NOT reset cycle
+      // Assert - Should NOT reset cycle, keeps HOLDING status
       expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
         "test-cycle-id",
         expect.objectContaining({
-          btc_accumulated: 0.00000001,
+          btc_accumulated: 0.0001,
           status: "HOLDING",
         }),
       );

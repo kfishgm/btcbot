@@ -7,6 +7,13 @@
     "doc": "docs"
   },
   "scripts": {
+    "start": "tsx bootstrap.ts",
+    "start:dev": "NODE_ENV=development tsx watch bootstrap.ts",
+    "start:prod": "NODE_ENV=production node dist/index.js",
+    "test:e2e": "NODE_ENV=test NODE_OPTIONS='--experimental-vm-modules' jest --config jest.e2e.config.mjs",
+    "test:e2e:watch": "NODE_ENV=test NODE_OPTIONS='--experimental-vm-modules' jest --config jest.e2e.config.mjs --watch",
+    "test:e2e:coverage": "NODE_ENV=test NODE_OPTIONS='--experimental-vm-modules' jest --config jest.e2e.config.mjs --coverage",
+    "test:e2e:single": "NODE_ENV=test NODE_OPTIONS='--experimental-vm-modules' jest --config jest.e2e.config.mjs --testNamePattern",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest --detectOpenHandles --forceExit",
     "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
     "test:coverage": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
@@ -14,7 +21,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "build": "tsc"
+    "build": "tsc",
+    "build:prod": "npm run typecheck && npm run lint && npm run build"
   },
   "keywords": [],
   "author": "",
@@ -34,6 +42,7 @@
     "prettier": "^3.6.2",
     "ts-jest": "^29.4.1",
     "ts-node": "^10.9.2",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.41.0"
   },

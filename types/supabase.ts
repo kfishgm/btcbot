@@ -17,10 +17,10 @@ export type Database = {
     Functions: {
       graphql: {
         Args: {
-          operationName?: string;
           extensions?: Json;
-          variables?: Json;
+          operationName?: string;
           query?: string;
+          variables?: Json;
         };
         Returns: Json;
       };
@@ -66,7 +66,11 @@ export type Database = {
           ath_price: number | null;
           btc_accum_net: number | null;
           btc_accumulated: number | null;
+          btc_dust: number | null;
           buy_amount: number | null;
+          buy_anchor_price: number | null;
+          buy_grid: number[] | null;
+          buy_index: number | null;
           capital_available: number;
           cost_accum_usdt: number | null;
           id: string;
@@ -74,12 +78,17 @@ export type Database = {
           reference_price: number | null;
           status: string;
           updated_at: string | null;
+          version: number;
         };
         Insert: {
           ath_price?: number | null;
           btc_accum_net?: number | null;
           btc_accumulated?: number | null;
+          btc_dust?: number | null;
           buy_amount?: number | null;
+          buy_anchor_price?: number | null;
+          buy_grid?: number[] | null;
+          buy_index?: number | null;
           capital_available: number;
           cost_accum_usdt?: number | null;
           id?: string;
@@ -87,12 +96,17 @@ export type Database = {
           reference_price?: number | null;
           status: string;
           updated_at?: string | null;
+          version?: number;
         };
         Update: {
           ath_price?: number | null;
           btc_accum_net?: number | null;
           btc_accumulated?: number | null;
+          btc_dust?: number | null;
           buy_amount?: number | null;
+          buy_anchor_price?: number | null;
+          buy_grid?: number[] | null;
+          buy_index?: number | null;
           capital_available?: number;
           cost_accum_usdt?: number | null;
           id?: string;
@@ -100,11 +114,49 @@ export type Database = {
           reference_price?: number | null;
           status?: string;
           updated_at?: string | null;
+          version?: number;
+        };
+        Relationships: [];
+      };
+      pause_states: {
+        Row: {
+          created_at: string | null;
+          id: number;
+          pause_metadata: Json | null;
+          pause_reason: string;
+          paused_at: string | null;
+          resume_metadata: Json | null;
+          resumed_at: string | null;
+          status: string;
+          updated_at: string | null;
+        };
+        Insert: {
+          created_at?: string | null;
+          id?: number;
+          pause_metadata?: Json | null;
+          pause_reason: string;
+          paused_at?: string | null;
+          resume_metadata?: Json | null;
+          resumed_at?: string | null;
+          status: string;
+          updated_at?: string | null;
+        };
+        Update: {
+          created_at?: string | null;
+          id?: number;
+          pause_metadata?: Json | null;
+          pause_reason?: string;
+          paused_at?: string | null;
+          resume_metadata?: Json | null;
+          resumed_at?: string | null;
+          status?: string;
+          updated_at?: string | null;
         };
         Relationships: [];
       };
       strategy_config: {
         Row: {
+          ath_window: number | null;
           drop_percentage: number;
           id: string;
           initial_capital_usdt: number;
@@ -118,6 +170,7 @@ export type Database = {
           updated_at: string | null;
         };
         Insert: {
+          ath_window?: number | null;
           drop_percentage: number;
           id?: string;
           initial_capital_usdt: number;
@@ -131,6 +184,7 @@ export type Database = {
           updated_at?: string | null;
         };
         Update: {
+          ath_window?: number | null;
           drop_percentage?: number;
           id?: string;
           initial_capital_usdt?: number;
@@ -145,6 +199,50 @@ export type Database = {
         };
         Relationships: [];
       };
+      trade_fills: {
+        Row: {
+          binance_trade_id: number | null;
+          commission: number | null;
+          commission_asset: string | null;
+          created_at: string | null;
+          fill_index: number;
+          id: string;
+          price: number;
+          quantity: number;
+          trade_id: string;
+        };
+        Insert: {
+          binance_trade_id?: number | null;
+          commission?: number | null;
+          commission_asset?: string | null;
+          created_at?: string | null;
+          fill_index: number;
+          id?: string;
+          price: number;
+          quantity: number;
+          trade_id: string;
+        };
+        Update: {
+          binance_trade_id?: number | null;
+          commission?: number | null;
+          commission_asset?: string | null;
+          created_at?: string | null;
+          fill_index?: number;
+          id?: string;
+          price?: number;
+          quantity?: number;
+          trade_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "trade_fills_trade_id_fkey";
+            columns: ["trade_id"];
+            isOneToOne: false;
+            referencedRelation: "trades";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       trades: {
         Row: {
           created_at: string | null;
@@ -152,6 +250,7 @@ export type Database = {
           executed_at: string;
           fee_amount: number | null;
           fee_asset: string | null;
+          fee_details: Json | null;
           id: string;
           order_id: string;
           price: number;
@@ -166,6 +265,7 @@ export type Database = {
           executed_at: string;
           fee_amount?: number | null;
           fee_asset?: string | null;
+          fee_details?: Json | null;
           id?: string;
           order_id: string;
           price: number;
@@ -180,6 +280,7 @@ export type Database = {
           executed_at?: string;
           fee_amount?: number | null;
           fee_asset?: string | null;
+          fee_details?: Json | null;
           id?: string;
           order_id?: string;
           price?: number;
@@ -198,80 +299,57 @@ export type Database = {
           },
         ];
       };
-      pause_states: {
-        Row: {
-          id: number;
-          status: string;
-          pause_reason: string;
-          pause_metadata: Json;
-          paused_at: string;
-          resumed_at: string | null;
-          resume_metadata: Json | null;
-          created_at: string | null;
-          updated_at: string | null;
-        };
-        Insert: {
-          id?: number;
-          status: string;
-          pause_reason: string;
-          pause_metadata?: Json;
-          paused_at?: string;
-          resumed_at?: string | null;
-          resume_metadata?: Json | null;
-          created_at?: string | null;
-          updated_at?: string | null;
-        };
-        Update: {
-          id?: number;
-          status?: string;
-          pause_reason?: string;
-          pause_metadata?: Json;
-          paused_at?: string;
-          resumed_at?: string | null;
-          resume_metadata?: Json | null;
-          created_at?: string | null;
-          updated_at?: string | null;
-        };
-        Relationships: [];
-      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
+      batch_update_states: {
+        Args: { p_updates: Json[] };
+        Returns: Json;
+      };
+      cleanup_old_events: {
+        Args: { retention_days?: number };
+        Returns: number;
+      };
+      execute_with_wal: {
+        Args:
+          | {
+              p_bot_id: string;
+              p_state_update: Json;
+              p_operation_metadata?: Json;
+            }
+          | {
+              p_state_update: Json;
+              p_operation_metadata: Json;
+              p_bot_id: string;
+            };
+        Returns: Json;
+      };
+      get_event_statistics: {
+        Args: { start_time?: string; end_time?: string };
+        Returns: {
+          event_count: number;
+          event_type: string;
+          severity: string;
+          first_occurrence: string;
+          last_occurrence: string;
+        }[];
+      };
+      recover_incomplete_wal: {
+        Args: { p_bot_id: string } | { p_bot_id: string };
+        Returns: Json;
+      };
       update_state_atomic: {
-        Args: {
-          p_bot_id: string;
-          p_updates: Json;
-          p_expected_version: number | null;
-        };
+        Args:
+          | { p_expected_version?: number; p_bot_id: string; p_updates: Json }
+          | { p_updates: Json; p_bot_id: string; p_expected_version?: number };
         Returns: Json;
       };
       update_state_critical: {
-        Args: {
-          p_bot_id: string;
-          p_updates: Json;
-        };
-        Returns: Json;
-      };
-      batch_update_states: {
-        Args: {
-          p_updates: Json[];
-        };
-        Returns: Json;
-      };
-      execute_with_wal: {
-        Args: {
-          p_bot_id: string;
-          p_state_update: Json;
-          p_operation_metadata: Json;
-        };
-        Returns: Json;
-      };
-      recover_incomplete_wal: {
-        Args: {
-          p_bot_id: string;
-        };
+        Args:
+          | { p_bot_id: string; p_updates: Json }
+          | { p_bot_id: string; p_updates: Json };
         Returns: Json;
       };
     };

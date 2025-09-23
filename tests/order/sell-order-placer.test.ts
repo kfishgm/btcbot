@@ -6,44 +6,67 @@ import {
 import { BinanceClient } from "../../src/exchange/binance-client";
 import { TradingRules } from "../../src/exchange/trading-rules";
 import { Decimal } from "decimal.js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   SymbolTradingRules,
   BinanceOrder,
+  BinanceTrade,
   OrderStatus,
   CreateOrderParams,
 } from "../../src/exchange/types";
 
-// Only mock the external dependencies (Binance API)
-jest.mock("../../src/exchange/binance-client");
-jest.mock("../../src/exchange/trading-rules");
+// We'll create mocks without using jest.mock() to avoid complexity
+
+type MockBinanceClient = {
+  createOrder: jest.Mock<(params: CreateOrderParams) => Promise<BinanceOrder>>;
+  getOrder: jest.Mock<
+    (
+      symbol: string,
+      orderId?: number,
+      origClientOrderId?: string,
+    ) => Promise<BinanceOrder>
+  >;
+  getMyTrades: jest.Mock<
+    (symbol: string, orderId?: number) => Promise<BinanceTrade[]>
+  >;
+};
+
+type MockTradingRules = {
+  getRules: jest.Mock<
+    (symbol: string, forceRefresh?: boolean) => Promise<SymbolTradingRules>
+  >;
+  roundQuantityToStep: jest.Mock<(quantity: number, symbol: string) => number>;
+  roundPriceToTick: jest.Mock<(price: number, symbol: string) => number>;
+  getMinimumSellableQuantity: jest.Mock<
+    (price: number, symbol: string) => number
+  >;
+};
 
 describe("SellOrderPlacer", () => {
   let sellOrderPlacer: SellOrderPlacer;
-  let mockBinanceClient: {
-    createOrder: jest.Mock<
-      (params: CreateOrderParams) => Promise<BinanceOrder>
-    >;
-    getOrder: jest.Mock<
-      (
-        symbol: string,
-        orderId?: number,
-        origClientOrderId?: string,
-      ) => Promise<BinanceOrder>
-    >;
-  };
-  let mockTradingRules: {
-    getRules: jest.Mock<
-      (symbol: string, forceRefresh?: boolean) => Promise<SymbolTradingRules>
-    >;
-    roundQuantityToStep: jest.Mock<
-      (quantity: number, symbol: string) => number
-    >;
-    roundPriceToTick: jest.Mock<(price: number, symbol: string) => number>;
-  };
+  let mockSupabaseClient: SupabaseClient;
+  let mockBinanceClient: MockBinanceClient;
+  let mockTradingRules: MockTradingRules;
 
   beforeEach(() => {
     // Reset all mocks
     jest.clearAllMocks();
+
+    // Mock SupabaseClient with chaining support
+    const mockQueryBuilder = {
+      insert: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      single: jest.fn(() =>
+        Promise.resolve({
+          data: { id: "mock-trade-id-123" },
+          error: null,
+        }),
+      ),
+    };
+
+    mockSupabaseClient = {
+      from: jest.fn(() => mockQueryBuilder),
+    } as unknown as SupabaseClient;
 
     // Setup default trading rules that match real Binance BTCUSDT rules
     const mockSymbolRules: SymbolTradingRules = {
@@ -58,59 +81,68 @@ describe("SellOrderPlacer", () => {
       lastUpdated: Date.now(),
     };
 
-    // Create mock functions with proper typing
-    const getRulesFn = jest.fn<() => Promise<SymbolTradingRules>>();
-    getRulesFn.mockResolvedValue(mockSymbolRules);
-
-    const roundQuantityFn = jest.fn<(qty: number, _symbol: string) => number>();
-    roundQuantityFn.mockImplementation((qty: number, _symbol: string) => {
-      // Real rounding logic for BTCUSDT
-      const stepSize = 0.00001;
-      return Math.round(qty / stepSize) * stepSize;
-    });
-
-    const roundPriceFn = jest.fn<(price: number, _symbol: string) => number>();
-    roundPriceFn.mockImplementation((price: number, _symbol: string) => {
-      // Real rounding logic for BTCUSDT
-      const tickSize = 0.01;
-      return Math.floor(price / tickSize) * tickSize;
-    });
-
-    // Create mock trading rules
-    mockTradingRules = {
-      getRules: getRulesFn as jest.Mock<
-        (symbol: string, forceRefresh?: boolean) => Promise<SymbolTradingRules>
-      >,
-      roundQuantityToStep: roundQuantityFn as jest.Mock<
-        (quantity: number, symbol: string) => number
-      >,
-      roundPriceToTick: roundPriceFn as jest.Mock<
-        (price: number, symbol: string) => number
-      >,
-    };
-
-    // Create mock Binance client
-    const createOrderFn = jest.fn<() => Promise<BinanceOrder>>();
-    const getOrderFn = jest.fn<() => Promise<BinanceOrder>>();
-
+    // Create mock instances
     mockBinanceClient = {
-      createOrder: createOrderFn as jest.Mock<
-        (params: CreateOrderParams) => Promise<BinanceOrder>
-      >,
-      getOrder: getOrderFn as jest.Mock<
-        (
-          symbol: string,
-          orderId?: number,
-          origClientOrderId?: string,
-        ) => Promise<BinanceOrder>
-      >,
+      createOrder:
+        jest.fn<(params: CreateOrderParams) => Promise<BinanceOrder>>(),
+      getOrder:
+        jest.fn<
+          (
+            symbol: string,
+            orderId?: number,
+            origClientOrderId?: string,
+          ) => Promise<BinanceOrder>
+        >(),
+      getMyTrades: jest
+        .fn<(symbol: string, orderId?: number) => Promise<BinanceTrade[]>>()
+        .mockResolvedValue([]),
     };
 
-    // Create SellOrderPlacer instance with null supabase client (we use events instead)
+    mockTradingRules = {
+      getRules: jest
+        .fn<
+          (
+            symbol: string,
+            forceRefresh?: boolean,
+          ) => Promise<SymbolTradingRules>
+        >()
+        .mockResolvedValue(mockSymbolRules),
+      roundQuantityToStep: jest
+        .fn<(quantity: number, symbol: string) => number>()
+        .mockImplementation((qty: number) => {
+          // Real rounding logic for BTCUSDT
+          const stepSize = 0.00001;
+          return Math.round(qty / stepSize) * stepSize;
+        }),
+      roundPriceToTick: jest
+        .fn<(price: number, symbol: string) => number>()
+        .mockImplementation((price: number) => {
+          // Real rounding logic for BTCUSDT
+          const tickSize = 0.01;
+          return Math.floor(price / tickSize) * tickSize;
+        }),
+      getMinimumSellableQuantity: jest
+        .fn<(price: number, symbol: string) => number>()
+        .mockImplementation((price: number) => {
+          // Calculate minimum based on minNotional ($10) and minQty (0.00001)
+          const minNotional = 10;
+          const minQty = 0.00001;
+          const stepSize = 0.00001;
+
+          const minQtyForNotional = minNotional / price;
+          const minSellableQty = Math.max(minQty, minQtyForNotional);
+
+          // Round up to nearest step size
+          const steps = Math.ceil(minSellableQty / stepSize);
+          return steps * stepSize;
+        }),
+    };
+
+    // Create SellOrderPlacer instance with mocked dependencies
     sellOrderPlacer = new SellOrderPlacer(
       mockBinanceClient as unknown as BinanceClient,
       mockTradingRules as unknown as TradingRules,
-      null, // Supabase client is not used directly
+      mockSupabaseClient,
       "BTCUSDT",
     );
   });
@@ -305,7 +337,7 @@ describe("SellOrderPlacer", () => {
       // This should fail because 0.000004 rounds to 0
       await expect(
         sellOrderPlacer.prepareOrder(btcAccumulated, currentPrice, 0.003),
-      ).rejects.toThrow("BTC amount too small after rounding to step size");
+      ).rejects.toThrow("Quantity 0.000004 BTC below minimum sellable");
     });
   });
 
@@ -326,7 +358,31 @@ describe("SellOrderPlacer", () => {
         timeInForce: "IOC",
       } as BinanceOrder;
 
+      // Clear and reset the mocks
+      mockBinanceClient.createOrder.mockReset();
+      mockBinanceClient.getOrder.mockReset();
+      mockBinanceClient.getMyTrades.mockReset();
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderResponse);
+
+      // Mock trades for the filled sell order
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 234567,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "24.925",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -366,6 +422,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderResponse);
+
+      // Mock trades for the partially filled sell order
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 234568,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.7",
+          quoteQty: "34895.00",
+          commission: "34.895",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -392,6 +468,10 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderResponse);
+
+      // No trades for unfilled order
+      mockBinanceClient.getMyTrades.mockResolvedValue([]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -420,6 +500,26 @@ describe("SellOrderPlacer", () => {
         .mockRejectedValueOnce(new Error("Network timeout"))
         .mockRejectedValueOnce(new Error("ECONNREFUSED"))
         .mockResolvedValueOnce(mockSuccessResponse);
+      mockBinanceClient.getOrder.mockResolvedValue(mockSuccessResponse);
+
+      // Mock getMyTrades for successful order
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "24.925",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -475,6 +575,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderWithBTCFee);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderWithBTCFee);
+
+      // Mock getMyTrades for BTC fee
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 654321,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "0.0005",
+          commissionAsset: "BTC",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -508,6 +628,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderWithUSDTFee);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderWithUSDTFee);
+
+      // Mock getMyTrades for USDT fee
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 654322,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "24.925",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -541,6 +681,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderWithBNBFee);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderWithBNBFee);
+
+      // Mock getMyTrades for BNB fee
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 654323,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "0.05",
+          commissionAsset: "BNB",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -551,7 +711,8 @@ describe("SellOrderPlacer", () => {
 
       expect(result.feeOther["BNB"].toString()).toBe("0.05");
       expect(result.feeBTC.toString()).toBe("0");
-      expect(result.feeUSDT.toString()).toBe("0");
+      // When BNB fee is used, implementation imputes USDT fee (0.075% of cumulative quote)
+      expect(result.feeUSDT.toString()).toBe("18.69375"); // 24925 * 0.00075
     });
 
     it("should aggregate fees across multiple fills", async () => {
@@ -591,6 +752,27 @@ describe("SellOrderPlacer", () => {
       mockBinanceClient.createOrder.mockResolvedValue(
         mockOrderWithMultipleFills,
       );
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderWithMultipleFills);
+
+      // Mock getMyTrades to return the fills as trades
+      const mockTrades: BinanceTrade[] = (
+        mockOrderWithMultipleFills.fills || []
+      ).map((fill) => ({
+        symbol: "BTCUSDT",
+        id: fill.tradeId,
+        orderId: 987654321,
+        orderListId: -1,
+        price: fill.price,
+        qty: fill.qty,
+        quoteQty: (parseFloat(fill.price) * parseFloat(fill.qty)).toString(),
+        commission: fill.commission,
+        commissionAsset: fill.commissionAsset,
+        time: Date.now(),
+        isBuyer: false,
+        isMaker: false,
+        isBestMatch: true,
+      }));
+      mockBinanceClient.getMyTrades.mockResolvedValue(mockTrades);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -626,6 +808,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderResponse);
+
+      // Mock getMyTrades for profit calculation
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "59820.00",
+          qty: "0.5",
+          quoteQty: "29910.00",
+          commission: "29.91",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -672,6 +874,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderResponse);
+
+      // Mock getMyTrades for negative profit scenario
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "39880.00",
+          qty: "0.5",
+          quoteQty: "19940.00",
+          commission: "19.94",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -718,6 +940,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderResponse);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderResponse);
+
+      // Mock getMyTrades for BTC fee in profit calculation
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "54835.00",
+          qty: "1.0",
+          quoteQty: "54835.00",
+          commission: "0.001",
+          commissionAsset: "BTC",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -754,10 +996,31 @@ describe("SellOrderPlacer", () => {
       const mockOrder = {
         orderId: 987654321,
         executedQty: "0.5",
+        cummulativeQuoteQty: "24925.00",
         status: "FILLED" as OrderStatus,
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrder);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
+
+      // Mock getMyTrades for event emission test
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "24.925",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const events: Array<{ event: string; data: unknown }> = [];
 
@@ -830,6 +1093,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrder);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
+
+      // Mock getMyTrades for trade record test
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "24.925",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       // Set cycle ID
       sellOrderPlacer.setCycleId("CYCLE_TEST_002");
@@ -876,6 +1159,27 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrder);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
+
+      // Mock getMyTrades for profit record test
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "59820.00",
+          qty: "0.5",
+          quoteQty: "29910.00",
+          commission: "29.91",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
+
       sellOrderPlacer.setCycleId("CYCLE_TEST_003");
 
       let profitRecord:
@@ -934,6 +1238,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrder);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
+
+      // Mock getMyTrades for state update test
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "1.0",
+          quoteQty: "49850.00",
+          commission: "49.85",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -970,6 +1294,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrder);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
+
+      // Mock getMyTrades for BTC fee
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "1.0",
+          quoteQty: "49850.00",
+          commission: "0.001",
+          commissionAsset: "BTC",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -982,7 +1326,7 @@ describe("SellOrderPlacer", () => {
       // When fee is in BTC, the USDT received is not reduced
       expect(stateData.btcSold.toString()).toBe("1");
       expect(stateData.usdtReceived.toString()).toBe("49850");
-      expect(stateData.netUsdtReceived.toString()).toBe("49850"); // No USDT fee
+      expect(stateData.netUsdtReceived.toString()).toBe("49850"); // No USDT fee deducted
     });
   });
 
@@ -999,12 +1343,33 @@ describe("SellOrderPlacer", () => {
       const mockOrder = {
         orderId: 987654321,
         executedQty: "0.5",
+        cummulativeQuoteQty: "24925.00",
         status: "FILLED" as OrderStatus,
       } as BinanceOrder;
 
       mockBinanceClient.createOrder
         .mockRejectedValueOnce(errorWithCode)
         .mockResolvedValue(mockOrder);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
+
+      // Mock getMyTrades for retry test
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "24.925",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -1029,12 +1394,33 @@ describe("SellOrderPlacer", () => {
       const mockOrder = {
         orderId: 987654321,
         executedQty: "0.5",
+        cummulativeQuoteQty: "24925.00",
         status: "FILLED" as OrderStatus,
       } as BinanceOrder;
 
       mockBinanceClient.createOrder
         .mockRejectedValueOnce(errorWithCode)
         .mockResolvedValue(mockOrder);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrder);
+
+      // Mock getMyTrades for retry test
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "24.925",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -1128,15 +1514,20 @@ describe("SellOrderPlacer", () => {
     it("should handle price at boundaries correctly", async () => {
       const btcAccumulated = new Decimal("0.01");
 
-      // Test with minimum price that would result in negative after slippage
+      // Test with minimum price - should fail due to notional requirement
       const minPrice = new Decimal("0.01");
-      const minOrderParams = await sellOrderPlacer.prepareOrder(
+      await expect(
+        sellOrderPlacer.prepareOrder(btcAccumulated, minPrice, 0.003),
+      ).rejects.toThrow("below minimum sellable");
+
+      // Test with price that meets notional requirement
+      const validPrice = new Decimal("1000"); // 0.01 BTC * $1000 = $10 notional
+      const validOrderParams = await sellOrderPlacer.prepareOrder(
         btcAccumulated,
-        minPrice,
+        validPrice,
         0.003,
       );
-      // 0.01 * 0.997 = 0.00997 which rounds to 0 with tick size 0.01
-      expect(minOrderParams.limitPrice.toNumber()).toBe(0);
+      expect(validOrderParams.limitPrice.toNumber()).toBe(997); // 1000 * 0.997
 
       // Test with maximum price
       const maxPrice = new Decimal("999999");
@@ -1161,6 +1552,26 @@ describe("SellOrderPlacer", () => {
       } as BinanceOrder;
 
       mockBinanceClient.createOrder.mockResolvedValue(mockOrderNoFills);
+      mockBinanceClient.getOrder.mockResolvedValue(mockOrderNoFills);
+
+      // Mock getMyTrades for order with no fills - should return trades
+      mockBinanceClient.getMyTrades.mockResolvedValue([
+        {
+          symbol: "BTCUSDT",
+          id: 123456,
+          orderId: 987654321,
+          orderListId: -1,
+          price: "49850.00",
+          qty: "0.5",
+          quoteQty: "24925.00",
+          commission: "24.925",
+          commissionAsset: "USDT",
+          time: Date.now(),
+          isBuyer: false,
+          isMaker: false,
+          isBestMatch: true,
+        },
+      ]);
 
       const result = await sellOrderPlacer.placeOrder(
         btcAccumulated,
@@ -1169,9 +1580,10 @@ describe("SellOrderPlacer", () => {
         0.003,
       );
 
-      // Should handle missing fills gracefully
+      // Should handle missing fills gracefully with fallback fee calculation
       expect(result.feeBTC.toString()).toBe("0");
-      expect(result.feeUSDT.toString()).toBe("0");
+      // Fallback fee is 0.1% of cumulative quote quantity
+      expect(result.feeUSDT.toString()).toBe("24.925"); // 24925 * 0.001
       expect(result.feeOther).toEqual({});
     });
 
@@ -1182,18 +1594,62 @@ describe("SellOrderPlacer", () => {
       const mockOrder1 = {
         orderId: 987654321,
         clientOrderId: "SELL_1_abc",
+        executedQty: "0.5",
+        cummulativeQuoteQty: "24925.00",
         status: "FILLED" as OrderStatus,
       } as BinanceOrder;
 
       const mockOrder2 = {
         orderId: 987654322,
         clientOrderId: "SELL_2_def",
+        executedQty: "0.5",
+        cummulativeQuoteQty: "24925.00",
         status: "FILLED" as OrderStatus,
       } as BinanceOrder;
 
       mockBinanceClient.createOrder
         .mockResolvedValueOnce(mockOrder1)
         .mockResolvedValueOnce(mockOrder2);
+      mockBinanceClient.getOrder
+        .mockResolvedValueOnce(mockOrder1)
+        .mockResolvedValueOnce(mockOrder2);
+
+      // Mock getMyTrades for concurrent orders
+      mockBinanceClient.getMyTrades
+        .mockResolvedValueOnce([
+          {
+            symbol: "BTCUSDT",
+            id: 123456,
+            orderId: 987654321,
+            orderListId: -1,
+            price: "49850.00",
+            qty: "0.5",
+            quoteQty: "24925.00",
+            commission: "24.925",
+            commissionAsset: "USDT",
+            time: Date.now(),
+            isBuyer: false,
+            isMaker: false,
+            isBestMatch: true,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            symbol: "BTCUSDT",
+            id: 123457,
+            orderId: 987654322,
+            orderListId: -1,
+            price: "49850.00",
+            qty: "0.5",
+            quoteQty: "24925.00",
+            commission: "24.925",
+            commissionAsset: "USDT",
+            time: Date.now(),
+            isBuyer: false,
+            isMaker: false,
+            isBestMatch: true,
+          },
+        ]);
 
       // Place orders concurrently
       const [result1, result2] = await Promise.all([

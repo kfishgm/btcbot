@@ -1,0 +1,130 @@
+{
+  "name": "Complete Trading Cycle Test",
+  "description": "Full cycle from multiple grid buys through accumulation to sell with profit calculation",
+  "symbol": "BTCUSDT",
+  "interval": "5m",
+  "candles": [
+    {
+      "openTime": 1704067200000,
+      "open": 100000,
+      "high": 100100,
+      "low": 99900,
+      "close": 100000,
+      "volume": 10,
+      "closeTime": 1704067559999,
+      "comment": "Initial candle, ATH at 100100"
+    },
+    {
+      "openTime": 1704067560000,
+      "open": 100000,
+      "high": 100000,
+      "low": 99650,
+      "close": 99700,
+      "volume": 15,
+      "closeTime": 1704068159999,
+      "comment": "First buy at 99700 (-0.3%)"
+    },
+    {
+      "openTime": 1704068160000,
+      "open": 99700,
+      "high": 99750,
+      "low": 99350,
+      "close": 99400,
+      "volume": 18,
+      "closeTime": 1704068759999,
+      "comment": "Second buy at 99400 (-0.6%)"
+    },
+    {
+      "openTime": 1704068760000,
+      "open": 99400,
+      "high": 99450,
+      "low": 99050,
+      "close": 99100,
+      "volume": 20,
+      "closeTime": 1704069359999,
+      "comment": "Third buy at 99100 (-0.9%)"
+    },
+    {
+      "openTime": 1704069360000,
+      "open": 99100,
+      "high": 99200,
+      "low": 99000,
+      "close": 99150,
+      "volume": 12,
+      "closeTime": 1704069959999,
+      "comment": "Consolidation"
+    },
+    {
+      "openTime": 1704069960000,
+      "open": 99150,
+      "high": 99300,
+      "low": 99100,
+      "close": 99250,
+      "volume": 14,
+      "closeTime": 1704070559999,
+      "comment": "Starting recovery"
+    },
+    {
+      "openTime": 1704070560000,
+      "open": 99250,
+      "high": 99500,
+      "low": 99200,
+      "close": 99450,
+      "volume": 16,
+      "closeTime": 1704071159999,
+      "comment": "Continued recovery"
+    },
+    {
+      "openTime": 1704071160000,
+      "open": 99450,
+      "high": 99850,
+      "low": 99400,
+      "close": 99800,
+      "volume": 22,
+      "closeTime": 1704071759999,
+      "comment": "Strong recovery, approaching sell threshold"
+    },
+    {
+      "openTime": 1704071760000,
+      "open": 99800,
+      "high": 99950,
+      "low": 99750,
+      "close": 99900,
+      "volume": 25,
+      "closeTime": 1704072359999,
+      "comment": "Rise to 99900, triggers sell (0.5% above reference ~99400)"
+    },
+    {
+      "openTime": 1704072360000,
+      "open": 99900,
+      "high": 100200,
+      "low": 99850,
+      "close": 100100,
+      "volume": 30,
+      "closeTime": 1704072959999,
+      "comment": "Post-sell continuation, cycle complete"
+    }
+  ],
+  "expectedCycle": {
+    "buys": [
+      { "price": 99700, "amount": 100, "btc": 0.001003 },
+      { "price": 99400, "amount": 100, "btc": 0.001006 },
+      { "price": 99100, "amount": 100, "btc": 0.001009 }
+    ],
+    "totalBuyAmount": 300,
+    "totalBtcAccumulated": 0.003018,
+    "averageBuyPrice": 99400,
+    "referencePrice": 99400,
+    "sellTriggerPrice": 99897,
+    "sell": {
+      "price": 99900,
+      "btcSold": 0.003018,
+      "usdtReceived": 301.5,
+      "profit": 1.5,
+      "profitPercentage": 0.5
+    },
+    "cycleStatus": "COMPLETED",
+    "finalCapital": 1001.5
+  },
+  "notes": "Complete cycle showing accumulation through grid buys and profitable exit on 0.5% rise"
+}

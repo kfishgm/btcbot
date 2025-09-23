@@ -20,12 +20,16 @@ export interface StateUpdateResult extends CycleState {
 export interface StateUpdateData {
   btc_accumulated: number;
   btc_accum_net: number;
+  btc_dust?: number;
   cost_accum_usdt: number;
   capital_available: number;
   purchases_remaining: number;
   reference_price: number | null;
   buy_amount: number | null;
   status: "READY" | "HOLDING" | "PAUSED";
+  ath_price?: number | null;
+  buy_grid?: number[] | null;
+  buy_index?: number | null;
 }
 
 export interface SellOrderStateUpdaterConfig {
@@ -78,7 +82,7 @@ export class SellOrderStateUpdater extends EventEmitter {
       const usdtReceived = orderResult.cummulativeQuoteQty
         .sub(orderResult.feeUSDT)
         .toNumber();
-      const cycleComplete = updates.btc_accumulated < 0.00000001;
+      const cycleComplete = updates.btc_accumulated < 0.00001;
 
       let principal: number | undefined;
       let profit: number | undefined;
@@ -105,12 +109,17 @@ export class SellOrderStateUpdater extends EventEmitter {
       };
 
       // Log successful update
-      logger.info("Sell order state update completed", {
-        cycleId: currentState.id,
-        orderId: orderResult.orderId,
-        updates,
-        cycleComplete,
-      });
+      logger.info(
+        `Sell order state update completed. Cycle complete: ${cycleComplete}, ATH: ${currentState.ath_price}, New ref price: ${updates.reference_price}`,
+        {
+          cycleId: currentState.id,
+          orderId: orderResult.orderId,
+          updates,
+          cycleComplete,
+          currentAthPrice: currentState.ath_price,
+          newReferencePrice: updates.reference_price,
+        },
+      );
 
       // Log to database
       await this.logStateUpdate(currentState.id, orderResult.orderId, updates);
@@ -187,16 +196,14 @@ export class SellOrderStateUpdater extends EventEmitter {
   ): StateUpdateData {
     // Calculate BTC amounts
     const btcSold = orderResult.executedQty;
-    const btcFee = orderResult.feeBTC;
 
-    // Update BTC accumulated (subtract sold amount, but add back BTC fees since they weren't actually sold)
+    // Update BTC accumulated
+    // For SELL orders on Binance: fee is in USDT, not BTC
+    // So we sell the full executedQty and don't need to adjust for BTC fees
     const currentBtcAccumulated = new Decimal(
       currentState.btc_accumulated ?? 0,
     );
-    const newBtcAccumulated = currentBtcAccumulated
-      .sub(btcSold)
-      .add(btcFee) // Add back BTC fee since it reduces what we sold, not what we have
-      .toNumber();
+    const newBtcAccumulated = currentBtcAccumulated.sub(btcSold).toNumber();
 
     // Calculate USDT amounts
     const usdtReceived = orderResult.cummulativeQuoteQty;
@@ -204,7 +211,9 @@ export class SellOrderStateUpdater extends EventEmitter {
     const netUsdtReceived = usdtReceived.sub(usdtFee);
 
     // Check if this is a complete sale (cycle reset)
-    const isCycleComplete = newBtcAccumulated < 0.00000001;
+    // Dust is BTC that cannot be sold due to minimum constraints
+    // We consider the cycle complete when remaining BTC is below minQty (0.00001)
+    const isCycleComplete = newBtcAccumulated < 0.00001;
 
     if (isCycleComplete) {
       // CYCLE RESET - Per STRATEGY.md lines 279-295
@@ -226,15 +235,44 @@ export class SellOrderStateUpdater extends EventEmitter {
         newCapitalAvailable / this.config.maxPurchases,
       );
 
+      // Use ATH price as new reference, but validate it first
+      const newReferencePrice =
+        currentState.ath_price && currentState.ath_price > 0
+          ? currentState.ath_price
+          : currentState.reference_price || 0; // Fallback to current reference if ATH is invalid
+
+      if (!currentState.ath_price || currentState.ath_price === 0) {
+        logger.warn(
+          "⚠️ ATH price is null/zero during cycle reset, using current reference price as fallback",
+          {
+            ath_price: currentState.ath_price,
+            reference_price: currentState.reference_price,
+            newReferencePrice,
+          },
+        );
+      }
+
+      // Log dust preservation
+      if (newBtcAccumulated > 0) {
+        logger.info("Preserving dust for next cycle", {
+          dustAmount: newBtcAccumulated,
+          dustValue: newBtcAccumulated * (currentState.reference_price || 0),
+        });
+      }
+
       return {
-        btc_accumulated: 0,
-        btc_accum_net: 0,
-        cost_accum_usdt: 0,
+        btc_accumulated: newBtcAccumulated, // Total BTC including dust
+        btc_accum_net: 0, // Reset to 0 for new cycle - only tracks current cycle BTC
+        btc_dust: newBtcAccumulated, // Save dust separately to exclude from reference price
+        cost_accum_usdt: 0, // Reset cost accumulator for clean profit tracking
         capital_available: newCapitalAvailable,
         purchases_remaining: this.config.maxPurchases,
-        reference_price: currentState.ath_price, // Reset to ATH (per STRATEGY.md line 294)
+        reference_price: newReferencePrice, // Reset to ATH (per STRATEGY.md line 294)
+        ath_price: currentState.ath_price, // Preserve ATH price
         buy_amount: newBuyAmount,
         status: "READY",
+        buy_grid: null, // Reset grid for new cycle
+        buy_index: 0, // Reset index for new cycle
       };
     } else {
       // PARTIAL SALE - Cycle continues
@@ -252,8 +290,11 @@ export class SellOrderStateUpdater extends EventEmitter {
         capital_available: newCapitalAvailable,
         purchases_remaining: currentState.purchases_remaining,
         reference_price: currentState.reference_price,
+        ath_price: currentState.ath_price, // Preserve ATH price
         buy_amount: currentState.buy_amount,
         status: "HOLDING", // Still holding some BTC
+        buy_grid: currentState.buy_grid, // Preserve buy_grid
+        buy_index: currentState.buy_index ?? undefined, // Preserve buy_index
       };
     }
   }

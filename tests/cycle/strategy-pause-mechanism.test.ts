@@ -6,9 +6,6 @@ import { DriftDetector } from "../../src/cycle/drift-detector";
 import { CycleStateManager } from "../../src/cycle/cycle-state-manager";
 import { DiscordNotifier } from "../../src/notifications/discord-notifier";
 
-// Mock dependencies
-jest.mock("../../src/utils/logger");
-
 describe("StrategyPauseMechanism", () => {
   let pauseMechanism: StrategyPauseMechanism;
   let mockSupabase: SupabaseClient<Database>;
@@ -93,6 +90,27 @@ describe("StrategyPauseMechanism", () => {
     );
   });
 
+  // Helper function to create a valid mock cycle state
+  const createMockCycleState = (overrides = {}) => ({
+    id: "test-id",
+    status: "READY",
+    capital_available: 1000,
+    btc_accumulated: 0,
+    purchases_remaining: 10,
+    ath_price: null,
+    btc_accum_net: null,
+    btc_dust: null,
+    buy_amount: null,
+    buy_anchor_price: null,
+    cost_accum_usdt: null,
+    reference_price: null,
+    updated_at: null,
+    buy_grid: null,
+    buy_index: 0,
+    version: 1,
+    ...overrides,
+  });
+
   describe("Initialization", () => {
     it("should initialize with all required dependencies", () => {
       expect(pauseMechanism).toBeDefined();
@@ -162,19 +180,12 @@ describe("StrategyPauseMechanism", () => {
       });
 
       // Mock current state
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
-        id: "test-id",
-        status: "READY",
-        capital_available: 1000,
-        btc_accumulated: 0.01,
-        purchases_remaining: 5,
-        ath_price: null,
-        btc_accum_net: null,
-        buy_amount: null,
-        cost_accum_usdt: null,
-        reference_price: null,
-        updated_at: null,
-      });
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+        createMockCycleState({
+          btc_accumulated: 0.01,
+          purchases_remaining: 5,
+        }),
+      );
 
       const result = await pauseMechanism.checkDriftAndPause(
         1010, // usdtSpotBalance
@@ -230,19 +241,12 @@ describe("StrategyPauseMechanism", () => {
         availableBalance: 50,
       };
 
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
-        id: "test-id",
-        status: "READY",
-        capital_available: 1000,
-        btc_accumulated: 0.01,
-        purchases_remaining: 5,
-        ath_price: null,
-        btc_accum_net: null,
-        buy_amount: null,
-        cost_accum_usdt: null,
-        reference_price: null,
-        updated_at: null,
-      });
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+        createMockCycleState({
+          btc_accumulated: 0.01,
+          purchases_remaining: 5,
+        }),
+      );
 
       await pauseMechanism.pauseOnError(error, context);
 
@@ -252,19 +256,12 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should not double-pause on multiple errors", async () => {
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
-        id: "test-id",
-        status: "READY",
-        capital_available: 1000,
-        btc_accumulated: 0.01,
-        purchases_remaining: 5,
-        ath_price: null,
-        btc_accum_net: null,
-        buy_amount: null,
-        cost_accum_usdt: null,
-        reference_price: null,
-        updated_at: null,
-      });
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+        createMockCycleState({
+          btc_accumulated: 0.01,
+          purchases_remaining: 5,
+        }),
+      );
 
       // First error
       await pauseMechanism.pauseOnError(new Error("First error"), {});
@@ -283,37 +280,24 @@ describe("StrategyPauseMechanism", () => {
   describe("Resume", () => {
     beforeEach(async () => {
       // Pause the strategy first
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
-        id: "test-id",
-        status: "READY",
-        capital_available: 1000,
-        btc_accumulated: 0.01,
-        purchases_remaining: 5,
-        ath_price: null,
-        btc_accum_net: null,
-        buy_amount: null,
-        cost_accum_usdt: null,
-        reference_price: null,
-        updated_at: null,
-      });
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+        createMockCycleState({
+          btc_accumulated: 0.01,
+          purchases_remaining: 5,
+        }),
+      );
 
       await pauseMechanism.pauseOnError(new Error("Test pause"), {});
     });
 
     it("should successfully resume when validation passes", async () => {
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
-        id: "test-id",
-        status: "PAUSED",
-        capital_available: 1000,
-        btc_accumulated: 0.01,
-        purchases_remaining: 5,
-        ath_price: null,
-        btc_accum_net: null,
-        buy_amount: null,
-        cost_accum_usdt: null,
-        reference_price: null,
-        updated_at: null,
-      });
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+        createMockCycleState({
+          status: "PAUSED",
+          btc_accumulated: 0.01,
+          purchases_remaining: 5,
+        }),
+      );
 
       jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(true);
 
@@ -325,19 +309,14 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should fail to resume when state validation fails", async () => {
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
-        id: "test-id",
-        status: "PAUSED",
-        capital_available: -100, // Invalid negative value
-        btc_accumulated: 0.01,
-        purchases_remaining: 5,
-        ath_price: null,
-        btc_accum_net: null,
-        buy_amount: null,
-        cost_accum_usdt: null,
-        reference_price: null,
-        updated_at: null,
-      });
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+        createMockCycleState({
+          status: "PAUSED",
+          capital_available: -100, // Invalid negative value
+          btc_accumulated: 0.01,
+          purchases_remaining: 5,
+        }),
+      );
 
       jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(false);
 
@@ -349,19 +328,13 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should allow force resume bypassing validation", async () => {
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
-        id: "test-id",
-        status: "PAUSED",
-        capital_available: 1000,
-        btc_accumulated: 0.01,
-        purchases_remaining: 5,
-        ath_price: null,
-        btc_accum_net: null,
-        buy_amount: null,
-        cost_accum_usdt: null,
-        reference_price: null,
-        updated_at: null,
-      });
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+        createMockCycleState({
+          status: "PAUSED",
+          btc_accumulated: 0.01,
+          purchases_remaining: 5,
+        }),
+      );
 
       jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(false);
 
@@ -394,19 +367,12 @@ describe("StrategyPauseMechanism", () => {
         overallStatus: "exceeded" as const,
       });
 
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue({
-        id: "test-id",
-        status: "READY",
-        capital_available: 1000,
-        btc_accumulated: 0.01,
-        purchases_remaining: 5,
-        ath_price: null,
-        btc_accum_net: null,
-        buy_amount: null,
-        cost_accum_usdt: null,
-        reference_price: null,
-        updated_at: null,
-      });
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+        createMockCycleState({
+          btc_accumulated: 0.01,
+          purchases_remaining: 5,
+        }),
+      );
 
       await pauseMechanism.checkDriftAndPause(1015, 1000, 0.01003, 0.01);
 

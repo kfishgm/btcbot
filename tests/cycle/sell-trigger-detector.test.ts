@@ -247,7 +247,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Drift Detection", () => {
-    it("should skip sell when BTC drift exceeds threshold", () => {
+    it("should skip sell when BTC drift exceeds threshold (insufficient BTC)", () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -274,7 +274,7 @@ describe("SellTriggerDetector", () => {
 
       const balances: BalanceInfo = {
         usdtSpot: 0,
-        btcSpot: 0.0098, // 2% drift from btc_accumulated (0.01)
+        btcSpot: 0.0098, // 2% insufficient BTC (less than accumulated)
       };
 
       const result = detector.checkSellTrigger(state, config, candle, balances);
@@ -319,6 +319,42 @@ describe("SellTriggerDetector", () => {
       const result = detector.checkSellTrigger(state, config, candle, balances);
 
       expect(result.shouldSell).toBe(true);
+      expect(result.validations?.driftCheck).toBe(true);
+    });
+
+    it("should pass drift check with excess BTC (dust amounts)", () => {
+      const state: CycleState = {
+        status: "HOLDING",
+        reference_price: 50000,
+        purchases_remaining: 0,
+        capital_available: 0,
+        btc_accumulated: 0.01,
+      };
+
+      const config: TradingConfig = {
+        dropPercentage: 0.02,
+        risePercentage: 0.03,
+        exchangeMinNotional: 10,
+        driftThresholdPct: 0.005, // 0.5%
+      };
+
+      const candle: Candle = {
+        close: 52000,
+        high: 52100,
+        low: 51900,
+        open: 51950,
+        volume: 100,
+        timestamp: Date.now(),
+      };
+
+      const balances: BalanceInfo = {
+        usdtSpot: 0,
+        btcSpot: 0.01000876, // Excess BTC (dust amount like after sells)
+      };
+
+      const result = detector.checkSellTrigger(state, config, candle, balances);
+
+      expect(result.shouldSell).toBe(true); // Should sell (excess BTC is OK)
       expect(result.validations?.driftCheck).toBe(true);
     });
 
@@ -546,7 +582,7 @@ describe("SellTriggerDetector", () => {
       const result = detector.checkSellTrigger(state, config, candle, balances);
 
       expect(result.shouldSell).toBe(false);
-      expect(result.reason).toContain("Reference price is not set");
+      expect(result.reason).toContain("Average cost is not set");
     });
 
     it("should handle very large numbers", () => {
@@ -1017,7 +1053,7 @@ describe("SellTriggerDetector", () => {
         expect.objectContaining({
           module: "SellTriggerDetector",
           price: 52000,
-          threshold: 51500,
+          sellThreshold: 51500,
           amount: 0.01,
         }),
       );
@@ -1033,7 +1069,7 @@ describe("SellTriggerDetector", () => {
         reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
-        btc_accumulated: 0,
+        btc_accumulated: 0, // No BTC, so should not trigger
       };
 
       const config: TradingConfig = {
@@ -1044,10 +1080,10 @@ describe("SellTriggerDetector", () => {
       };
 
       const candle: Candle = {
-        close: 52000,
-        high: 52100,
-        low: 51900,
-        open: 51950,
+        close: 51000, // Changed to be below sell threshold
+        high: 51100,
+        low: 50900,
+        open: 50950,
         volume: 100,
         timestamp: Date.now(),
       };

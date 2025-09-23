@@ -1,5 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { Logger } from "../utils/logger";
+import { EventEmitter } from "events";
 
 export interface EventLoggerConfig {
   supabase: SupabaseClient;
@@ -104,7 +105,7 @@ interface QueuedEvent extends BaseEvent {
   retryCount?: number;
 }
 
-export class EventLogger {
+export class EventLogger extends EventEmitter {
   private supabase: SupabaseClient;
   private logger: Logger;
   private batchSize: number;
@@ -123,6 +124,7 @@ export class EventLogger {
   private customEventTypes: Map<string, EventClassification> = new Map();
 
   constructor(config: EventLoggerConfig) {
+    super();
     this.supabase = config.supabase;
     this.logger = config.logger;
     this.batchSize = config.batchSize ?? 10;
@@ -182,6 +184,33 @@ export class EventLogger {
       severity: "INFO",
       priority: "LOW",
       category: "SYSTEM",
+    });
+
+    // Trading decision events
+    this.customEventTypes.set("ATH_UPDATED", {
+      severity: "INFO",
+      priority: "MEDIUM",
+      category: "TRADING",
+    });
+    this.customEventTypes.set("BUY_CONDITION_MET", {
+      severity: "INFO",
+      priority: "HIGH",
+      category: "TRADING",
+    });
+    this.customEventTypes.set("SELL_CONDITION_MET", {
+      severity: "INFO",
+      priority: "HIGH",
+      category: "TRADING",
+    });
+    this.customEventTypes.set("BUY_ORDER_PLACED", {
+      severity: "INFO",
+      priority: "HIGH",
+      category: "TRADING",
+    });
+    this.customEventTypes.set("SELL_ORDER_PLACED", {
+      severity: "INFO",
+      priority: "HIGH",
+      category: "TRADING",
     });
 
     // Metric events
@@ -269,7 +298,19 @@ export class EventLogger {
 
     this.eventQueue.push(queuedEvent);
 
-    if (this.eventQueue.length >= this.batchSize) {
+    // Emit the event for listeners
+    this.emit("event", {
+      type: event.event_type,
+      data: event.metadata || {},
+    });
+
+    // In development/test mode, flush immediately for better visibility
+    const isDevelopment =
+      process.env.NODE_ENV === "development" ||
+      process.env.NODE_ENV === "test" ||
+      process.env.BINANCE_TESTNET === "true";
+
+    if (isDevelopment || this.eventQueue.length >= this.batchSize) {
       await this.flush();
     }
   }
@@ -296,8 +337,11 @@ export class EventLogger {
             this.eventQueue.push(event);
           } else {
             this.logger.error("Failed to log event after retries", {
-              event,
-              error,
+              event_type: event.event_type,
+              message: event.message,
+              retryCount: event.retryCount,
+              error: error instanceof Error ? error.message : String(error),
+              errorDetails: error,
             });
           }
         }
@@ -319,6 +363,13 @@ export class EventLogger {
       .insert(eventsToInsert);
 
     if (error) {
+      this.logger.error("Database insert failed", {
+        error: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        events: eventsToInsert,
+      });
       throw error;
     }
   }
