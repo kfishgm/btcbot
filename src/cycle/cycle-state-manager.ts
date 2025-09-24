@@ -35,48 +35,70 @@ export class CycleStateManager {
 
   async initialize(): Promise<void> {
     try {
-      const { data: existingState, error } = await this.supabase
+      // First, check if any cycle states exist
+      const { data: allStates, error: countError } = await this.supabase
         .from("cycle_state")
         .select("*")
-        .single();
+        .order("updated_at", { ascending: false })
+        .limit(10);
 
-      console.log("DEBUG: Queried cycle state from database");
-      console.log(
-        "DEBUG: existingState =",
-        JSON.stringify(existingState, null, 2),
-      );
-      console.log("DEBUG: error =", error);
-      console.log("DEBUG: existingState?.id =", existingState?.id);
-
-      logger.info("Queried cycle state from database", {
-        hasData: !!existingState,
-        hasId: existingState ? !!existingState.id : false,
-        id: existingState?.id,
-        keys: existingState ? Object.keys(existingState) : [],
-        fullState: JSON.stringify(existingState),
-        error: error?.message,
-      });
-
-      if (error && error.code === "PGRST116") {
-        await this.createInitialState();
-        return;
+      if (countError) {
+        const errorMessage =
+          (countError as { message?: string }).message ||
+          (countError as { code?: string }).code ||
+          String(countError);
+        throw new Error(`Failed to query cycle states: ${errorMessage}`);
       }
 
-      if (error) {
-        throw new Error(`Failed to query cycle state: ${error.message}`);
-      }
+      // Handle multiple rows case
+      if (allStates && allStates.length > 1) {
+        logger.warn(
+          `Found ${allStates.length} cycle_state rows! Using most recent.`,
+          {
+            ids: allStates.map((s) => s.id),
+            updated_at: allStates.map((s) => s.updated_at),
+          },
+        );
 
-      if (existingState) {
+        // Use the most recently updated state
+        const existingState = allStates[0];
         const isValid = await this.validateAndHandleState(existingState);
         if (isValid) {
           this.currentState = existingState;
-          logger.info("Recovered existing cycle state", {
+          logger.info("Recovered existing cycle state (from multiple)", {
             id: existingState.id,
             status: existingState.status,
             capital_available: existingState.capital_available,
             btc_accumulated: existingState.btc_accumulated,
           });
         }
+        return;
+      }
+
+      // Single row case
+      const existingState = allStates?.[0] || null;
+
+      logger.info("Queried cycle state from database", {
+        hasData: !!existingState,
+        hasId: existingState ? !!existingState.id : false,
+        id: existingState?.id,
+      });
+
+      if (!existingState) {
+        await this.createInitialState();
+        return;
+      }
+
+      // Process the single existing state
+      const isValid = await this.validateAndHandleState(existingState);
+      if (isValid) {
+        this.currentState = existingState;
+        logger.info("Recovered existing cycle state", {
+          id: existingState.id,
+          status: existingState.status,
+          capital_available: existingState.capital_available,
+          btc_accumulated: existingState.btc_accumulated,
+        });
       }
     } catch (error) {
       logger.error("Failed to initialize cycle state", { error });

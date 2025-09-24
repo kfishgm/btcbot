@@ -190,11 +190,18 @@ export async function createTestOrchestrator(
     config.scenario.symbol,
   );
 
-  const buyOrderStateUpdater = new BuyOrderStateUpdater(supabaseClient);
+  const buyOrderStateUpdater = new BuyOrderStateUpdater(
+    supabaseClient,
+    discordNotifier,
+  );
 
-  const sellOrderStateUpdater = new SellOrderStateUpdater(supabaseClient, {
-    maxPurchases: maxPurchases,
-  });
+  const sellOrderStateUpdater = new SellOrderStateUpdater(
+    supabaseClient,
+    {
+      maxPurchases: maxPurchases,
+    },
+    discordNotifier,
+  );
 
   const driftDetector = new DriftDetector();
 

@@ -453,7 +453,7 @@ describe("Multiple Cycles E2E", () => {
 
     // Start with partial cycle in progress
     testOrchestrator.mocks.supabase.setCycleState("test-cycle", {
-      status: "BUYING",
+      status: "READY",
       capital_available: 750,
       btc_accumulated: 0.0025,
       purchases_remaining: 7,
@@ -470,7 +470,7 @@ describe("Multiple Cycles E2E", () => {
     const partialState = await components.cycleStateManager.getCurrentState();
 
     // Should be able to continue from partial state
-    expect(partialState?.status).toBe("BUYING");
+    expect(partialState?.status).toBe("READY");
     expect(partialState?.purchases_remaining).toBe(7);
     expect(partialState?.btc_accumulated).toBeGreaterThan(0);
 

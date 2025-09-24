@@ -245,7 +245,7 @@ export class CandleProcessor extends EventEmitter {
   }
 
   attachToWebSocketManager(manager: EventEmitter): void {
-    manager.on("message", (message: unknown) => {
+    manager.on("kline", (message: unknown) => {
       // Check if this is a kline message
       if (this.isKlineMessage(message)) {
         this.processMessage(message as KlineMessage);

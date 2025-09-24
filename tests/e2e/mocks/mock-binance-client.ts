@@ -335,4 +335,18 @@ export class MockBinanceClient {
     this.executedOrders = [];
     this.orderIdCounter = 1000;
   }
+
+  // Helper method for tests to set balance
+  setBalance(asset: string, amount: number): void {
+    const balance = this.balances.get(asset);
+    if (balance) {
+      balance.free = new Decimal(amount);
+    } else {
+      this.balances.set(asset, {
+        asset,
+        free: new Decimal(amount),
+        locked: new Decimal(0),
+      });
+    }
+  }
 }

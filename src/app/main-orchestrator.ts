@@ -171,8 +171,32 @@ export class MainOrchestrator extends EventEmitter {
         throw new Error("No active strategy configuration found");
       }
 
+      logger.info("Strategy configuration loaded", {
+        timeframe: this.strategyConfig.timeframe,
+        dropPercentage: `${(this.strategyConfig.dropPercentage * 100).toFixed(2)}%`,
+        risePercentage: `${(this.strategyConfig.risePercentage * 100).toFixed(2)}%`,
+        maxPurchases: this.strategyConfig.maxPurchases,
+        minBuyUsdt: this.strategyConfig.minBuyUsdt,
+        initialCapitalUsdt: this.strategyConfig.initialCapitalUsdt,
+        athWindow: this.strategyConfig.athWindow,
+      });
+
       // 4. Initialize cycle state manager
       await this.config.cycleStateManager.initialize();
+
+      // Log current cycle state
+      const cycleState = this.config.cycleStateManager.getCurrentState();
+      if (cycleState) {
+        logger.info("Cycle state loaded", {
+          id: cycleState.id,
+          status: cycleState.status,
+          capitalAvailable: cycleState.capital_available,
+          btcAccumulated: cycleState.btc_accumulated,
+          purchasesRemaining: cycleState.purchases_remaining,
+          referencePrice: cycleState.reference_price,
+          buyAmount: cycleState.buy_amount,
+        });
+      }
 
       // 5. Check if strategy is paused
       const isPaused = this.config.strategyPauseMechanism.isPausedStatus();
@@ -319,13 +343,26 @@ export class MainOrchestrator extends EventEmitter {
    */
   private async processCandleWithStrategy(candle: CandleData): Promise<void> {
     const closePrice = parseFloat(candle.close);
-    logger.info(`Processing candle close at ${closePrice}`);
 
     // Get current state
     const state = await this.config.cycleStateManager.getCurrentState();
     if (!state) {
       throw new Error("No cycle state available");
     }
+
+    // Log detailed candle processing information
+    logger.info(
+      `Candle closed. Price: ${closePrice.toFixed(2)}, Reference: ${state.reference_price ? state.reference_price.toFixed(2) : "N/A"}, ATH: ${state.ath_price ? state.ath_price.toFixed(2) : "N/A"}`,
+      {
+        closePrice,
+        reference_price: state.reference_price,
+        ath_price: state.ath_price,
+        btc_accumulated: state.btc_accumulated || 0,
+        purchases_remaining: state.purchases_remaining,
+        capital_available: state.capital_available,
+        status: state.status,
+      },
+    );
 
     // Convert state to mutable copy we can work with
     const workingState: CycleState = { ...state };
@@ -346,14 +383,23 @@ export class MainOrchestrator extends EventEmitter {
           workingState.ath_price = athPrice;
           workingState.reference_price = athPrice;
 
-          logger.info(`Updated ATH to ${athPrice} from 20 candles`);
+          const candleCount =
+            this.config.historicalCandleManager.getStatistics().candleCount;
+          logger.info(
+            `ATH updated and persisted: ${athPrice.toFixed(2)} from ${candleCount} candles`,
+            {
+              ath_price: athPrice,
+              candle_count: candleCount,
+              timestamp: new Date().toISOString(),
+            },
+          );
           await this.config.eventLogger.queueEvent({
             event_type: "ATH_UPDATED",
             severity: "INFO",
             message: `ATH updated to ${athPrice}`,
             metadata: {
               ath_price: athPrice,
-              candle_count: 20,
+              candle_count: candleCount,
             },
           });
         }
@@ -678,7 +724,7 @@ export class MainOrchestrator extends EventEmitter {
 
   private setupEventListeners(): void {
     // Listen for candle close events
-    this.config.candleProcessor.on("candleClosed", (candle: CandleData) => {
+    this.config.candleProcessor.on("candle_closed", (candle: CandleData) => {
       this.onCandleClose(candle).catch((error) => {
         logger.error("Error in candle close handler", error);
       });

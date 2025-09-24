@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { getConfig } from "./index.js";
+import { logger } from "../utils/logger.js";
 
 // Strategy configuration interface matching database schema
 export interface StrategyConfig {
@@ -66,30 +67,36 @@ export class StrategyConfigLoader {
     }
 
     try {
-      // Try to load active configuration
-      const { data, error } = await this.client
+      // Try to load active configuration(s)
+      const { data: configs, error } = await this.client
         .from("strategy_config")
         .select("*")
         .eq("is_active", true)
-        .single();
-
-      if (error && error.code === "PGRST116") {
-        // No configuration found, create default
-        // No configuration found, create default
-        const defaultConfig = await this.createDefaultConfig();
-        this.cachedConfig = defaultConfig;
-        return defaultConfig;
-      }
+        .order("updated_at", { ascending: false })
+        .limit(10);
 
       if (error) {
         throw new StrategyConfigError(`Database error: ${error.message}`);
       }
 
-      // Check for multiple active configs (should not happen)
-      if (Array.isArray(data)) {
-        throw new StrategyConfigError(
-          "Multiple active configurations found. Please ensure only one configuration is active.",
+      // Handle multiple active configs
+      if (configs && configs.length > 1) {
+        logger.warn(
+          `Found ${configs.length} active strategy configs! Using most recent.`,
+          {
+            ids: configs.map((c) => c.id),
+            updated_at: configs.map((c) => c.updated_at),
+          },
         );
+      }
+
+      const data = configs?.[0] || null;
+
+      if (!data) {
+        // No configuration found, create default
+        const defaultConfig = await this.createDefaultConfig();
+        this.cachedConfig = defaultConfig;
+        return defaultConfig;
       }
 
       // Convert from database format to application format
@@ -285,16 +292,23 @@ export class StrategyConfigLoader {
     }
 
     // Fetch the inserted configuration
-    const { data: createdConfig, error: fetchError } = await this.client
+    const { data: createdConfigs, error: fetchError } = await this.client
       .from("strategy_config")
       .select("*")
       .eq("is_active", true)
-      .single();
+      .order("updated_at", { ascending: false })
+      .limit(1);
 
     if (fetchError) {
       throw new StrategyConfigError(
         `Failed to fetch created configuration: ${(fetchError as { message?: string }).message || "Unknown error"}`,
       );
+    }
+
+    const createdConfig = createdConfigs?.[0] || null;
+
+    if (!createdConfig) {
+      throw new StrategyConfigError("Failed to fetch created configuration");
     }
 
     // Default configuration created with is_active=false

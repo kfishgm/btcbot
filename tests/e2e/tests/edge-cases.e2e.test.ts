@@ -67,7 +67,7 @@ describe("Edge Cases E2E", () => {
 
     // Start with 9 purchases already made, 1 remaining
     testOrchestrator.mocks.supabase.setCycleState("test-cycle", {
-      status: "BUYING",
+      status: "READY",
       capital_available: 100, // Only enough for 1 more purchase
       btc_accumulated: 0.009,
       purchases_remaining: 1, // Last purchase available
@@ -147,7 +147,7 @@ describe("Edge Cases E2E", () => {
 
     // Very low capital, less than minimum buy
     testOrchestrator.mocks.supabase.setCycleState("test-cycle", {
-      status: "BUYING",
+      status: "READY",
       capital_available: 5, // Below minimum buy amount
       btc_accumulated: 0.001,
       purchases_remaining: 5,
@@ -205,7 +205,7 @@ describe("Edge Cases E2E", () => {
 
     // Should NOT trigger buy due to insufficient capital
     expect(buyTrigger.shouldBuy).toBe(false);
-    expect(buyTrigger.reason).toContain("Insufficient capital");
+    expect(buyTrigger.reason).toContain("below minimum");
   });
 
   it("should handle BTC dust accumulation", async () => {
@@ -215,7 +215,7 @@ describe("Edge Cases E2E", () => {
     testOrchestrator.mocks.supabase.setCycleState("test-cycle", {
       status: "HOLDING",
       capital_available: 500,
-      btc_accumulated: 0.005, // Clean amount
+      btc_accumulated: 0.01, // Increased to meet minimum notional
       btc_dust: 0.00000123, // Dust from fees/rounding
       purchases_remaining: 5,
       reference_price: 99500,
@@ -234,7 +234,10 @@ describe("Edge Cases E2E", () => {
 
     // Total BTC for sell should include dust
     const totalBtc = (state?.btc_accumulated || 0) + (state?.btc_dust || 0);
-    expect(totalBtc).toBeCloseTo(0.00500123, 8);
+    expect(totalBtc).toBeCloseTo(0.01000123, 8);
+
+    // Set up BTC balance in mock Binance to match state
+    mocks.binance.setBalance("BTC", 0.01000123);
 
     // When checking sell trigger, dust should be considered
     const btcBalance = await mocks.binance.getBalance("BTC");
@@ -252,7 +255,7 @@ describe("Edge Cases E2E", () => {
         reference_price: 99500,
         purchases_remaining: 5,
         capital_available: 500,
-        btc_accumulated: 0.005,
+        btc_accumulated: 0.01,
       },
       {
         risePercentage: 0.005,
@@ -405,7 +408,7 @@ describe("Edge Cases E2E", () => {
 
     // Simulate bot restart with partial state
     testOrchestrator.mocks.supabase.setCycleState("test-cycle", {
-      status: "BUYING",
+      status: "READY",
       capital_available: 650,
       btc_accumulated: 0.0035,
       purchases_remaining: 6,
@@ -424,7 +427,7 @@ describe("Edge Cases E2E", () => {
 
     // State should be fully recovered
     expect(recoveredState).toBeDefined();
-    expect(recoveredState?.status).toBe("BUYING");
+    expect(recoveredState?.status).toBe("READY");
     expect(recoveredState?.btc_accumulated).toBe(0.0035);
     expect(recoveredState?.purchases_remaining).toBe(6);
     expect(recoveredState?.buy_index).toBe(4);

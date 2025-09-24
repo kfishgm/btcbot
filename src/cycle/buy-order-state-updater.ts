@@ -6,6 +6,7 @@ import type { OrderResult } from "../order/buy-order-placer";
 import { StateTransactionManager } from "./state-transaction-manager";
 import { Decimal } from "decimal.js";
 import { logger } from "../utils/logger";
+import type { DiscordNotifier } from "../notifications/discord-notifier";
 
 export interface StateUpdateResult extends CycleState {
   updateSummary?: {
@@ -34,11 +35,16 @@ export interface StateUpdateData {
 export class BuyOrderStateUpdater extends EventEmitter {
   private supabase: SupabaseClient<Database>;
   private transactionManager: StateTransactionManager;
+  private discordNotifier?: DiscordNotifier;
 
-  constructor(supabase: SupabaseClient<Database>) {
+  constructor(
+    supabase: SupabaseClient<Database>,
+    discordNotifier?: DiscordNotifier,
+  ) {
     super();
     this.supabase = supabase;
     this.transactionManager = new StateTransactionManager(supabase);
+    this.discordNotifier = discordNotifier;
   }
 
   async updateAfterBuyOrder(
@@ -118,6 +124,47 @@ export class BuyOrderStateUpdater extends EventEmitter {
         orderId: orderResult.orderId,
         updates,
       });
+
+      // Send Discord notification
+      if (this.discordNotifier) {
+        try {
+          const fields = [
+            {
+              name: "📉 Buy Price",
+              value: `$${orderResult.avgPrice.toFixed(2)}`,
+              inline: false,
+            },
+            {
+              name: "🔢 Quantity",
+              value: `${orderResult.executedQty.toFixed(8)} BTC`,
+              inline: false,
+            },
+            {
+              name: "💵 Total Cost",
+              value: `${orderResult.cummulativeQuoteQty.toFixed(2)} USDT`,
+              inline: false,
+            },
+            {
+              name: "📊 New Reference Price",
+              value: `$${updates.reference_price.toFixed(2)}`,
+              inline: false,
+            },
+            {
+              name: "🛒 Purchases Remaining",
+              value: updates.purchases_remaining.toString(),
+              inline: false,
+            },
+            {
+              name: "📈 BTC Accumulated",
+              value: `${updates.btc_accumulated.toFixed(8)} BTC`,
+              inline: false,
+            },
+          ];
+          await this.discordNotifier.sendBuyNotification(fields);
+        } catch (error) {
+          logger.error("Failed to send Discord notification", { error });
+        }
+      }
 
       // Emit completion event
       this.emit("stateUpdateCompleted", {

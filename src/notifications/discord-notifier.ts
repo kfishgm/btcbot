@@ -167,12 +167,12 @@ export class DiscordNotifier {
       {
         name: "Pause Type",
         value: reason.type.replace(/_/g, " ").toUpperCase(),
-        inline: true,
+        inline: false,
       },
       {
         name: "Timestamp",
         value: new Date().toISOString(),
-        inline: true,
+        inline: false,
       },
     ];
 
@@ -186,12 +186,12 @@ export class DiscordNotifier {
         {
           name: "USDT Drift",
           value: `${usdtDrift}%`,
-          inline: true,
+          inline: false,
         },
         {
           name: "BTC Drift",
           value: `${btcDrift}%`,
-          inline: true,
+          inline: false,
         },
       );
     }
@@ -209,12 +209,12 @@ export class DiscordNotifier {
       {
         name: "Resume Type",
         value: forced ? "Forced" : "Validated",
-        inline: true,
+        inline: false,
       },
       {
         name: "Timestamp",
         value: new Date().toISOString(),
-        inline: true,
+        inline: false,
       },
     ];
 
@@ -235,7 +235,7 @@ export class DiscordNotifier {
       {
         name: "Timestamp",
         value: new Date().toISOString(),
-        inline: true,
+        inline: false,
       },
     ];
 
@@ -259,22 +259,22 @@ export class DiscordNotifier {
       {
         name: "Type",
         value: type.toUpperCase(),
-        inline: true,
+        inline: false,
       },
       {
         name: "Price",
         value: `$${price.toFixed(2)}`,
-        inline: true,
+        inline: false,
       },
       {
         name: "Quantity",
         value: `${quantity.toFixed(8)} BTC`,
-        inline: true,
+        inline: false,
       },
       {
         name: "Total Value",
         value: `$${(price * quantity).toFixed(2)}`,
-        inline: true,
+        inline: false,
       },
     ];
 
@@ -381,27 +381,27 @@ export class DiscordNotifier {
       {
         name: "Profit",
         value: `$${data.profit.toFixed(2)}`,
-        inline: true,
+        inline: false,
       },
       {
         name: "Profit %",
         value: `${data.profitPercentage.toFixed(2)}%`,
-        inline: true,
+        inline: false,
       },
       {
         name: "Total Trades",
         value: data.totalTrades.toString(),
-        inline: true,
+        inline: false,
       },
       {
         name: "Duration",
         value: this.formatDuration(data.duration),
-        inline: true,
+        inline: false,
       },
       {
         name: "Final Capital",
         value: `$${data.finalCapital.toFixed(2)}`,
-        inline: true,
+        inline: false,
       },
     ];
 

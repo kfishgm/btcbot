@@ -40,6 +40,9 @@ describe("Sell Trigger E2E", () => {
       buy_index: 0,
       btc_dust: 0,
     });
+
+    // Set matching BTC balance in mock Binance client
+    testOrchestrator.mocks.binance.setBalance("BTC", 0.003);
   });
 
   afterEach(() => {
@@ -277,8 +280,7 @@ describe("Sell Trigger E2E", () => {
     await components.cycleStateManager.initialize();
 
     // Set actual balance slightly different due to dust
-    // Note: setBalance method doesn't exist on MockBinanceClient
-    // The mock will use the btc_accumulated value from state
+    mocks.binance.setBalance("BTC", 0.002999);
 
     const btcBalance = await mocks.binance.getBalance("BTC");
     const usdtBalance = await mocks.binance.getBalance("USDT");

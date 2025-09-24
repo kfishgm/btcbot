@@ -6,6 +6,7 @@ import type { OrderResult } from "../order/buy-order-placer";
 import { StateTransactionManager } from "./state-transaction-manager";
 import { Decimal } from "decimal.js";
 import { logger } from "../utils/logger";
+import type { DiscordNotifier } from "../notifications/discord-notifier";
 
 export interface StateUpdateResult extends CycleState {
   updateSummary?: {
@@ -40,15 +41,18 @@ export class SellOrderStateUpdater extends EventEmitter {
   private supabase: SupabaseClient<Database>;
   private transactionManager: StateTransactionManager;
   private config: SellOrderStateUpdaterConfig;
+  private discordNotifier?: DiscordNotifier;
 
   constructor(
     supabase: SupabaseClient<Database>,
     config: SellOrderStateUpdaterConfig,
+    discordNotifier?: DiscordNotifier,
   ) {
     super();
     this.supabase = supabase;
     this.transactionManager = new StateTransactionManager(supabase);
     this.config = config;
+    this.discordNotifier = discordNotifier;
   }
 
   async updateAfterSellOrder(
@@ -123,6 +127,80 @@ export class SellOrderStateUpdater extends EventEmitter {
 
       // Log to database
       await this.logStateUpdate(currentState.id, orderResult.orderId, updates);
+
+      // Send Discord notifications
+      if (this.discordNotifier) {
+        try {
+          if (cycleComplete) {
+            // Cycle complete notification
+            const fields = [
+              {
+                name: "💰 Profit",
+                value: `$${(profit || 0).toFixed(2)}`,
+                inline: false,
+              },
+              {
+                name: "📦 BTC Dust",
+                value: `${updates.btc_accumulated.toFixed(8)} BTC`,
+                inline: false,
+              },
+              {
+                name: "💵 New Capital",
+                value: `$${updates.capital_available.toFixed(2)}`,
+                inline: false,
+              },
+              {
+                name: "📊 New Reference Price",
+                value: `$${(updates.reference_price || 0).toFixed(2)}`,
+                inline: false,
+              },
+              {
+                name: "🔄 Cycle Reset",
+                value: "✅ Complete",
+                inline: false,
+              },
+            ];
+            await this.discordNotifier.sendCycleCompleteNotification(fields);
+          } else {
+            // Regular sell notification
+            const fields = [
+              {
+                name: "📉 Sell Price",
+                value: `$${orderResult.avgPrice.toFixed(2)}`,
+                inline: false,
+              },
+              {
+                name: "🔢 Quantity Sold",
+                value: `${orderResult.executedQty.toFixed(8)} BTC`,
+                inline: false,
+              },
+              {
+                name: "💵 Total Received",
+                value: `$${usdtReceived.toFixed(2)}`,
+                inline: false,
+              },
+              {
+                name: "📦 BTC Remaining",
+                value: `${updates.btc_accumulated.toFixed(8)} BTC`,
+                inline: false,
+              },
+              {
+                name: "💰 Capital Available",
+                value: `$${updates.capital_available.toFixed(2)}`,
+                inline: false,
+              },
+              {
+                name: "📊 Current ATH",
+                value: `$${(currentState.ath_price || 0).toFixed(2)}`,
+                inline: false,
+              },
+            ];
+            await this.discordNotifier.sendSellNotification(fields);
+          }
+        } catch (error) {
+          logger.error("Failed to send Discord notification", { error });
+        }
+      }
 
       // Emit completion event
       this.emit("stateUpdateCompleted", {

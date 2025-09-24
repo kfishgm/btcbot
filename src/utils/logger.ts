@@ -414,6 +414,7 @@ export class Logger {
           this.config.format === "json" ? JSON.stringify(logOutput) : message,
         timestamp,
         ...meta,
+        ...(metadata || {}),
       });
     }
   }

@@ -32,7 +32,7 @@ describe("CycleStateManager", () => {
     reference_price: null,
     cost_accum_usdt: 0,
     btc_accum_net: 0,
-        btc_dust: 0,
+    btc_dust: 0,
     ath_price: null,
     buy_amount: 30,
     buy_anchor_price: null,
@@ -64,7 +64,7 @@ describe("CycleStateManager", () => {
 
         mockSupabase = createMockSupabaseClient({
           cycle_state: {
-            select: { data: null, error: { code: "PGRST116" } },
+            select: { data: null, error: null },
             insert: { data: insertData, error: null },
           },
           bot_events: {
@@ -114,7 +114,7 @@ describe("CycleStateManager", () => {
 
           const localMockSupabase = createMockSupabaseClient({
             cycle_state: {
-              select: { data: null, error: { code: "PGRST116" } },
+              select: { data: null, error: null },
               insert: { data: insertData, error: null },
             },
             bot_events: {
@@ -140,7 +140,7 @@ describe("CycleStateManager", () => {
           btc_accumulated: 0,
           cost_accum_usdt: 0,
           btc_accum_net: 0,
-        btc_dust: 0,
+          btc_dust: 0,
         });
       });
 
@@ -177,7 +177,7 @@ describe("CycleStateManager", () => {
           reference_price: 30000,
           cost_accum_usdt: 150,
           btc_accum_net: 0.005,
-        btc_dust: 0,
+          btc_dust: 0,
           ath_price: 31000,
           buy_amount: 30,
         });
@@ -293,7 +293,7 @@ describe("CycleStateManager", () => {
           reference_price: null,
           cost_accum_usdt: 0,
           btc_accum_net: 0,
-        btc_dust: 0,
+          btc_dust: 0,
           ath_price: null,
           buy_amount: 30,
           updated_at: new Date().toISOString(),
@@ -330,7 +330,7 @@ describe("CycleStateManager", () => {
           reference_price: null,
           cost_accum_usdt: 150,
           btc_accum_net: 0.005,
-        btc_dust: 0,
+          btc_dust: 0,
           ath_price: null,
           buy_amount: 30,
         });
@@ -404,7 +404,7 @@ describe("CycleStateManager", () => {
       it("should throw error when state creation fails", async () => {
         mockSupabase = createMockSupabaseClient({
           cycle_state: {
-            select: { data: null, error: { code: "PGRST116" } },
+            select: { data: null, error: null },
             insert: { data: null, error: new Error("Insert failed") },
           },
         });

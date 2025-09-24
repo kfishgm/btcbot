@@ -88,19 +88,6 @@ export class MockSupabaseClient {
             }
             return { data: null, error: null };
           },
-          order: (_column: string, _options?: { ascending?: boolean }) => ({
-            limit: (_count: number) => ({
-              single: async () => {
-                if (table === "cycle_state" || table === "strategy_config") {
-                  const values = Array.from(
-                    (tableData as Map<string, unknown>).values(),
-                  );
-                  return { data: values[0] || null, error: null };
-                }
-                return { data: null, error: null };
-              },
-            }),
-          }),
         }),
         single: async () => {
           if (table === "cycle_state" || table === "strategy_config") {
@@ -112,34 +99,45 @@ export class MockSupabaseClient {
           return { data: null, error: null };
         },
         order: (_column: string, _options?: { ascending?: boolean }) => ({
-          limit: (_count: number) => ({
-            single: async () => {
-              if (table === "cycle_state" || table === "strategy_config") {
-                const values = Array.from(
-                  (tableData as Map<string, unknown>).values(),
-                );
-                return { data: values[0] || null, error: null };
-              }
-              return { data: null, error: null };
-            },
-          }),
+          limit: async (_count: number) => {
+            if (table === "cycle_state" || table === "strategy_config") {
+              const values = Array.from(
+                (tableData as Map<string, unknown>).values(),
+              );
+              // Return array of values, not single value
+              return { data: values, error: null };
+            }
+            return { data: [], error: null };
+          },
         }),
       }),
 
-      insert: async (data: unknown | unknown[]) => {
+      insert: (data: unknown | unknown[]) => {
         const insertData = Array.isArray(data) ? data : [data];
+        let finalData = insertData;
 
         if (table === "bot_events") {
           (tableData as BotEvent[]).push(...(insertData as BotEvent[]));
         } else if (table === "trades") {
           (tableData as Trade[]).push(...(insertData as Trade[]));
+        } else if (table === "cycle_state") {
+          // Handle cycle_state inserts
+          const cycleData = insertData[0] as CycleState;
+          const id = cycleData.id || `cycle_${Date.now()}`;
+          const newCycleState = {
+            ...cycleData,
+            id,
+            updated_at: new Date().toISOString(),
+          } as CycleState;
+          (tableData as Map<string, CycleState>).set(id, newCycleState);
+          finalData = [newCycleState];
         }
 
         return {
-          data: insertData,
+          data: finalData,
           error: null,
           select: () => ({
-            single: async () => ({ data: insertData[0], error: null }),
+            single: async () => ({ data: finalData[0], error: null }),
           }),
         };
       },

@@ -965,7 +965,7 @@ describe("CandleProcessor", () => {
       processor.on("error", () => {}); // Handle errors
 
       // Simulate WebSocketManager emitting a kline message
-      manager.emit("message", testMessage);
+      manager.emit("kline", testMessage);
 
       expect(candleClosedEmitted).toBe(true);
     });

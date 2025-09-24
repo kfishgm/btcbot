@@ -158,13 +158,19 @@ export class BuyTriggerDetector {
         config,
         state.buy_anchor_price,
       );
-      logger.info("Building buy grid dynamically on first trigger", {
-        athPrice: state.reference_price,
-        anchorPrice: state.buy_anchor_price,
-        dropPercentage: config.dropPercentage,
-        gridLevels: newGrid,
-        currentPrice: candle.close,
-      });
+      const basePrice = state.buy_anchor_price || state.reference_price;
+      logger.info(
+        `Building buy grid from ${state.buy_anchor_price ? "anchor" : "ATH"} price: ${basePrice.toFixed(2)}`,
+        {
+          athPrice: state.reference_price,
+          anchorPrice: state.buy_anchor_price,
+          basePrice,
+          dropPercentage: config.dropPercentage,
+          gridLevels: newGrid.map((level) => level.toFixed(2)),
+          currentPrice: candle.close,
+          maxPurchases: config.maxPurchases,
+        },
+      );
 
       // Use the newly built grid for this buy check
       // Note: The grid will be saved to state by the caller
@@ -414,19 +420,22 @@ export class BuyTriggerDetector {
       grid.push(quantizedLevel);
     }
 
-    logger.info("Buy grid built", {
-      athPrice,
-      anchorPrice,
-      basePrice,
-      dropPercentage: config.dropPercentage,
-      maxPurchases: config.maxPurchases,
-      tickSize,
-      gridLevels: grid.map((level) => this.formatPrice(level)),
-      firstLevel: grid[0] ? this.formatPrice(grid[0]) : "N/A",
-      lastLevel: grid[grid.length - 1]
-        ? this.formatPrice(grid[grid.length - 1])
-        : "N/A",
-    });
+    logger.info(
+      `Buy grid levels (${grid.length} levels from ${basePrice.toFixed(2)}): ${grid.map((l) => l.toFixed(2)).join(", ")}`,
+      {
+        athPrice,
+        anchorPrice,
+        basePrice,
+        dropPercentage: config.dropPercentage,
+        maxPurchases: config.maxPurchases,
+        tickSize,
+        gridLevels: grid.map((level) => this.formatPrice(level)),
+        firstLevel: grid[0] ? this.formatPrice(grid[0]) : "N/A",
+        lastLevel: grid[grid.length - 1]
+          ? this.formatPrice(grid[grid.length - 1])
+          : "N/A",
+      },
+    );
 
     return grid;
   }
@@ -454,18 +463,21 @@ export class BuyTriggerDetector {
     // Verify first level is below anchor
     const firstLevelBelowAnchor = grid[0] && grid[0] < anchorPrice;
 
-    logger.info("Buy grid rebuilt from anchor", {
-      anchorPrice: this.formatPrice(anchorPrice),
-      dropPercentage: config.dropPercentage,
-      maxPurchases: config.maxPurchases,
-      tickSize,
-      gridLevels: grid.map((level) => this.formatPrice(level)),
-      firstLevel: grid[0] ? this.formatPrice(grid[0]) : "N/A",
-      firstLevelBelowAnchor,
-      gapFromAnchor: grid[0]
-        ? `${(((anchorPrice - grid[0]) / anchorPrice) * 100).toFixed(3)}%`
-        : "N/A",
-    });
+    logger.info(
+      `Building buy grid from anchor price ${anchorPrice.toFixed(2)}`,
+      {
+        anchorPrice: this.formatPrice(anchorPrice),
+        dropPercentage: config.dropPercentage,
+        maxPurchases: config.maxPurchases,
+        tickSize,
+        gridLevels: grid.map((level) => this.formatPrice(level)),
+        firstLevel: grid[0] ? this.formatPrice(grid[0]) : "N/A",
+        firstLevelBelowAnchor,
+        gapFromAnchor: grid[0]
+          ? `${(((anchorPrice - grid[0]) / anchorPrice) * 100).toFixed(3)}%`
+          : "N/A",
+      },
+    );
 
     if (!firstLevelBelowAnchor) {
       logger.warn("⚠️ First grid level is NOT below anchor price!", {
