@@ -321,8 +321,35 @@ export class CycleStateManager {
     }
   }
 
-  getCurrentState(): CycleState | null {
-    return this.currentState ? { ...this.currentState } : null;
+  async getCurrentState(): Promise<CycleState | null> {
+    // Always fetch fresh from database to avoid stale cache issues
+    logger.debug("Fetching current state from database");
+
+    const { data, error } = await this.supabase
+      .from("cycle_state")
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error) {
+      logger.error("Failed to fetch current state from database", { error });
+      return null;
+    }
+
+    if (data) {
+      // Update cache with fresh data
+      this.currentState = data;
+      logger.debug("State loaded from database", {
+        id: data.id,
+        status: data.status,
+        btc_accumulated: data.btc_accumulated,
+        purchases_remaining: data.purchases_remaining,
+        buy_index: data.buy_index,
+      });
+    }
+
+    return data;
   }
 
   /**

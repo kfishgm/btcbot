@@ -192,7 +192,7 @@ export class MainOrchestrator extends EventEmitter {
       await this.config.cycleStateManager.initialize();
 
       // Log current cycle state
-      const cycleState = this.config.cycleStateManager.getCurrentState();
+      const cycleState = await this.config.cycleStateManager.getCurrentState();
       if (cycleState) {
         logger.info("Cycle state loaded", {
           id: cycleState.id,
@@ -351,7 +351,7 @@ export class MainOrchestrator extends EventEmitter {
   private async processCandleWithStrategy(candle: CandleData): Promise<void> {
     const closePrice = parseFloat(candle.close);
 
-    // Get current state
+    // Get current state (always fresh from database)
     const state = await this.config.cycleStateManager.getCurrentState();
     if (!state) {
       throw new Error("No cycle state available");
@@ -508,11 +508,7 @@ export class MainOrchestrator extends EventEmitter {
               });
             }
 
-            // Save state atomically
-            await this.config.stateTransactionManager.updateStateAtomic(
-              updatedState.id,
-              updatedState,
-            );
+            // State is already saved by sellOrderStateUpdater - no duplicate save needed
           }
         }
       }
@@ -666,11 +662,7 @@ export class MainOrchestrator extends EventEmitter {
                 buyResult.levelsTriggered || 1,
               )) as CycleState;
 
-            // Save state atomically
-            await this.config.stateTransactionManager.updateStateAtomic(
-              updatedState.id,
-              updatedState,
-            );
+            // State is already saved by buyOrderStateUpdater - no duplicate save needed
 
             // Discord notification is sent by buy-order-state-updater with detailed fields
             await this.config.eventLogger.queueEvent({

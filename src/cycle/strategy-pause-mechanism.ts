@@ -104,7 +104,7 @@ export class StrategyPauseMechanism {
 
   async pauseStrategy(reason: PauseReason): Promise<void> {
     try {
-      const cycleState = this.cycleStateManager.getCurrentState();
+      const cycleState = await this.cycleStateManager.getCurrentState();
       if (!cycleState) {
         throw new Error("No cycle state available");
       }
@@ -160,7 +160,7 @@ export class StrategyPauseMechanism {
     };
 
     try {
-      const cycleState = this.cycleStateManager.getCurrentState();
+      const cycleState = await this.cycleStateManager.getCurrentState();
       if (!cycleState) {
         result.canResume = false;
         result.validationErrors.push("No cycle state available");
@@ -209,7 +209,7 @@ export class StrategyPauseMechanism {
     }
 
     try {
-      const cycleState = this.cycleStateManager.getCurrentState();
+      const cycleState = await this.cycleStateManager.getCurrentState();
       if (!cycleState) {
         throw new Error("No cycle state available");
       }
