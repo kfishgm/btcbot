@@ -16,7 +16,6 @@ import type { BuyOrderPlacer } from "../order/buy-order-placer";
 import type { SellOrderPlacer } from "../order/sell-order-placer";
 import type { BuyOrderStateUpdater } from "../cycle/buy-order-state-updater";
 import type { SellOrderStateUpdater } from "../cycle/sell-order-state-updater";
-import type { DriftDetector } from "../cycle/drift-detector";
 import type { StrategyPauseMechanism } from "../cycle/strategy-pause-mechanism";
 import type { DiscordNotifier } from "../notifications/discord-notifier";
 import type { EventLogger } from "../monitoring/event-logger";
@@ -50,7 +49,6 @@ export interface OrchestratorConfig {
   sellOrderPlacer: SellOrderPlacer;
   buyOrderStateUpdater: BuyOrderStateUpdater;
   sellOrderStateUpdater: SellOrderStateUpdater;
-  driftDetector: DriftDetector;
   strategyPauseMechanism: StrategyPauseMechanism;
   discordNotifier?: DiscordNotifier;
   eventLogger: EventLogger;
@@ -181,7 +179,16 @@ export class MainOrchestrator extends EventEmitter {
         athWindow: this.strategyConfig.athWindow,
       });
 
-      // 4. Initialize cycle state manager
+      // 4. Initialize historical candle manager with configured window
+      logger.info(
+        `Fetching historical candles for ATH calculation (window: ${this.strategyConfig.athWindow} candles)`,
+      );
+      await this.config.historicalCandleManager.initialize();
+      const loadedCandles =
+        this.config.historicalCandleManager.getCandleHistory().length;
+      logger.info(`Historical candles loaded: ${loadedCandles} candles`);
+
+      // 5. Initialize cycle state manager
       await this.config.cycleStateManager.initialize();
 
       // Log current cycle state
@@ -198,17 +205,17 @@ export class MainOrchestrator extends EventEmitter {
         });
       }
 
-      // 5. Check if strategy is paused
+      // 6. Check if strategy is paused
       const isPaused = this.config.strategyPauseMechanism.isPausedStatus();
       if (isPaused) {
         logger.warn("Strategy is currently paused. Starting in paused mode.");
         this.emit("strategyPaused");
       }
 
-      // 6. Setup event listeners
+      // 7. Setup event listeners
       this.setupEventListeners();
 
-      // 7. Start health monitoring if enabled
+      // 8. Start health monitoring if enabled
       if (this.config.enableHealthMonitoring) {
         this.startHealthMonitoring();
       }
@@ -350,19 +357,8 @@ export class MainOrchestrator extends EventEmitter {
       throw new Error("No cycle state available");
     }
 
-    // Log detailed candle processing information
-    logger.info(
-      `Candle closed. Price: ${closePrice.toFixed(2)}, Reference: ${state.reference_price ? state.reference_price.toFixed(2) : "N/A"}, ATH: ${state.ath_price ? state.ath_price.toFixed(2) : "N/A"}`,
-      {
-        closePrice,
-        reference_price: state.reference_price,
-        ath_price: state.ath_price,
-        btc_accumulated: state.btc_accumulated || 0,
-        purchases_remaining: state.purchases_remaining,
-        capital_available: state.capital_available,
-        status: state.status,
-      },
-    );
+    // Log candle close concisely
+    logger.info(`Candle closed. Price: ${closePrice.toFixed(2)}`);
 
     // Convert state to mutable copy we can work with
     const workingState: CycleState = { ...state };
@@ -383,16 +379,12 @@ export class MainOrchestrator extends EventEmitter {
           workingState.ath_price = athPrice;
           workingState.reference_price = athPrice;
 
+          logger.info(
+            `Updating ATH: ${athPrice.toFixed(2)} and Reference Price: ${athPrice.toFixed(2)}`,
+          );
+
           const candleCount =
             this.config.historicalCandleManager.getStatistics().candleCount;
-          logger.info(
-            `ATH updated and persisted: ${athPrice.toFixed(2)} from ${candleCount} candles`,
-            {
-              ath_price: athPrice,
-              candle_count: candleCount,
-              timestamp: new Date().toISOString(),
-            },
-          );
           await this.config.eventLogger.queueEvent({
             event_type: "ATH_UPDATED",
             severity: "INFO",
@@ -413,6 +405,20 @@ export class MainOrchestrator extends EventEmitter {
           `Holding ${workingState.btc_accumulated} BTC, checking sell condition`,
         );
 
+        // Calculate sell details for logging
+        const sellTarget = workingState.reference_price
+          ? workingState.reference_price *
+            (1 + (this.strategyConfig?.risePercentage || 0.03))
+          : null;
+        const usdtAmount = workingState.btc_accumulated * closePrice;
+        const percentAwayFromSell = sellTarget
+          ? ((sellTarget - closePrice) / sellTarget) * 100
+          : null;
+
+        logger.info(
+          `Sell check - Price: ${closePrice.toFixed(2)}, BTC Accumulated: ${workingState.btc_accumulated.toFixed(8)}, USDT Amount: ${usdtAmount.toFixed(2)}, Reference Price: ${workingState.reference_price ? workingState.reference_price.toFixed(2) : "N/A"}, Sell Target: ${sellTarget ? sellTarget.toFixed(2) : "N/A"}, % Away: ${percentAwayFromSell ? percentAwayFromSell.toFixed(2) : "N/A"}%`,
+        );
+
         const sellResult =
           await this.config.sellTriggerDetector.checkSellTrigger(
             {
@@ -429,7 +435,6 @@ export class MainOrchestrator extends EventEmitter {
               dropPercentage: this.strategyConfig?.dropPercentage || 0.03,
               risePercentage: this.strategyConfig?.risePercentage || 0.03,
               exchangeMinNotional: 10,
-              driftThresholdPct: 0.005,
             },
             {
               close: closePrice,
@@ -449,47 +454,10 @@ export class MainOrchestrator extends EventEmitter {
         if (shouldSell) {
           logger.info("SELL condition triggered");
 
-          // Validate BTC balance
-          const btcBalanceResult =
-            await this.config.balanceManager.getBalance("BTC");
-          const btcBalance = btcBalanceResult.free.toNumber();
-          if (btcBalance < workingState.btc_accumulated) {
-            logger.error(
-              `BTC balance mismatch: have ${btcBalance}, expected ${workingState.btc_accumulated}`,
-            );
-            await this.config.strategyPauseMechanism.pauseStrategy({
-              type: "drift_detected",
-              message: `BTC balance mismatch: have ${btcBalance}, expected ${workingState.btc_accumulated}`,
-              metadata: {
-                expected: workingState.btc_accumulated,
-                actual: btcBalance,
-              },
-            });
-            return;
-          }
+          // Drift check removed - will retry on insufficient balance instead
 
-          // Check drift
-          const drift = await this.config.driftDetector.checkDrift({
-            btcAccumulated: workingState.btc_accumulated,
-            btcSpotBalance: btcBalance,
-            capitalAvailable: workingState.capital_available,
-            usdtSpotBalance: (
-              await this.config.balanceManager.getBalance("USDT")
-            ).free.toNumber(),
-          });
-
-          if (drift.overallStatus === "exceeded") {
-            logger.error("Drift exceeded threshold", drift);
-            await this.config.strategyPauseMechanism.pauseStrategy({
-              type: "drift_detected",
-              message: "Balance drift exceeded threshold",
-              metadata: {
-                btcDrift: drift.btc,
-                usdtDrift: drift.usdt,
-              },
-            });
-            return;
-          }
+          // Set cycle ID for trade recording
+          this.config.sellOrderPlacer.setCycleId(workingState.id);
 
           // Place sell order for ALL accumulated BTC
           const sellOrderResult = await this.config.sellOrderPlacer.placeOrder(
@@ -528,12 +496,7 @@ export class MainOrchestrator extends EventEmitter {
             ) {
               const profit = 0; // Profit calculation is done in state updater
               logger.info(`Cycle complete. Profit: ${profit}`);
-              if (this.config.discordNotifier) {
-                await this.config.discordNotifier.sendAlert(
-                  `✅ Cycle complete. Profit: $${profit.toFixed(2)}`,
-                  "info",
-                );
-              }
+              // Discord notification is sent by sell-order-state-updater with detailed fields
               await this.config.eventLogger.queueEvent({
                 event_type: "CYCLE_COMPLETE",
                 severity: "INFO",
@@ -565,6 +528,28 @@ export class MainOrchestrator extends EventEmitter {
           `Have ${workingState.purchases_remaining} purchases remaining, checking buy condition`,
         );
 
+        // Calculate the buy details for logging
+        const buyIndex = workingState.buy_index || 0;
+        const currentGridLevel =
+          workingState.buy_grid && buyIndex < workingState.buy_grid.length
+            ? workingState.buy_grid[buyIndex]
+            : null;
+        const buyTarget =
+          currentGridLevel ||
+          (workingState.reference_price
+            ? workingState.reference_price *
+              (1 - (this.strategyConfig?.dropPercentage || 0.03))
+            : null);
+        const percentAway = buyTarget
+          ? ((buyTarget - closePrice) / buyTarget) * 100
+          : null;
+        const purchaseAmount =
+          workingState.capital_available / workingState.purchases_remaining;
+
+        logger.info(
+          `Buy check - Price: ${closePrice.toFixed(2)}, Grid Level: ${currentGridLevel ? currentGridLevel.toFixed(2) : "N/A"}, Purchase Amount: ${purchaseAmount.toFixed(2)} USDT, Buy Target: ${buyTarget ? buyTarget.toFixed(2) : "N/A"}, % Away: ${percentAway ? percentAway.toFixed(2) : "N/A"}%`,
+        );
+
         const buyResult = await this.config.buyTriggerDetector.checkBuyTrigger(
           {
             status: (workingState.status || "READY") as
@@ -586,7 +571,6 @@ export class MainOrchestrator extends EventEmitter {
             risePercentage: this.strategyConfig?.risePercentage || 0.03,
             minBuyUSDT: this.strategyConfig?.minBuyUsdt || 10,
             exchangeMinNotional: 10,
-            driftThresholdPct: 0.005,
             maxPurchases: this.strategyConfig?.maxPurchases || 10,
           },
           {
@@ -636,28 +620,10 @@ export class MainOrchestrator extends EventEmitter {
             return;
           }
 
-          // Check drift
-          const drift = await this.config.driftDetector.checkDrift({
-            btcAccumulated: workingState.btc_accumulated || 0,
-            btcSpotBalance: (
-              await this.config.balanceManager.getBalance("BTC")
-            ).free.toNumber(),
-            capitalAvailable: workingState.capital_available,
-            usdtSpotBalance: usdtBalance,
-          });
+          // Drift check removed - will retry on insufficient balance instead
 
-          if (drift.overallStatus === "exceeded") {
-            logger.error("Drift exceeded threshold", drift);
-            await this.config.strategyPauseMechanism.pauseStrategy({
-              type: "drift_detected",
-              message: "Balance drift exceeded threshold",
-              metadata: {
-                btcDrift: drift.btc,
-                usdtDrift: drift.usdt,
-              },
-            });
-            return;
-          }
+          // Set cycle ID for trade recording
+          this.config.buyOrderPlacer.setCycleId(workingState.id);
 
           // Place buy order
           const buyOrderResult = await this.config.buyOrderPlacer.placeOrder(
@@ -694,12 +660,7 @@ export class MainOrchestrator extends EventEmitter {
               updatedState,
             );
 
-            if (this.config.discordNotifier) {
-              await this.config.discordNotifier.sendAlert(
-                `📈 Buy executed at ${buyOrderResult.avgPrice.toFixed(2)}`,
-                "info",
-              );
-            }
+            // Discord notification is sent by buy-order-state-updater with detailed fields
             await this.config.eventLogger.queueEvent({
               event_type: "BUY_EXECUTED",
               severity: "INFO",
