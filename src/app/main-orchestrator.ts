@@ -412,7 +412,7 @@ export class MainOrchestrator extends EventEmitter {
           : null;
         const usdtAmount = workingState.btc_accumulated * closePrice;
         const percentAwayFromSell = sellTarget
-          ? ((sellTarget - closePrice) / sellTarget) * 100
+          ? Math.abs((sellTarget - closePrice) / sellTarget) * 100
           : null;
 
         logger.info(
@@ -541,7 +541,7 @@ export class MainOrchestrator extends EventEmitter {
               (1 - (this.strategyConfig?.dropPercentage || 0.03))
             : null);
         const percentAway = buyTarget
-          ? ((buyTarget - closePrice) / buyTarget) * 100
+          ? Math.abs((closePrice - buyTarget) / buyTarget) * 100
           : null;
         const purchaseAmount =
           workingState.capital_available / workingState.purchases_remaining;
