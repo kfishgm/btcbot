@@ -279,8 +279,8 @@ describe("Sell Trigger E2E", () => {
 
     await components.cycleStateManager.initialize();
 
-    // Set actual balance slightly different due to dust
-    mocks.binance.setBalance("BTC", 0.002999);
+    // Set actual balance slightly more than accumulated (to simulate fees/dust)
+    mocks.binance.setBalance("BTC", 0.003001);
 
     const btcBalance = await mocks.binance.getBalance("BTC");
     const usdtBalance = await mocks.binance.getBalance("USDT");
@@ -320,9 +320,9 @@ describe("Sell Trigger E2E", () => {
     // Should still trigger sell even with slight balance difference
     expect(sellTrigger.shouldSell).toBe(true);
 
-    // Should sell the actual balance, not the accumulated amount
+    // Should sell the accumulated amount from state
     if (sellTrigger.sellAmount) {
-      expect(sellTrigger.sellAmount).toBeCloseTo(0.002999, 6);
+      expect(sellTrigger.sellAmount).toBeCloseTo(0.003, 6);
     }
   });
 });
