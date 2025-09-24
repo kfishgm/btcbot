@@ -66,10 +66,10 @@ describe("DiscordNotifier", () => {
         title: "📈 Trade Executed",
         color: 0x00ff00,
         fields: expect.arrayContaining([
-          { name: "Type", value: "BUY", inline: true },
-          { name: "Price", value: "$50000.00", inline: true },
-          { name: "Quantity", value: "0.10000000 BTC", inline: true },
-          { name: "Total Value", value: "$5000.00", inline: true },
+          { name: "Type", value: "BUY", inline: false },
+          { name: "Price", value: "$50000.00", inline: false },
+          { name: "Quantity", value: "0.10000000 BTC", inline: false },
+          { name: "Total Value", value: "$5000.00", inline: false },
         ]),
       });
     });
@@ -84,8 +84,8 @@ describe("DiscordNotifier", () => {
         title: "📉 Trade Executed",
         color: 0xff0000,
         fields: expect.arrayContaining([
-          { name: "Type", value: "SELL", inline: true },
-          { name: "Price", value: "$55000.00", inline: true },
+          { name: "Type", value: "SELL", inline: false },
+          { name: "Price", value: "$55000.00", inline: false },
         ]),
       });
     });
@@ -110,11 +110,11 @@ describe("DiscordNotifier", () => {
         title: expect.stringContaining("Cycle #3 Complete"),
         color: 0x00ff00,
         fields: expect.arrayContaining([
-          { name: "Profit", value: "$150.75", inline: true },
-          { name: "Profit %", value: "5.25%", inline: true },
-          { name: "Total Trades", value: "8", inline: true },
-          { name: "Duration", value: "4h 0m", inline: true },
-          { name: "Final Capital", value: "$3150.75", inline: true },
+          { name: "Profit", value: "$150.75", inline: false },
+          { name: "Profit %", value: "5.25%", inline: false },
+          { name: "Total Trades", value: "8", inline: false },
+          { name: "Duration", value: "4h 0m", inline: false },
+          { name: "Final Capital", value: "$3150.75", inline: false },
         ]),
       });
     });
@@ -135,7 +135,7 @@ describe("DiscordNotifier", () => {
       expect(body.embeds?.[0].fields).toContainEqual({
         name: "Profit",
         value: "$0.00",
-        inline: true,
+        inline: false,
       });
     });
   });
@@ -342,12 +342,12 @@ describe("DiscordNotifier", () => {
       expect(body.embeds?.[0].fields).toContainEqual({
         name: "USDT Drift",
         value: "1.00%",
-        inline: true,
+        inline: false,
       });
       expect(body.embeds?.[0].fields).toContainEqual({
         name: "BTC Drift",
         value: "0.50%",
-        inline: true,
+        inline: false,
       });
     });
   });
@@ -498,7 +498,7 @@ describe("DiscordNotifier", () => {
       expect(body.embeds?.[0].fields).toContainEqual({
         name: "Resume Type",
         value: "Validated",
-        inline: true,
+        inline: false,
       });
     });
 

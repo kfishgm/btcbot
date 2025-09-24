@@ -39,6 +39,12 @@ type MockSupabaseClient = {
     (data: unknown) => Promise<{ data: unknown; error: unknown }>
   >;
   update: jest.MockedFunction<(data: unknown) => MockSupabaseClient>;
+  order: jest.MockedFunction<
+    (column: string, options?: unknown) => MockSupabaseClient
+  >;
+  limit: jest.MockedFunction<(count: number) => MockSupabaseClient>;
+  data?: unknown;
+  error?: unknown;
 };
 
 describe("StrategyConfigLoader", () => {
@@ -58,6 +64,8 @@ describe("StrategyConfigLoader", () => {
       single: jest.fn() as MockSupabaseClient["single"],
       insert: jest.fn() as MockSupabaseClient["insert"],
       update: jest.fn(() => mockSupabaseClient) as MockSupabaseClient["update"],
+      order: jest.fn(() => mockSupabaseClient) as MockSupabaseClient["order"],
+      limit: jest.fn(() => mockSupabaseClient) as MockSupabaseClient["limit"],
     };
 
     // Mock Supabase client
@@ -101,10 +109,12 @@ describe("StrategyConfigLoader", () => {
         updated_at: "2025-01-01T00:00:00Z",
       };
 
-      mockSupabaseClient.single.mockResolvedValue({
-        data: mockConfig,
+      // Mock the return for order().limit() chain
+      mockSupabaseClient.limit.mockReturnValue({
+        ...mockSupabaseClient,
+        data: [mockConfig],
         error: null,
-      });
+      } as unknown as MockSupabaseClient);
 
       const config = await loader.loadConfig();
 
@@ -128,10 +138,11 @@ describe("StrategyConfigLoader", () => {
 
     it("should create default configuration if none exists", async () => {
       // Mock no active config found
-      mockSupabaseClient.single.mockResolvedValueOnce({
+      mockSupabaseClient.limit.mockReturnValueOnce({
+        ...mockSupabaseClient,
         data: null,
-        error: { code: "PGRST116", message: "No rows found" },
-      });
+        error: null,
+      } as unknown as MockSupabaseClient);
 
       // Mock successful insert of default config
       const defaultConfig = {
@@ -155,11 +166,12 @@ describe("StrategyConfigLoader", () => {
         error: null,
       });
 
-      // Mock single for the fetch after insert
-      mockSupabaseClient.single.mockResolvedValueOnce({
-        data: defaultConfig,
+      // Mock limit for the fetch after insert
+      mockSupabaseClient.limit.mockReturnValueOnce({
+        ...mockSupabaseClient,
+        data: [defaultConfig],
         error: null,
-      });
+      } as unknown as MockSupabaseClient);
 
       const config = await loader.loadConfig();
 
@@ -196,10 +208,11 @@ describe("StrategyConfigLoader", () => {
         updated_at: "2025-01-01T00:00:00Z",
       };
 
-      mockSupabaseClient.single.mockResolvedValue({
-        data: invalidConfig,
+      mockSupabaseClient.limit.mockReturnValue({
+        ...mockSupabaseClient,
+        data: [invalidConfig],
         error: null,
-      });
+      } as unknown as MockSupabaseClient);
 
       await expect(loader.loadConfig()).rejects.toThrow(
         /drop_percentage must be between 0.0015 and 0.08/,
@@ -207,10 +220,11 @@ describe("StrategyConfigLoader", () => {
     });
 
     it("should handle database connection errors", async () => {
-      mockSupabaseClient.single.mockResolvedValue({
+      mockSupabaseClient.limit.mockReturnValue({
+        ...mockSupabaseClient,
         data: null,
         error: { code: "CONNECTION_ERROR", message: "Database unavailable" },
-      });
+      } as unknown as MockSupabaseClient);
 
       await expect(loader.loadConfig()).rejects.toThrow(/Database unavailable/);
     });
