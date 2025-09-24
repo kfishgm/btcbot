@@ -593,6 +593,14 @@ export class MainOrchestrator extends EventEmitter {
         if (shouldBuy) {
           logger.info("BUY condition triggered");
 
+          // If a new grid was built dynamically, update working state
+          if (buyResult.newGrid) {
+            workingState.buy_grid = buyResult.newGrid;
+            logger.info(
+              `Updating working state with new grid: ${buyResult.newGrid.length} levels`,
+            );
+          }
+
           // Calculate buy amount
           const buyAmount = this.config.buyAmountCalculator.calculateBuyAmount({
             buy_amount: workingState.buy_amount,
@@ -646,12 +654,16 @@ export class MainOrchestrator extends EventEmitter {
               cost_accum_usdt: workingState.cost_accum_usdt || 0,
               purchases_remaining: workingState.purchases_remaining,
               reference_price: workingState.reference_price || 0,
+              buy_grid: workingState.buy_grid || null,
+              buy_index: workingState.buy_index || 0,
+              buy_anchor_price: workingState.buy_anchor_price || null,
               updated_at: workingState.updated_at || new Date().toISOString(),
             };
             const updatedState =
               (await this.config.buyOrderStateUpdater.updateAfterBuyOrder(
                 normalizedState as CycleState,
                 buyOrderResult,
+                buyResult.levelsTriggered || 1,
               )) as CycleState;
 
             // Save state atomically
