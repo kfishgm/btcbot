@@ -4,7 +4,6 @@ import type {
   DiscordNotifierConfig,
   DiscordMessage,
 } from "../../src/notifications/discord-notifier.js";
-import type { PauseReason } from "../../src/cycle/strategy-pause-mechanism.js";
 
 // Mock fetch globally
 global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
@@ -322,35 +321,7 @@ describe("DiscordNotifier", () => {
     });
   });
 
-  describe("sendPauseAlert", () => {
-    it("should send pause alert with drift information", async () => {
-      const reason: PauseReason = {
-        type: "drift_detected",
-        message: "Balance drift detected",
-        metadata: {
-          usdtDrift: 0.01,
-          btcDrift: 0.005,
-        },
-      };
-
-      await notifier.sendPauseAlert(reason);
-
-      const callArgs = mockFetch.mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string) as DiscordMessage;
-
-      expect(body.embeds?.[0].description).toContain("STRATEGY PAUSED");
-      expect(body.embeds?.[0].fields).toContainEqual({
-        name: "USDT Drift",
-        value: "1.00%",
-        inline: false,
-      });
-      expect(body.embeds?.[0].fields).toContainEqual({
-        name: "BTC Drift",
-        value: "0.50%",
-        inline: false,
-      });
-    });
-  });
+  describe("sendPauseAlert", () => {});
 
   describe("rate limiting", () => {
     it("should enforce rate limits when enabled", async () => {

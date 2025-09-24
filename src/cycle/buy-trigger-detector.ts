@@ -13,8 +13,7 @@
  * 3. Price is at or below next grid level(s)
  * 4. Purchases remaining > 0
  * 5. Capital available >= buy amount
- * 6. Drift < 0.5%
- * 7. Amount is valid (meets minimums)
+ * 6. Amount is valid (meets minimums)
  */
 
 import {
@@ -42,7 +41,6 @@ export interface TradingConfig {
   risePercentage: number; // e.g., 0.03 for 3%
   minBuyUSDT: number;
   exchangeMinNotional: number;
-  driftThresholdPct: number; // 0.005 for 0.5%
   maxPurchases: number;
 }
 
@@ -70,7 +68,6 @@ export interface BuyTriggerResult {
   validations?: {
     priceThresholdMet: boolean;
     capitalAvailable: boolean;
-    driftCheck: boolean;
     strategyActive: boolean;
     amountValid: boolean;
     gridValid: boolean;
@@ -93,7 +90,7 @@ export class BuyTriggerDetector {
     state: CycleState,
     config: TradingConfig,
     candle: Candle,
-    balances: BalanceInfo,
+    _balances: BalanceInfo, // Kept for interface compatibility, no longer used for drift check
   ): BuyTriggerResult {
     // Initialize validations object
     const validations = {
@@ -101,7 +98,6 @@ export class BuyTriggerDetector {
       gridValid: false,
       priceThresholdMet: false,
       capitalAvailable: false,
-      driftCheck: false,
       amountValid: false,
     };
 
@@ -160,7 +156,7 @@ export class BuyTriggerDetector {
       );
       const basePrice = state.buy_anchor_price || state.reference_price;
       logger.info(
-        `Building buy grid from ${state.buy_anchor_price ? "anchor" : "ATH"} price: ${basePrice.toFixed(2)}`,
+        `🏗️ Building buy grid from ${state.buy_anchor_price ? "anchor" : "ATH"} price: ${basePrice.toFixed(2)}`,
         {
           athPrice: state.reference_price,
           anchorPrice: state.buy_anchor_price,
@@ -169,6 +165,8 @@ export class BuyTriggerDetector {
           gridLevels: newGrid.map((level) => level.toFixed(2)),
           currentPrice: candle.close,
           maxPurchases: config.maxPurchases,
+          gridType: state.buy_anchor_price ? "ANCHORED" : "INITIAL",
+          triggerReason: "Price reached first trigger level",
         },
       );
 
@@ -206,10 +204,12 @@ export class BuyTriggerDetector {
 
       // For first buy, only trigger ONE level regardless of how many are crossed
       if (isFirstBuy) {
-        logger.info("First buy detected - limiting to single level", {
+        logger.info("🎯 First buy detected - limiting to single level", {
           totalLevelsCrossed: levelsTriggered,
           currentPrice: candle.close,
           anchorPrice: state.buy_anchor_price,
+          gridLevel: this.formatPrice(state.buy_grid[state.buy_index]),
+          note: "Grid will be rebuilt after this buy executes",
         });
         break;
       }
@@ -261,22 +261,7 @@ export class BuyTriggerDetector {
       };
     }
 
-    // 7. Check drift
-    const usdtDrift = this.calculateDrift(
-      balances.usdtSpot,
-      state.capital_available,
-    );
-    validations.driftCheck = usdtDrift < config.driftThresholdPct;
-
-    if (!validations.driftCheck) {
-      return {
-        shouldBuy: false,
-        reason: `USDT drift ${(usdtDrift * 100).toFixed(3)}% exceeds threshold ${(config.driftThresholdPct * 100).toFixed(1)}%`,
-        validations,
-      };
-    }
-
-    // 8. Check if amount is valid (meets minimums)
+    // 6. Check if amount is valid (meets minimums)
     validations.amountValid = this.buyAmountCalculator.isAmountValid(
       totalBuyAmount,
       config.minBuyUSDT,
@@ -352,24 +337,6 @@ export class BuyTriggerDetector {
   }
 
   /**
-   * Calculate USDT drift percentage
-   * Only triggers when insufficient funds (per STRATEGY.md)
-   */
-  private calculateDrift(spotBalance: number, stateBalance: number): number {
-    // Only check drift when we have insufficient funds
-    if (spotBalance >= stateBalance) {
-      return 0; // No drift when we have enough or more funds
-    }
-
-    // Calculate drift as per STRATEGY.md
-    const drift = Math.max(
-      0,
-      (stateBalance - spotBalance) / Math.max(stateBalance, 1),
-    );
-    return drift;
-  }
-
-  /**
    * Format price for display
    */
   private formatPrice(price: number): string {
@@ -420,20 +387,17 @@ export class BuyTriggerDetector {
       grid.push(quantizedLevel);
     }
 
-    logger.info(
-      `Buy grid levels (${grid.length} levels from ${basePrice.toFixed(2)}): ${grid.map((l) => l.toFixed(2)).join(", ")}`,
+    logger.debug(
+      `📊 Grid levels calculated from ${anchorPrice ? "anchor" : "ATH"}`,
       {
-        athPrice,
-        anchorPrice,
-        basePrice,
+        basePrice: this.formatPrice(basePrice),
         dropPercentage: config.dropPercentage,
         maxPurchases: config.maxPurchases,
-        tickSize,
-        gridLevels: grid.map((level) => this.formatPrice(level)),
-        firstLevel: grid[0] ? this.formatPrice(grid[0]) : "N/A",
-        lastLevel: grid[grid.length - 1]
-          ? this.formatPrice(grid[grid.length - 1])
-          : "N/A",
+        gridLevels: grid.map((level, index) => ({
+          level: index + 1,
+          price: this.formatPrice(level),
+          dropFromBase: `${((1 - level / basePrice) * 100).toFixed(2)}%`,
+        })),
       },
     );
 
@@ -464,7 +428,7 @@ export class BuyTriggerDetector {
     const firstLevelBelowAnchor = grid[0] && grid[0] < anchorPrice;
 
     logger.info(
-      `Building buy grid from anchor price ${anchorPrice.toFixed(2)}`,
+      `🔄 Rebuilding grid from anchor price ${anchorPrice.toFixed(2)}`,
       {
         anchorPrice: this.formatPrice(anchorPrice),
         dropPercentage: config.dropPercentage,
@@ -476,6 +440,7 @@ export class BuyTriggerDetector {
         gapFromAnchor: grid[0]
           ? `${(((anchorPrice - grid[0]) / anchorPrice) * 100).toFixed(3)}%`
           : "N/A",
+        rebuiltReason: "First buy executed - anchoring to execution price",
       },
     );
 

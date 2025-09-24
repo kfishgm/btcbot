@@ -115,7 +115,6 @@ describe("Edge Cases E2E", () => {
         maxPurchases: 10,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       },
       {
         close: testPrice,
@@ -190,7 +189,6 @@ describe("Edge Cases E2E", () => {
         maxPurchases: 10,
         minBuyUSDT: 10, // Minimum buy is 10 USDT
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       },
       {
         close: testPrice,
@@ -260,7 +258,6 @@ describe("Edge Cases E2E", () => {
       {
         risePercentage: 0.005,
         dropPercentage: 0.003,
-        driftThresholdPct: 0.005,
         exchangeMinNotional: 10,
       },
       {
@@ -314,7 +311,6 @@ describe("Edge Cases E2E", () => {
         maxPurchases: 10,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       },
       {
         close: 99700, // Trigger price
@@ -376,7 +372,6 @@ describe("Edge Cases E2E", () => {
         maxPurchases: 10,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       },
       {
         close: rapidDropPrice,

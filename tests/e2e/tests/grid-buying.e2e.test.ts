@@ -99,7 +99,6 @@ describe("Grid Buying E2E", () => {
               maxPurchases: 10,
               minBuyUSDT: 10,
               exchangeMinNotional: 10,
-              driftThresholdPct: 0.005,
             },
             {
               close: currentPrice,
@@ -233,7 +232,6 @@ describe("Grid Buying E2E", () => {
         maxPurchases: 10,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       },
       {
         close: rapidDropPrice,
@@ -302,7 +300,6 @@ describe("Grid Buying E2E", () => {
         maxPurchases: 10,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       },
       {
         close: testPrice,

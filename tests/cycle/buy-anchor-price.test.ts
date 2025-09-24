@@ -132,7 +132,6 @@ describe("Buy Anchor Price End-to-End", () => {
         risePercentage: 0.03,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
         maxPurchases: 10,
       };
 
@@ -205,7 +204,6 @@ describe("Buy Anchor Price End-to-End", () => {
         risePercentage: 0.03,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
         maxPurchases: 10,
       };
 
@@ -303,7 +301,6 @@ describe("Buy Anchor Price End-to-End", () => {
         risePercentage: 0.03,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
         maxPurchases: 10,
       };
 
@@ -422,7 +419,6 @@ describe("Buy Anchor Price End-to-End", () => {
         risePercentage: 0.03,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
         maxPurchases: 10,
       };
 

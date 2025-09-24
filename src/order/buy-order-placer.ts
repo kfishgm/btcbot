@@ -224,7 +224,7 @@ export class BuyOrderPlacer extends EventEmitter {
     slippageGuardPct: number = 0.003,
   ): Promise<OrderResult> {
     // Prepare order
-    const orderParams = await this.prepareOrder(
+    let orderParams = await this.prepareOrder(
       buyAmount,
       currentPrice,
       slippageGuardPct,
@@ -239,6 +239,8 @@ export class BuyOrderPlacer extends EventEmitter {
     // Place order with retry logic
     let lastError: Error | null = null;
     let attempt = 0;
+    let balanceRetryCount = 0;
+    const maxBalanceRetries = 3;
 
     while (attempt < this.retryCount) {
       try {
@@ -278,8 +280,83 @@ export class BuyOrderPlacer extends EventEmitter {
         return result;
       } catch (error: unknown) {
         lastError = error as Error;
+        const errorMessage = lastError.message.toLowerCase();
+        const errorCode = (lastError as ErrorWithCode).code;
 
-        // Check if error is retryable
+        // Check for insufficient balance error specifically
+        if (
+          (errorMessage.includes("insufficient balance") ||
+            errorMessage.includes("account has insufficient") ||
+            errorCode === "-2010") &&
+          balanceRetryCount < maxBalanceRetries
+        ) {
+          balanceRetryCount++;
+          logger.warn(
+            `Insufficient USDT balance, retrying with refreshed balance (attempt ${balanceRetryCount}/${maxBalanceRetries})`,
+            {
+              originalAmount: buyAmount.toString(),
+              error: errorMessage,
+            },
+          );
+
+          try {
+            // Refresh USDT balance from exchange
+            const usdtBalance = await this.binanceClient.getBalance("USDT");
+            const availableUsdt = new Decimal(usdtBalance.free);
+
+            logger.info("Refreshed USDT balance from exchange", {
+              availableUsdt: availableUsdt.toString(),
+              originalBuyAmount: buyAmount.toString(),
+            });
+
+            // Calculate safe buy amount (min of available balance and intended amount)
+            const safeBuyAmount = Decimal.min(
+              availableUsdt.mul(0.995),
+              buyAmount,
+            ); // Use 99.5% to account for fees
+
+            // Check if safe amount meets minimum notional requirements
+            const notional = safeBuyAmount;
+            const minNotional = new Decimal(10); // Binance minimum
+
+            if (notional.lt(minNotional)) {
+              logger.error("Adjusted buy amount below minimum notional", {
+                safeBuyAmount: safeBuyAmount.toString(),
+                minNotional: minNotional.toString(),
+              });
+              throw new Error(
+                `Insufficient balance: adjusted amount ${safeBuyAmount.toString()} USDT below minimum ${minNotional.toString()} USDT`,
+              );
+            }
+
+            // Prepare new order with adjusted amount
+            orderParams = await this.prepareOrder(
+              safeBuyAmount,
+              currentPrice,
+              slippageGuardPct,
+            );
+
+            // Validate the new order parameters
+            await this.validateOrder(orderParams);
+
+            logger.info("Retrying buy with adjusted amount", {
+              originalAmount: buyAmount.toString(),
+              adjustedAmount: safeBuyAmount.toString(),
+              clientOrderId: orderParams.clientOrderId,
+            });
+
+            // Don't increment main attempt counter for balance retries
+            await this.sleep(1000); // Brief pause before retry
+            continue;
+          } catch (balanceError) {
+            logger.error("Failed to refresh balance or adjust buy amount", {
+              error: balanceError,
+            });
+            throw balanceError;
+          }
+        }
+
+        // Check if error is retryable (non-balance errors)
         if (this.isRetryableError(error)) {
           attempt++;
           if (attempt < this.retryCount) {

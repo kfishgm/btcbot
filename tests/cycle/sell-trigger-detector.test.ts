@@ -31,7 +31,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03, // 3% rise
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -53,8 +52,7 @@ describe("SellTriggerDetector", () => {
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.01); // Should sell all btc_accumulated
       expect(result.validations?.priceThresholdMet).toBe(true);
-      expect(result.validations?.balanceSufficient).toBe(true);
-      expect(result.validations?.driftCheck).toBe(true);
+      // balanceSufficient removed - no longer checked
       expect(result.validations?.strategyActive).toBe(true);
     });
 
@@ -71,7 +69,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.025, // 2.5% rise
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -107,7 +104,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03, // 3% rise
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -148,7 +144,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -184,7 +179,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -203,9 +197,10 @@ describe("SellTriggerDetector", () => {
 
       const result = detector.checkSellTrigger(state, config, candle, balances);
 
-      expect(result.shouldSell).toBe(false);
-      expect(result.reason).toContain("Insufficient BTC balance");
-      expect(result.validations?.balanceSufficient).toBe(false);
+      // Should still trigger - insufficient balance handled by retry logic
+      expect(result.shouldSell).toBe(true);
+      expect(result.sellAmount).toBe(0.01);
+      // balanceSufficient removed - insufficient balance handled by retry logic
     });
 
     it("should skip sell when strategy is PAUSED", () => {
@@ -221,7 +216,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -260,7 +254,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005, // 0.5%
       };
 
       const candle: Candle = {
@@ -279,11 +272,9 @@ describe("SellTriggerDetector", () => {
 
       const result = detector.checkSellTrigger(state, config, candle, balances);
 
-      expect(result.shouldSell).toBe(false);
-      expect(result.reason).toContain(
-        "BTC drift 2.000% exceeds threshold 0.5%",
-      );
-      expect(result.validations?.driftCheck).toBe(false);
+      // Drift no longer blocks trades - retry logic handles balance mismatch
+      expect(result.shouldSell).toBe(true);
+      expect(result.sellAmount).toBe(0.01);
     });
 
     it("should pass drift check when within threshold", () => {
@@ -299,7 +290,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005, // 0.5%
       };
 
       const candle: Candle = {
@@ -319,7 +309,6 @@ describe("SellTriggerDetector", () => {
       const result = detector.checkSellTrigger(state, config, candle, balances);
 
       expect(result.shouldSell).toBe(true);
-      expect(result.validations?.driftCheck).toBe(true);
     });
 
     it("should pass drift check with excess BTC (dust amounts)", () => {
@@ -335,7 +324,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005, // 0.5%
       };
 
       const candle: Candle = {
@@ -355,7 +343,6 @@ describe("SellTriggerDetector", () => {
       const result = detector.checkSellTrigger(state, config, candle, balances);
 
       expect(result.shouldSell).toBe(true); // Should sell (excess BTC is OK)
-      expect(result.validations?.driftCheck).toBe(true);
     });
 
     it("should calculate drift correctly with zero BTC accumulated", () => {
@@ -371,7 +358,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -408,7 +394,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005, // 0.5%
       };
 
       const candle: Candle = {
@@ -427,11 +412,9 @@ describe("SellTriggerDetector", () => {
 
       const result = detector.checkSellTrigger(state, config, candle, balances);
 
-      // Exactly at threshold should fail (>= check)
-      expect(result.shouldSell).toBe(false);
-      expect(result.reason).toContain(
-        "BTC drift 0.500% exceeds threshold 0.5%",
-      );
+      // Drift no longer blocks trades
+      expect(result.shouldSell).toBe(true);
+      expect(result.sellAmount).toBe(0.1); // Should sell full accumulated amount
     });
   });
 
@@ -449,7 +432,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -486,7 +468,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -525,7 +506,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03, // 3%
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       // Sell threshold = 50000.12345678 * (1 + 0.03) = 51500.12716148
@@ -562,7 +542,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -598,7 +577,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.05, // 5%
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -634,7 +612,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.001, // 0.1% rise
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -669,7 +646,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -707,7 +683,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -733,8 +708,6 @@ describe("SellTriggerDetector", () => {
           strategyActive: true,
           hasAccumulatedBTC: true,
           priceThresholdMet: true,
-          balanceSufficient: true,
-          driftCheck: true,
           minNotionalMet: true,
         },
       });
@@ -753,7 +726,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const baseCandle: Candle = {
@@ -799,23 +771,22 @@ describe("SellTriggerDetector", () => {
       );
       expect(result.reason).toContain("Strategy is PAUSED");
 
-      // Test 4: Insufficient BTC balance
+      // Test 4: Insufficient balance now handled by retry logic
+      // (no longer blocks the sell trigger)
       result = detector.checkSellTrigger(baseState, baseConfig, baseCandle, {
         ...baseBalances,
         btcSpot: 0.005,
       });
-      expect(result.reason).toContain(
-        "Insufficient BTC balance: 0.00500000 < 0.01000000",
-      );
+      // Should still trigger - retry logic handles insufficient balance
+      expect(result.shouldSell).toBe(true);
 
-      // Test 5: Drift exceeded
+      // Test 5: Drift no longer blocks trades
       result = detector.checkSellTrigger(baseState, baseConfig, baseCandle, {
         ...baseBalances,
         btcSpot: 0.0098,
       });
-      expect(result.reason).toContain(
-        "BTC drift 2.000% exceeds threshold 0.5%",
-      );
+      // Should still trigger - drift handled by retry logic
+      expect(result.shouldSell).toBe(true);
     });
   });
 
@@ -834,7 +805,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.03,
         risePercentage: 0.04, // 4%
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       // Sell threshold = 60000 * (1 + 0.04) = 62400
@@ -871,61 +841,7 @@ describe("SellTriggerDetector", () => {
       });
     });
 
-    it("should validate drift per STRATEGY.md formula", () => {
-      // STRATEGY.md: drift_btc = |BTC_SPOT - btc_accumulated| / max(btc_accumulated, 0.00000001)
-      const state: CycleState = {
-        status: "HOLDING",
-        reference_price: 50000,
-        purchases_remaining: 0,
-        capital_available: 0,
-        btc_accumulated: 0.1,
-      };
-
-      const config: TradingConfig = {
-        dropPercentage: 0.02,
-        risePercentage: 0.03,
-        exchangeMinNotional: 10,
-        driftThresholdPct: 0.005, // 0.5%
-      };
-
-      const candle: Candle = {
-        close: 52000,
-        high: 52100,
-        low: 51900,
-        open: 51950,
-        volume: 100,
-        timestamp: Date.now(),
-      };
-
-      // Test various drift scenarios
-      const driftTests = [
-        { btcSpot: 0.1, expectedDrift: 0, shouldSell: true },
-        { btcSpot: 0.1004, expectedDrift: 0.004, shouldSell: true },
-        { btcSpot: 0.0995, expectedDrift: 0.005, shouldSell: false }, // Exactly at threshold
-        { btcSpot: 0.0994, expectedDrift: 0.006, shouldSell: false },
-        { btcSpot: 0.101, expectedDrift: 0.01, shouldSell: false },
-      ];
-
-      driftTests.forEach(({ btcSpot, expectedDrift, shouldSell }) => {
-        const balances: BalanceInfo = {
-          usdtSpot: 0,
-          btcSpot,
-        };
-
-        const result = detector.checkSellTrigger(
-          state,
-          config,
-          candle,
-          balances,
-        );
-        expect(result.shouldSell).toBe(shouldSell);
-
-        if (!shouldSell && expectedDrift >= 0.005) {
-          expect(result.reason).toContain(`BTC drift`);
-          expect(result.reason).toContain(`exceeds threshold`);
-        }
-      });
-    });
+    // Drift test removed - drift no longer blocks trades, handled by retry logic
 
     it("should validate all pre-sell conditions in correct order", () => {
       // Per STRATEGY.md execution order
@@ -941,7 +857,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -960,13 +875,11 @@ describe("SellTriggerDetector", () => {
 
       const result = detector.checkSellTrigger(state, config, candle, balances);
 
-      // Verify all checks pass in correct order
+      // Verify all checks pass in correct order (drift/balance checks removed)
       expect(result.validations).toEqual({
         strategyActive: true,
         hasAccumulatedBTC: true,
         priceThresholdMet: true,
-        balanceSufficient: true,
-        driftCheck: true,
         minNotionalMet: true,
       });
     });
@@ -985,7 +898,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -1029,7 +941,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -1076,7 +987,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -1117,40 +1027,7 @@ describe("SellTriggerDetector", () => {
       expect(threshold).toBeCloseTo(51750, 2); // 50000 * (1 + 0.035)
     });
 
-    it("should calculate BTC drift correctly", () => {
-      const testCases = [
-        {
-          spotBalance: 0.1,
-          stateBalance: 0.1,
-          expectedDrift: 0,
-        },
-        {
-          spotBalance: 0.105,
-          stateBalance: 0.1,
-          expectedDrift: 0.05,
-        },
-        {
-          spotBalance: 0.095,
-          stateBalance: 0.1,
-          expectedDrift: 0.05,
-        },
-        {
-          spotBalance: 0.0001,
-          stateBalance: 0,
-          expectedDrift: 10000, // |0.0001 - 0| / max(0, 0.00000001)
-        },
-        {
-          spotBalance: 0,
-          stateBalance: 0,
-          expectedDrift: 0,
-        },
-      ];
-
-      testCases.forEach(({ spotBalance, stateBalance, expectedDrift }) => {
-        const drift = detector.calculateDrift(spotBalance, stateBalance);
-        expect(drift).toBeCloseTo(expectedDrift, 10);
-      });
-    });
+    // Drift calculation test removed - drift no longer blocks trades
 
     it("should format BTC amount for logging", () => {
       const testCases = [
@@ -1187,7 +1064,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -1227,7 +1103,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -1255,8 +1130,6 @@ describe("SellTriggerDetector", () => {
         strategyActive: true,
         hasAccumulatedBTC: true,
         priceThresholdMet: true,
-        balanceSufficient: true,
-        driftCheck: true,
         minNotionalMet: true,
       });
     });
@@ -1274,7 +1147,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const balances: BalanceInfo = {
@@ -1307,7 +1179,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.04, // 4%
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const threshold = detector.getNextSellThreshold(state, config);
@@ -1328,7 +1199,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const threshold = detector.getNextSellThreshold(state, config);
@@ -1376,7 +1246,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       let result = detector.validateConfig(validConfig);
@@ -1397,12 +1266,7 @@ describe("SellTriggerDetector", () => {
       expect(result.isValid).toBe(false);
       expect(result.error).toContain("Rise percentage must be between 0 and 1");
 
-      result = detector.validateConfig({
-        ...validConfig,
-        driftThresholdPct: -0.005,
-      });
-      expect(result.isValid).toBe(false);
-      expect(result.error).toContain("Drift threshold must be between 0 and 1");
+      // Drift threshold test removed - no longer used
     });
 
     it("should get sell amount for the cycle", () => {
@@ -1434,7 +1298,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {
@@ -1470,7 +1333,6 @@ describe("SellTriggerDetector", () => {
         dropPercentage: 0.02,
         risePercentage: 0.03,
         exchangeMinNotional: 10, // $10 minimum
-        driftThresholdPct: 0.005,
       };
 
       const candle: Candle = {

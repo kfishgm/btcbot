@@ -40,7 +40,6 @@ describe("BuyTriggerDetector", () => {
     risePercentage: 0.03,
     minBuyUSDT: 10,
     exchangeMinNotional: 10,
-    driftThresholdPct: 0.005,
     maxPurchases: 5,
     ...overrides,
   });
@@ -113,7 +112,6 @@ describe("BuyTriggerDetector", () => {
       expect(result.buyAmount).toBe(100);
       expect(result.validations?.priceThresholdMet).toBe(true);
       expect(result.validations?.capitalAvailable).toBe(true);
-      expect(result.validations?.driftCheck).toBe(true);
       expect(result.validations?.strategyActive).toBe(true);
       expect(result.validations?.amountValid).toBe(true);
     });
@@ -347,7 +345,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Drift Detection", () => {
-    it("should skip buy when USDT drift exceeds threshold", () => {
+    it("should trigger buy regardless of balance mismatch (retry handles)", () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -380,11 +378,8 @@ describe("BuyTriggerDetector", () => {
 
       const result = detector.checkBuyTrigger(state, config, candle, balances);
 
-      expect(result.shouldBuy).toBe(false);
-      expect(result.reason).toContain(
-        "USDT drift 2.000% exceeds threshold 0.5%",
-      );
-      expect(result.validations?.driftCheck).toBe(false);
+      // Drift no longer blocks trades - retry logic handles balance mismatch
+      expect(result.shouldBuy).toBe(true);
     });
 
     it("should pass drift check when within threshold", () => {
@@ -421,7 +416,6 @@ describe("BuyTriggerDetector", () => {
       const result = detector.checkBuyTrigger(state, config, candle, balances);
 
       expect(result.shouldBuy).toBe(true);
-      expect(result.validations?.driftCheck).toBe(true);
     });
 
     it("should calculate drift correctly with zero capital", () => {
@@ -463,7 +457,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.reason).toContain("below minimum");
     });
 
-    it("should handle edge case of exact drift threshold", () => {
+    it("should handle edge case of balance mismatch", () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -496,11 +490,8 @@ describe("BuyTriggerDetector", () => {
 
       const result = detector.checkBuyTrigger(state, config, candle, balances);
 
-      // Exactly at threshold should fail (>= check)
-      expect(result.shouldBuy).toBe(false);
-      expect(result.reason).toContain(
-        "USDT drift 0.500% exceeds threshold 0.5%",
-      );
+      // Balance mismatch no longer blocks trades
+      expect(result.shouldBuy).toBe(true);
     });
   });
 
@@ -824,7 +815,6 @@ describe("BuyTriggerDetector", () => {
       expect(result.validations).toMatchObject({
         priceThresholdMet: true,
         capitalAvailable: true,
-        driftCheck: true,
         strategyActive: true,
         amountValid: true,
         gridValid: true,
@@ -899,16 +889,8 @@ describe("BuyTriggerDetector", () => {
       // With only 50 capital, the amount is below minimum
       expect(result.reason).toContain("below minimum");
 
-      // Test 5: Drift exceeded
-      mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
-      mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
-      result = detector.checkBuyTrigger(baseState, baseConfig, baseCandle, {
-        ...baseBalances,
-        usdtSpot: 490,
-      });
-      expect(result.reason).toContain(
-        "USDT drift 2.000% exceeds threshold 0.5%",
-      );
+      // Test 5: Drift no longer blocks trades (removed)
+      // Balance mismatch now handled by retry logic
 
       // Test 6: Amount below minimum
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(5);
@@ -1023,7 +1005,7 @@ describe("BuyTriggerDetector", () => {
       });
     });
 
-    it("should validate drift per STRATEGY.md formula", () => {
+    it("should no longer validate drift (handled by retry logic)", () => {
       // STRATEGY.md: drift_usdt = |USDT_SPOT - capital_available| / max(capital_available, 1)
       const state = createCycleState({
         status: "READY",
@@ -1060,7 +1042,7 @@ describe("BuyTriggerDetector", () => {
         { usdtSpot: 1010, expectedDrift: 0, shouldBuy: true }, // Excess funds (no drift)
       ];
 
-      driftTests.forEach(({ usdtSpot, expectedDrift, shouldBuy }) => {
+      driftTests.forEach(({ usdtSpot }) => {
         const balances: BalanceInfo = {
           usdtSpot,
           btcSpot: 0,
@@ -1072,12 +1054,8 @@ describe("BuyTriggerDetector", () => {
           candle,
           balances,
         );
-        expect(result.shouldBuy).toBe(shouldBuy);
-
-        if (!shouldBuy && expectedDrift >= 0.005) {
-          expect(result.reason).toContain(`USDT drift`);
-          expect(result.reason).toContain(`exceeds threshold`);
-        }
+        // All should trigger - balance mismatch handled by retry logic
+        expect(result.shouldBuy).toBe(true);
       });
     });
 
@@ -1119,7 +1097,6 @@ describe("BuyTriggerDetector", () => {
       expect(result.validations).toEqual({
         priceThresholdMet: true,
         capitalAvailable: true,
-        driftCheck: true,
         strategyActive: true,
         amountValid: true,
         gridValid: true, // Grid validation is now part of the checks
@@ -1245,7 +1222,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.levelsTriggered).toBe(1);
     });
 
-    it("should validate drift detection through checkBuyTrigger", () => {
+    it("should no longer validate drift through checkBuyTrigger", () => {
       const state = createCycleState({
         reference_price: 50000,
         capital_available: 1000,
@@ -1256,9 +1233,7 @@ describe("BuyTriggerDetector", () => {
         btc_accumulated: 0, // No BTC accumulated yet
       });
 
-      const config = createTradingConfig({
-        driftThresholdPct: 0.005,
-      });
+      const config = createTradingConfig({});
 
       const candle = createCandle({ close: 49000 });
 
@@ -1276,9 +1251,8 @@ describe("BuyTriggerDetector", () => {
         balancesWithDrift,
       );
 
-      expect(result.shouldBuy).toBe(false);
-      expect(result.validations?.driftCheck).toBe(false);
-      expect(result.reason).toContain("drift");
+      // Drift no longer blocks trades
+      expect(result.shouldBuy).toBe(true);
     });
 
     it("should handle paused strategy state", () => {

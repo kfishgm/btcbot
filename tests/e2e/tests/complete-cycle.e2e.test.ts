@@ -121,7 +121,6 @@ describe("Complete Trading Cycle E2E", () => {
               maxPurchases: 10,
               minBuyUSDT: 10,
               exchangeMinNotional: 10,
-              driftThresholdPct: 0.005,
             },
             {
               close: currentPrice,
@@ -223,7 +222,6 @@ describe("Complete Trading Cycle E2E", () => {
             {
               risePercentage: 0.005,
               dropPercentage: 0.003,
-              driftThresholdPct: 0.005,
               exchangeMinNotional: 10,
             },
             {

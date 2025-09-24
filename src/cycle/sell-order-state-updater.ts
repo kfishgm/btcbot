@@ -135,12 +135,12 @@ export class SellOrderStateUpdater extends EventEmitter {
             // Cycle complete notification
             const fields = [
               {
-                name: "💰 Profit",
+                name: "💰 Realized P&L",
                 value: `$${(profit || 0).toFixed(2)}`,
                 inline: false,
               },
               {
-                name: "📦 BTC Dust",
+                name: "📦 BTC Remaining",
                 value: `${updates.btc_accumulated.toFixed(8)} BTC`,
                 inline: false,
               },
@@ -272,19 +272,43 @@ export class SellOrderStateUpdater extends EventEmitter {
     currentState: CycleState,
     orderResult: OrderResult,
   ): StateUpdateData {
-    // Calculate BTC amounts
-    const btcSold = orderResult.executedQty;
+    // Calculate actual BTC sold from fills
+    let actualBtcSold = new Decimal(0);
+    let actualUsdtReceived = new Decimal(0);
 
-    // Update BTC accumulated
-    // For SELL orders on Binance: fee is in USDT, not BTC
-    // So we sell the full executedQty and don't need to adjust for BTC fees
+    // Use fills data for precise reconciliation
+    if (orderResult.fills && orderResult.fills.length > 0) {
+      for (const fill of orderResult.fills) {
+        const fillQty = new Decimal(fill.qty);
+        const fillPrice = new Decimal(fill.price);
+        actualBtcSold = actualBtcSold.add(fillQty);
+        actualUsdtReceived = actualUsdtReceived.add(fillQty.mul(fillPrice));
+      }
+
+      logger.info("Post-trade reconciliation from fills", {
+        fillCount: orderResult.fills.length,
+        actualBtcSold: actualBtcSold.toString(),
+        actualUsdtReceived: actualUsdtReceived.toString(),
+        reportedExecutedQty: orderResult.executedQty.toString(),
+        reportedQuoteQty: orderResult.cummulativeQuoteQty.toString(),
+      });
+    } else {
+      // Fallback to reported values if no fills
+      actualBtcSold = orderResult.executedQty;
+      actualUsdtReceived = orderResult.cummulativeQuoteQty;
+      logger.warn("No fills data available, using reported values");
+    }
+
+    // Update BTC accumulated based on actual sold amount
     const currentBtcAccumulated = new Decimal(
       currentState.btc_accumulated ?? 0,
     );
-    const newBtcAccumulated = currentBtcAccumulated.sub(btcSold).toNumber();
+    const newBtcAccumulated = currentBtcAccumulated
+      .sub(actualBtcSold)
+      .toNumber();
 
-    // Calculate USDT amounts
-    const usdtReceived = orderResult.cummulativeQuoteQty;
+    // Calculate USDT amounts using actual values from fills
+    const usdtReceived = actualUsdtReceived;
     const usdtFee = orderResult.feeUSDT;
     const netUsdtReceived = usdtReceived.sub(usdtFee);
 
@@ -296,9 +320,9 @@ export class SellOrderStateUpdater extends EventEmitter {
     if (isCycleComplete) {
       // CYCLE RESET - Per STRATEGY.md lines 279-295
 
-      // Calculate profit (per STRATEGY.md lines 116-118)
+      // Calculate profit using actual BTC sold (per STRATEGY.md lines 116-118)
       const referencePrice = currentState.reference_price ?? 0;
-      const principal = new Decimal(referencePrice).mul(btcSold);
+      const principal = new Decimal(referencePrice).mul(actualBtcSold);
       const profit = Decimal.max(0, netUsdtReceived.sub(principal));
 
       // Update capital (per STRATEGY.md line 118)

@@ -18,7 +18,6 @@ describe("Grid Anchoring Strategy", () => {
         risePercentage: 0.005,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
         maxPurchases: 10,
       };
 
@@ -53,7 +52,6 @@ describe("Grid Anchoring Strategy", () => {
         risePercentage: 0.005,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
         maxPurchases: 10,
       };
 
@@ -90,7 +88,6 @@ describe("Grid Anchoring Strategy", () => {
         risePercentage: 0.005,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
         maxPurchases: 10,
       };
 
@@ -123,7 +120,6 @@ describe("Grid Anchoring Strategy", () => {
         risePercentage: 0.005, // 0.5%
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
         maxPurchases: 10,
       };
 

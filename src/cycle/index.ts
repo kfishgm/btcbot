@@ -40,13 +40,3 @@ export type {
   StateUpdateData as SellStateUpdateData,
   SellOrderStateUpdaterConfig,
 } from "./sell-order-state-updater.js";
-
-export { DriftDetector } from "./drift-detector.js";
-export type {
-  DriftResult,
-  DriftStatus,
-  USDTDriftParams,
-  BTCDriftParams,
-  CombinedDriftParams,
-  CombinedDriftResult,
-} from "./drift-detector.js";

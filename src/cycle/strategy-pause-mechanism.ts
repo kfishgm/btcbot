@@ -1,12 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/supabase.js";
 import type { CycleStateManager } from "./cycle-state-manager.js";
-import type { DriftDetector, CombinedDriftResult } from "./drift-detector.js";
 import type { DiscordNotifier } from "../notifications/discord-notifier.js";
 import { logger } from "../utils/logger.js";
 
 export interface PauseReason {
-  type: "drift_detected" | "critical_error" | "manual" | "state_corruption";
+  type: "critical_error" | "manual" | "state_corruption";
   message: string;
   metadata?: Record<string, unknown>;
 }
@@ -14,11 +13,9 @@ export interface PauseReason {
 export interface ResumeValidationResult {
   canResume: boolean;
   validationErrors: string[];
-  driftCheck?: CombinedDriftResult;
 }
 
 export interface StrategyPauseMechanismConfig {
-  driftThreshold?: number;
   enableNotifications?: boolean;
   requireManualResume?: boolean;
 }
@@ -36,7 +33,6 @@ export interface PauseState {
 export class StrategyPauseMechanism {
   private supabase: SupabaseClient<Database>;
   private cycleStateManager: CycleStateManager;
-  private driftDetector: DriftDetector;
   private discordNotifier?: DiscordNotifier;
   private config: Required<StrategyPauseMechanismConfig>;
   private isPaused: boolean = false;
@@ -45,16 +41,13 @@ export class StrategyPauseMechanism {
   constructor(
     supabase: SupabaseClient<Database>,
     cycleStateManager: CycleStateManager,
-    driftDetector: DriftDetector,
     discordNotifier?: DiscordNotifier,
     config?: StrategyPauseMechanismConfig,
   ) {
     this.supabase = supabase;
     this.cycleStateManager = cycleStateManager;
-    this.driftDetector = driftDetector;
     this.discordNotifier = discordNotifier;
     this.config = {
-      driftThreshold: config?.driftThreshold ?? 0.005,
       enableNotifications: config?.enableNotifications ?? true,
       requireManualResume: config?.requireManualResume ?? true,
     };
@@ -81,51 +74,6 @@ export class StrategyPauseMechanism {
     } catch (error) {
       logger.error("Failed to check pause state", { error });
     }
-  }
-
-  async checkDriftAndPause(
-    usdtSpotBalance: number,
-    capitalAvailable: number,
-    btcSpotBalance: number,
-    btcAccumulated: number,
-  ): Promise<boolean> {
-    if (this.isPaused) {
-      return true;
-    }
-
-    const driftResult = this.driftDetector.checkDrift({
-      usdtSpotBalance,
-      capitalAvailable,
-      btcSpotBalance,
-      btcAccumulated,
-    });
-
-    if (driftResult.overallStatus === "exceeded") {
-      const pauseReason: PauseReason = {
-        type: "drift_detected",
-        message: `Balance drift exceeded threshold: USDT ${(
-          driftResult.usdt.driftPercentage * 100
-        ).toFixed(2)}%, BTC ${(driftResult.btc.driftPercentage * 100).toFixed(
-          2,
-        )}%`,
-        metadata: {
-          usdtDrift: driftResult.usdt.driftPercentage,
-          btcDrift: driftResult.btc.driftPercentage,
-          threshold: this.config.driftThreshold,
-          balances: {
-            usdtSpot: usdtSpotBalance,
-            capitalAvailable,
-            btcSpot: btcSpotBalance,
-            btcAccumulated,
-          },
-        },
-      };
-
-      await this.pauseStrategy(pauseReason);
-      return true;
-    }
-
-    return false;
   }
 
   async pauseOnError(
@@ -227,7 +175,6 @@ export class StrategyPauseMechanism {
       // Note: In production, balance and connectivity checks would be performed
       // using the actual exchange client. For now, we rely on the cycle state
       // manager's validation which includes balance consistency checks.
-      // The drift detector is already used in checkDriftAndPause method.
     } catch (error) {
       result.canResume = false;
       result.validationErrors.push(

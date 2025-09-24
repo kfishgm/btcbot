@@ -2,7 +2,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "description": "Protect system files and enforce naming conventions",
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {
@@ -13,7 +12,6 @@
         ]
       },
       {
-        "description": "Validate commands and enforce agent-specific rules",
         "matcher": "Bash",
         "hooks": [
           {
@@ -24,7 +22,6 @@
         ]
       },
       {
-        "description": "Prevent direct dev server commands",
         "matcher": "Bash",
         "hooks": [
           {
@@ -35,7 +32,6 @@
         ]
       },
       {
-        "description": "Prevent adding .skip or .only to tests",
         "matcher": "Edit|MultiEdit",
         "hooks": [
           {
@@ -46,7 +42,6 @@
         ]
       },
       {
-        "description": "Prevent piping complete-task output",
         "matcher": "Bash",
         "hooks": [
           {
@@ -57,7 +52,6 @@
         ]
       },
       {
-        "description": "Prevent TypeScript/ESLint suppressions and 'any' types",
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {
@@ -68,7 +62,6 @@
         ]
       },
       {
-        "description": "Prevent dangerous git add patterns",
         "matcher": "Bash",
         "hooks": [
           {
@@ -79,7 +72,6 @@
         ]
       },
       {
-        "description": "Block TASK file commits (legacy)",
         "matcher": "Bash",
         "hooks": [
           {
@@ -91,7 +83,6 @@
     ],
     "PostToolUse": [
       {
-        "description": "Format files with Prettier after editing",
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {
@@ -100,58 +91,15 @@
             "timeout": 5
           }
         ]
-      },
-      {
-        "description": "Monitor test execution and provide guidance",
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-test-status.js",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "description": "Provide guidance when complete-task fails",
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/complete-task-failure-guidance.js",
-            "timeout": 3
-          }
-        ]
-      },
-      {
-        "description": "Type check TypeScript files after edit",
-        "matcher": "Edit|MultiEdit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "FILE_PATH=$(cat | jq -r '.tool_input.file_path // empty'); if [ -n \"$FILE_PATH\" ] && echo \"$FILE_PATH\" | grep -qE '\\.(ts|tsx)$'; then echo \"Type checking $FILE_PATH...\"; timeout 10s npx tsc --noEmit \"$FILE_PATH\" 2>&1 | grep -E '(error|Error)' | head -5 || true; fi",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "Stop": [
       {
-        "description": "Enforce task completion for implementer",
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/enforce-implementer-completion.js",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "description": "Clean up processes when session ends",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "WORKTREE_PATH=$(pwd); pkill -f \"$WORKTREE_PATH.*jest\" 2>/dev/null || true; pkill -f \"$WORKTREE_PATH.*tsc\" 2>/dev/null || true; pkill -f \"$WORKTREE_PATH.*eslint\" 2>/dev/null || true; echo \"Cleaned up processes for $WORKTREE_PATH\""
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-todos.py",
+            "timeout": 5
           }
         ]
       }

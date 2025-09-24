@@ -23,7 +23,6 @@ import { TradingRules } from "./src/exchange/trading-rules.js";
 import { CycleStateManager } from "./src/cycle/cycle-state-manager.js";
 import { BuyTriggerDetector } from "./src/cycle/buy-trigger-detector.js";
 import { SellTriggerDetector } from "./src/cycle/sell-trigger-detector.js";
-import { DriftDetector } from "./src/cycle/drift-detector.js";
 import { StrategyPauseMechanism } from "./src/cycle/strategy-pause-mechanism.js";
 import { BuyOrderStateUpdater } from "./src/cycle/buy-order-state-updater.js";
 import { SellOrderStateUpdater } from "./src/cycle/sell-order-state-updater.js";
@@ -80,7 +79,6 @@ async function createDependencies() {
   const referencePriceCalculator = new ReferencePriceCalculator();
   const buyAmountCalculator = new BuyAmountCalculator();
   const stateTransactionManager = new StateTransactionManager(supabase);
-  const driftDetector = new DriftDetector();
 
   const cycleStateManager = new CycleStateManager(supabase, {
     initialCapitalUSDT: strategyConfig.initialCapitalUsdt,
@@ -91,7 +89,6 @@ async function createDependencies() {
   const strategyPauseMechanism = new StrategyPauseMechanism(
     supabase,
     cycleStateManager,
-    driftDetector,
   );
 
   const historicalCandleManager = new HistoricalCandleManager(
@@ -173,7 +170,6 @@ async function createDependencies() {
     sellOrderPlacer,
     buyOrderStateUpdater,
     sellOrderStateUpdater,
-    driftDetector,
     strategyPauseMechanism,
     discordNotifier,
     eventLogger,

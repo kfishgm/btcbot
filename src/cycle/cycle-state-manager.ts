@@ -85,6 +85,8 @@ export class CycleStateManager {
       });
 
       if (!existingState) {
+        // Check if this is truly a first-time startup
+        logger.info("No existing cycle state found - creating initial state");
         await this.createInitialState();
         return;
       }
@@ -93,11 +95,23 @@ export class CycleStateManager {
       const isValid = await this.validateAndHandleState(existingState);
       if (isValid) {
         this.currentState = existingState;
-        logger.info("Recovered existing cycle state", {
+
+        // Log what state we're resuming from
+        const stateDescription =
+          existingState.status === "READY" &&
+          existingState.btc_accumulated === 0
+            ? "Starting fresh cycle (READY state with no BTC)"
+            : existingState.status === "HOLDING"
+              ? `Resuming HOLDING state with ${existingState.btc_accumulated} BTC`
+              : `Resuming ${existingState.status} state`;
+
+        logger.info(`✅ Recovered existing cycle state: ${stateDescription}`, {
           id: existingState.id,
           status: existingState.status,
           capital_available: existingState.capital_available,
           btc_accumulated: existingState.btc_accumulated,
+          purchases_remaining: existingState.purchases_remaining,
+          reference_price: existingState.reference_price,
         });
       }
     } catch (error) {

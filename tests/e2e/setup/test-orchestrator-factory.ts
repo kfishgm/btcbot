@@ -19,7 +19,6 @@ import { BuyOrderPlacer } from "../../../src/order/buy-order-placer.js";
 import { SellOrderPlacer } from "../../../src/order/sell-order-placer.js";
 import { BuyOrderStateUpdater } from "../../../src/cycle/buy-order-state-updater.js";
 import { SellOrderStateUpdater } from "../../../src/cycle/sell-order-state-updater.js";
-import { DriftDetector } from "../../../src/cycle/drift-detector.js";
 import { StrategyPauseMechanism } from "../../../src/cycle/strategy-pause-mechanism.js";
 import { EventLogger } from "../../../src/monitoring/event-logger.js";
 import { BalanceManager } from "../../../src/exchange/balance-manager.js";
@@ -203,8 +202,6 @@ export async function createTestOrchestrator(
     discordNotifier,
   );
 
-  const driftDetector = new DriftDetector();
-
   // Import the logger from utils
   const { logger } = await import("../../../src/utils/logger.js");
   const eventLogger = new EventLogger({
@@ -215,7 +212,6 @@ export async function createTestOrchestrator(
   const strategyPauseMechanism = new StrategyPauseMechanism(
     supabaseClient,
     cycleStateManager,
-    driftDetector,
     discordNotifier,
   );
 
@@ -233,7 +229,6 @@ export async function createTestOrchestrator(
     sellOrderPlacer,
     buyOrderStateUpdater,
     sellOrderStateUpdater,
-    driftDetector,
     strategyPauseMechanism,
     discordNotifier,
     eventLogger,

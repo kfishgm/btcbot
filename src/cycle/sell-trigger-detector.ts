@@ -7,15 +7,12 @@
  * - IMPORTANT: avg_cost is the economic reference, NOT the same as reference_price
  *   - reference_price = ATH when no BTC held (for grid anchoring)
  *   - reference_price = avg_cost when BTC held (for sell trigger)
- * - Drift check: drift_btc = |BTC_SPOT - btc_accumulated| / max(btc_accumulated, 0.00000001)
- * - Must be < 0.005 (0.5%)
  *
  * Pre-sell validations:
  * 1. Strategy is not PAUSED
  * 2. BTC accumulated > 0
  * 3. Price meets sell threshold (above avg_cost * (1 + %Rise))
- * 4. BTC balance >= btc_accumulated
- * 5. Drift < 0.5%
+ * 4. Minimum notional value met
  *
  * Critical: ONLY sell btc_accumulated amount (cycle isolation)
  */
@@ -33,7 +30,6 @@ export interface CycleState {
 export interface TradingConfig {
   risePercentage: number; // e.g., 0.03 for 3%
   dropPercentage: number; // e.g., 0.02 for 2%
-  driftThresholdPct: number; // 0.005 for 0.5%
   exchangeMinNotional: number; // Minimum trade value
 }
 
@@ -59,8 +55,6 @@ export interface SellTriggerResult {
     strategyActive: boolean;
     hasAccumulatedBTC: boolean;
     priceThresholdMet: boolean;
-    balanceSufficient: boolean;
-    driftCheck: boolean;
     minNotionalMet: boolean;
   };
 }
@@ -78,15 +72,13 @@ export class SellTriggerDetector {
     state: CycleState,
     config: TradingConfig,
     candle: Candle,
-    balances: BalanceInfo,
+    _balances: BalanceInfo, // Kept for interface compatibility, no longer used for drift check
   ): SellTriggerResult {
     // Initialize validations object
     const validations = {
       strategyActive: false,
       hasAccumulatedBTC: false,
       priceThresholdMet: false,
-      balanceSufficient: false,
-      driftCheck: false,
       minNotionalMet: false,
     };
 
@@ -134,65 +126,7 @@ export class SellTriggerDetector {
       };
     }
 
-    // 5. Check if we have sufficient BTC balance
-    validations.balanceSufficient = balances.btcSpot >= state.btc_accumulated;
-
-    // 6. Check drift
-    const btcDrift = this.calculateDrift(
-      balances.btcSpot,
-      state.btc_accumulated,
-    );
-
-    // Handle the validation logic based on balance and drift
-    if (!validations.balanceSufficient) {
-      // Insufficient balance - decide how to report it
-      validations.driftCheck = btcDrift < config.driftThresholdPct;
-
-      // For major shortages (> 10% difference), report as insufficient balance
-      // For minor discrepancies within drift range, report as drift issue
-      if (btcDrift > 0.1) {
-        // Major shortage - report as insufficient balance (user-friendly)
-        return {
-          shouldSell: false,
-          reason: `Insufficient BTC balance: ${this.formatBTC(balances.btcSpot)} < ${this.formatBTC(state.btc_accumulated)}`,
-          validations,
-        };
-      } else if (!validations.driftCheck) {
-        // Small shortage but exceeds drift threshold - report as drift
-        return {
-          shouldSell: false,
-          reason: `BTC drift ${(btcDrift * 100).toFixed(3)}% exceeds threshold ${(config.driftThresholdPct * 100).toFixed(1)}%`,
-          validations,
-        };
-      } else {
-        // Within drift tolerance but still insufficient
-        return {
-          shouldSell: false,
-          reason: `Insufficient BTC balance: ${this.formatBTC(balances.btcSpot)} < ${this.formatBTC(state.btc_accumulated)}`,
-          validations,
-        };
-      }
-    }
-
-    // Balance is sufficient - check drift for excess
-    // Large excess (> 10%) is likely from other sources, allow it
-    // Small excess within normal range should follow drift rules
-    if (btcDrift > 0.1) {
-      // Significantly more BTC (>10%) - likely from other sources, allow
-      validations.driftCheck = true;
-    } else {
-      // Small difference - check drift strictly
-      validations.driftCheck = btcDrift < config.driftThresholdPct;
-      if (!validations.driftCheck) {
-        return {
-          shouldSell: false,
-          reason: `BTC drift ${(btcDrift * 100).toFixed(3)}% exceeds threshold ${(config.driftThresholdPct * 100).toFixed(1)}%`,
-          validations,
-        };
-      }
-    }
-
-    // 7. Check minimum notional value
+    // 5. Check minimum notional value
     const notionalValue = state.btc_accumulated * candle.close;
     validations.minNotionalMet = notionalValue >= config.exchangeMinNotional;
 
@@ -232,18 +166,6 @@ export class SellTriggerDetector {
     // Formula from STRATEGY_UPDATED.md: avg_cost * (1 + %Rise)
     // where avg_cost is stored as reference_price
     return referencePrice * (1 + risePercentage);
-  }
-
-  /**
-   * Calculate drift percentage for BTC
-   * @param spotBalance BTC spot balance from exchange
-   * @param expectedBalance Expected BTC balance in state
-   * @returns Drift percentage
-   */
-  public calculateDrift(spotBalance: number, expectedBalance: number): number {
-    // Formula from STRATEGY.md: |BTC_SPOT - btc_accumulated| / max(btc_accumulated, 0.00000001)
-    const denominator = Math.max(expectedBalance, 0.00000001);
-    return Math.abs(spotBalance - expectedBalance) / denominator;
   }
 
   /**
@@ -440,13 +362,6 @@ export class SellTriggerDetector {
       return {
         isValid: false,
         error: "Rise percentage must be between 0 and 1",
-      };
-    }
-
-    if (config.driftThresholdPct < 0 || config.driftThresholdPct > 1) {
-      return {
-        isValid: false,
-        error: "Drift threshold must be between 0 and 1",
       };
     }
 

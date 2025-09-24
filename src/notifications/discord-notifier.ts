@@ -176,26 +176,6 @@ export class DiscordNotifier {
       },
     ];
 
-    if (reason.type === "drift_detected" && reason.metadata) {
-      const usdtDrift = ((reason.metadata.usdtDrift as number) * 100).toFixed(
-        2,
-      );
-      const btcDrift = ((reason.metadata.btcDrift as number) * 100).toFixed(2);
-
-      fields.push(
-        {
-          name: "USDT Drift",
-          value: `${usdtDrift}%`,
-          inline: false,
-        },
-        {
-          name: "BTC Drift",
-          value: `${btcDrift}%`,
-          inline: false,
-        },
-      );
-    }
-
     await this.sendAlert(
       `⚠️ **STRATEGY PAUSED**\n\n${reason.message}\n\n**Manual intervention required!**`,
       "critical",
@@ -481,19 +461,6 @@ export class DiscordNotifier {
     for (const alert of alerts) {
       await this.sendAlert(alert.description, alert.severity);
     }
-  }
-
-  async sendDriftAlert(driftData: {
-    usdtDrift: number;
-    btcDrift: number;
-    threshold: number;
-  }): Promise<void> {
-    const reason: PauseReason = {
-      type: "drift_detected",
-      message: `Balance drift exceeded: USDT ${(driftData.usdtDrift * 100).toFixed(2)}%, BTC ${(driftData.btcDrift * 100).toFixed(2)}%`,
-      metadata: driftData,
-    };
-    await this.sendPauseAlert(reason);
   }
 
   async sendErrorAlert(

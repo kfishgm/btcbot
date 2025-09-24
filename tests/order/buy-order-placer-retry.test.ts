@@ -152,9 +152,11 @@ describe("BuyOrderPlacer - Retry Logic", () => {
       expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(2);
       // Verify second order used reduced USDT amount
       const secondCall = mockBinanceClient.createOrder.mock.calls[1];
-      const orderValue = secondCall?.[0]
-        ? secondCall[0].quantity * secondCall[0].price
-        : 0;
+      const secondCallArg = secondCall?.[0];
+      const orderValue =
+        secondCallArg?.quantity && secondCallArg?.price
+          ? secondCallArg.quantity * secondCallArg.price
+          : 0;
       expect(orderValue).toBeLessThan(1000);
       expect(orderValue).toBeLessThanOrEqual(800 * 0.995); // 99.5% of available
       // Verify result
@@ -318,11 +320,13 @@ describe("BuyOrderPlacer - Retry Logic", () => {
       await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
       // Verify the quantity was properly calculated from available USDT
       const secondCall = mockBinanceClient.createOrder.mock.calls[1];
-      const orderValue = secondCall?.[0]
-        ? secondCall[0].quantity * secondCall[0].price
-        : 0;
+      const secondCallArg = secondCall?.[0];
+      const orderValue =
+        secondCallArg?.quantity && secondCallArg?.price
+          ? secondCallArg.quantity * secondCallArg.price
+          : 0;
       expect(orderValue).toBeLessThanOrEqual(600 * 0.995); // 99.5% of available
-      expect(secondCall?.[0]?.quantity).toBe(0.01213);
+      expect(secondCallArg?.quantity).toBe(0.01213);
     });
     it("should throw error if adjusted amount is below minimum notional", async () => {
       const buyAmount = new Decimal(100);
@@ -392,9 +396,11 @@ describe("BuyOrderPlacer - Retry Logic", () => {
       await buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003);
       // Verify second order used 99.5% of available balance (to account for fees)
       const secondCall = mockBinanceClient.createOrder.mock.calls[1];
-      const orderValue = secondCall?.[0]
-        ? secondCall[0].quantity * secondCall[0].price
-        : 0;
+      const secondCallArg = secondCall?.[0];
+      const orderValue =
+        secondCallArg?.quantity && secondCallArg?.price
+          ? secondCallArg.quantity * secondCallArg.price
+          : 0;
       expect(orderValue).toBeLessThanOrEqual(995); // 99.5% of 1000
       expect(orderValue).toBeGreaterThan(990); // But not too much less
     });
@@ -505,9 +511,11 @@ describe("BuyOrderPlacer - Retry Logic", () => {
       await buyOrderPlacer.placeOrder(intendedBuyAmount, currentPrice, 0.003);
       // Verify second order used the available capital (less than intended)
       const secondCall = mockBinanceClient.createOrder.mock.calls[1];
-      const orderValue = secondCall?.[0]
-        ? secondCall[0].quantity * secondCall[0].price
-        : 0;
+      const secondCallArg = secondCall?.[0];
+      const orderValue =
+        secondCallArg?.quantity && secondCallArg?.price
+          ? secondCallArg.quantity * secondCallArg.price
+          : 0;
       expect(orderValue).toBeLessThan(2000);
       expect(orderValue).toBeLessThanOrEqual(1500 * 0.995);
     });

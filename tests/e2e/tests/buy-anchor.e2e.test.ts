@@ -108,7 +108,6 @@ describe("Buy Anchor E2E", () => {
               maxPurchases: 10,
               minBuyUSDT: 10,
               exchangeMinNotional: 10,
-              driftThresholdPct: 0.005,
             },
             {
               close: currentPrice,
@@ -283,7 +282,6 @@ describe("Buy Anchor E2E", () => {
         maxPurchases: 10,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       },
       {
         close: testPrice,

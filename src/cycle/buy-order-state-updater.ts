@@ -78,7 +78,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       });
 
       // Execute update atomically
-      logger.info("Executing atomic state update", {
+      logger.debug("Executing atomic state update", {
         id: currentState.id,
         idType: typeof currentState.id,
         hasId: !!currentState.id,
@@ -90,7 +90,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       }
 
       // Log the exact updates being sent
-      logger.info("Sending updates to updateStateAtomic", {
+      logger.debug("Sending updates to updateStateAtomic", {
         botId: currentState.id,
         updates: JSON.stringify(updates),
         updateKeys: Object.keys(updates),
@@ -258,7 +258,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     const totalCostUsdt = usdtSpent; // No fee addition - fees handled via reduced BTC
 
     // Debug logging for reference price calculation
-    logger.info("Reference price calculation inputs:", {
+    logger.debug("Reference price calculation inputs:", {
       btcFilled: btcFilled.toString(),
       btcFee: btcFee.toString(),
       netBtcReceived: netBtcReceived.toString(),
@@ -304,7 +304,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     );
 
     // More debug logging
-    logger.info("Reference price calculation results:", {
+    logger.debug("Reference price calculation results:", {
       newBtcAccumulated,
       newCostAccumUsdt,
       newBtcAccumNet,
@@ -414,7 +414,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     const referencePrice = costAccumUsdt / btcAccumNet;
     const rounded = Math.round(referencePrice * 100) / 100;
 
-    logger.info("calculateReferencePrice details:", {
+    logger.debug("calculateReferencePrice details:", {
       costAccumUsdt,
       btcAccumNet,
       rawReferencePrice: referencePrice,

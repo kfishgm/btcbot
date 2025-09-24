@@ -551,6 +551,167 @@ async function onCandleClose(candle: Candle): Promise<void> {
 
 ---
 
+## Balance Mismatch Handling
+
+### Retry-on-Insufficient-Balance Strategy
+
+**IMPORTANT: The bot now uses automatic retry with balance refresh instead of blocking on drift detection.**
+
+When an order fails due to insufficient balance, the bot will:
+
+1. **Refresh balance from exchange** - Get the latest available balance directly from Binance
+2. **Calculate safe quantity** - Use minimum of available balance and intended amount
+3. **Apply safety factor** - Use 99.5% of available balance to account for fees
+4. **Generate unique clientOrderId** - Each retry gets a new ID for idempotency
+5. **Retry with adjusted amount** - Place order with recalculated safe quantity
+
+### Retry Configuration
+
+```typescript
+// Maximum retries specifically for balance errors
+const MAX_BALANCE_RETRIES = 3;
+
+// Safety factor to account for fees and rounding
+const BALANCE_SAFETY_FACTOR = 0.995; // 99.5%
+
+// Standard retry configuration (non-balance errors)
+const MAX_STANDARD_RETRIES = 3;
+const RETRY_DELAY_MS = 1000; // Exponential backoff applied
+```
+
+### Safe Quantity Calculation
+
+**For Sell Orders (BTC):**
+
+```typescript
+// Refresh BTC balance from exchange
+const btcBalance = await binanceClient.getBalance("BTC");
+const availableBtc = btcBalance.free;
+
+// Calculate safe sell quantity
+const safeSellQty = Math.min(availableBtc * BALANCE_SAFETY_FACTOR, intendedQty);
+
+// Quantize to exchange step size
+const quantizedQty = Math.floor(safeSellQty / stepSize) * stepSize;
+
+// Validate minimum constraints
+if (quantizedQty < minQty || quantizedQty * currentPrice < minNotional) {
+  // Skip order - amount too small to trade
+  return;
+}
+```
+
+**For Buy Orders (USDT):**
+
+```typescript
+// Refresh USDT balance from exchange
+const usdtBalance = await binanceClient.getBalance("USDT");
+const availableUsdt = usdtBalance.free;
+
+// Calculate safe buy amount
+const safeBuyAmount = Math.min(
+  availableUsdt * BALANCE_SAFETY_FACTOR,
+  intendedAmount,
+);
+
+// Validate minimum constraints
+if (safeBuyAmount < minNotional) {
+  // Skip order - amount too small to trade
+  return;
+}
+```
+
+### Error Detection Patterns
+
+The bot recognizes insufficient balance errors through:
+
+- Error message contains "insufficient balance"
+- Error message contains "account has insufficient"
+- Binance error code "-2010" (INSUFFICIENT_BALANCE)
+
+### Retry Flow Example
+
+```typescript
+async function placeOrderWithRetry(orderParams) {
+  let balanceRetryCount = 0;
+  let standardRetryCount = 0;
+
+  while (true) {
+    try {
+      // Generate unique clientOrderId for this attempt
+      const clientOrderId = generateClientOrderId();
+
+      // Place order
+      const result = await binanceClient.createOrder({
+        ...orderParams,
+        clientOrderId,
+      });
+
+      return result;
+    } catch (error) {
+      if (
+        isInsufficientBalanceError(error) &&
+        balanceRetryCount < MAX_BALANCE_RETRIES
+      ) {
+        balanceRetryCount++;
+
+        // Refresh balance and recalculate
+        const freshBalance = await refreshBalance();
+        orderParams = recalculateOrderParams(freshBalance);
+
+        continue; // Retry immediately with fresh balance
+      }
+
+      if (
+        isRetryableError(error) &&
+        standardRetryCount < MAX_STANDARD_RETRIES
+      ) {
+        standardRetryCount++;
+        await sleep(RETRY_DELAY_MS * Math.pow(2, standardRetryCount));
+        continue;
+      }
+
+      throw error; // Non-retryable or max retries reached
+    }
+  }
+}
+```
+
+### Fills-Based Reconciliation
+
+After successful order execution, the bot uses fills data for precise state updates:
+
+```typescript
+// Use fills data for exact reconciliation
+const totalBtcReceived = fills.reduce(
+  (sum, fill) => sum + parseFloat(fill.qty),
+  0,
+);
+
+const totalUsdtPaid = fills.reduce(
+  (sum, fill) => sum + parseFloat(fill.qty) * parseFloat(fill.price),
+  0,
+);
+
+const totalFeesBtc = fills.reduce(
+  (sum, fill) =>
+    fill.commissionAsset === "BTC" ? sum + parseFloat(fill.commission) : sum,
+  0,
+);
+
+// Update state with exact values
+state.btc_accum_net += totalBtcReceived - totalFeesBtc;
+state.cost_accum_usdt += totalUsdtPaid;
+```
+
+### Key Benefits
+
+1. **No blocking on drift** - Trading continues even with temporary balance mismatches
+2. **Automatic recovery** - Self-corrects transient balance issues
+3. **Precise accounting** - Uses fills data for exact state tracking
+4. **Idempotent retries** - Unique clientOrderId prevents duplicate orders
+5. **Safety margins** - 99.5% factor prevents edge case failures
+
 ## Important Notes
 
 1. **Spot only** — no leverage, no futures.
@@ -561,6 +722,16 @@ async function onCandleClose(candle: Candle): Promise<void> {
 ---
 
 ## Change Log
+
+- **2025-09-24 — Retry-on-Insufficient-Balance Strategy**
+  - **NEW STRATEGY**: Replaced drift detection blocking with automatic retry on insufficient balance
+  - **BALANCE REFRESH**: Orders retry with fresh balance from exchange on INSUFFICIENT_BALANCE errors
+  - **SAFE CALCULATION**: Uses min(available_balance, intended_amount) \* 0.995 for safety
+  - **IDEMPOTENT RETRIES**: Unique clientOrderId generated for each retry attempt
+  - **FILLS RECONCILIATION**: Precise state updates using fills data from executed orders
+  - **NO BLOCKING**: Trading continues even with temporary balance mismatches
+  - Maximum 3 retries for balance-specific errors with immediate retry (no delay)
+  - Standard retryable errors still use exponential backoff
 
 - **2025-09-22 — ATH Window Made Configurable**
   - **CONFIGURATION CHANGE**: ATH window is now configurable via database (10-500 range)

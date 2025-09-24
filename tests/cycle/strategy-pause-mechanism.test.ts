@@ -2,14 +2,12 @@ import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/supabase";
 import { StrategyPauseMechanism } from "../../src/cycle/strategy-pause-mechanism";
-import { DriftDetector } from "../../src/cycle/drift-detector";
 import { CycleStateManager } from "../../src/cycle/cycle-state-manager";
 import { DiscordNotifier } from "../../src/notifications/discord-notifier";
 
 describe("StrategyPauseMechanism", () => {
   let pauseMechanism: StrategyPauseMechanism;
   let mockSupabase: SupabaseClient<Database>;
-  let mockDriftDetector: DriftDetector;
   let mockCycleStateManager: CycleStateManager;
   let mockDiscordNotifier: DiscordNotifier;
 
@@ -59,7 +57,6 @@ describe("StrategyPauseMechanism", () => {
     } as unknown as SupabaseClient<Database>;
 
     // Create mock instances
-    mockDriftDetector = new DriftDetector();
     mockCycleStateManager = new CycleStateManager(mockSupabase, {
       initialCapitalUSDT: 1000,
       maxPurchases: 10,
@@ -85,7 +82,6 @@ describe("StrategyPauseMechanism", () => {
     pauseMechanism = new StrategyPauseMechanism(
       mockSupabase,
       mockCycleStateManager,
-      mockDriftDetector,
       mockDiscordNotifier,
     );
   });
@@ -149,7 +145,6 @@ describe("StrategyPauseMechanism", () => {
       const pauseMechanismWithState = new StrategyPauseMechanism(
         mockSupabaseWithData,
         mockCycleStateManager,
-        mockDriftDetector,
         mockDiscordNotifier,
       );
 
@@ -157,78 +152,6 @@ describe("StrategyPauseMechanism", () => {
 
       expect(pauseMechanismWithState.isPausedStatus()).toBe(true);
       expect(pauseMechanismWithState.getPauseReason()).toBe("Drift detected");
-    });
-  });
-
-  describe("Drift Detection Pausing", () => {
-    it("should pause strategy when drift exceeds threshold", async () => {
-      // Mock drift detection result
-      jest.spyOn(mockDriftDetector, "checkDrift").mockReturnValue({
-        usdt: {
-          asset: "USDT",
-          driftPercentage: 0.01, // 1% drift
-          status: "exceeded" as const,
-          threshold: 0.005,
-        },
-        btc: {
-          asset: "BTC",
-          driftPercentage: 0.001,
-          status: "ok" as const,
-          threshold: 0.005,
-        },
-        overallStatus: "exceeded" as const,
-      });
-
-      // Mock current state
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
-        createMockCycleState({
-          btc_accumulated: 0.01,
-          purchases_remaining: 5,
-        }),
-      );
-
-      const result = await pauseMechanism.checkDriftAndPause(
-        1010, // usdtSpotBalance
-        1000, // capitalAvailable
-        0.01, // btcSpotBalance
-        0.01, // btcAccumulated
-      );
-
-      expect(result).toBe(true);
-      expect(pauseMechanism.isPausedStatus()).toBe(true);
-      expect(pauseMechanism.getPauseReason()).toContain("drift exceeded");
-
-      // Verify Discord notification was sent
-      expect(mockDiscordNotifier.sendPauseAlert).toHaveBeenCalled();
-    });
-
-    it("should not pause when drift is within acceptable threshold", async () => {
-      jest.spyOn(mockDriftDetector, "checkDrift").mockReturnValue({
-        usdt: {
-          asset: "USDT",
-          driftPercentage: 0.001,
-          status: "ok" as const,
-          threshold: 0.005,
-        },
-        btc: {
-          asset: "BTC",
-          driftPercentage: 0.002,
-          status: "ok" as const,
-          threshold: 0.005,
-        },
-        overallStatus: "ok" as const,
-      });
-
-      const result = await pauseMechanism.checkDriftAndPause(
-        1001,
-        1000,
-        0.01002,
-        0.01,
-      );
-
-      expect(result).toBe(false);
-      expect(pauseMechanism.isPausedStatus()).toBe(false);
-      expect(pauseMechanism.getPauseReason()).toBeNull();
     });
   });
 
@@ -349,39 +272,6 @@ describe("StrategyPauseMechanism", () => {
   });
 
   describe("State Management", () => {
-    it("should track pause metadata", async () => {
-      // Mock drift detection to trigger pause with metadata
-      jest.spyOn(mockDriftDetector, "checkDrift").mockReturnValue({
-        usdt: {
-          asset: "USDT",
-          driftPercentage: 0.015,
-          status: "exceeded" as const,
-          threshold: 0.005,
-        },
-        btc: {
-          asset: "BTC",
-          driftPercentage: 0.003,
-          status: "ok" as const,
-          threshold: 0.005,
-        },
-        overallStatus: "exceeded" as const,
-      });
-
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
-        createMockCycleState({
-          btc_accumulated: 0.01,
-          purchases_remaining: 5,
-        }),
-      );
-
-      await pauseMechanism.checkDriftAndPause(1015, 1000, 0.01003, 0.01);
-
-      const metadata = pauseMechanism.getPauseMetadata();
-      expect(metadata).toBeDefined();
-      expect(metadata?.usdtDrift).toBe(0.015);
-      expect(metadata?.btcDrift).toBe(0.003);
-    });
-
     it("should return null metadata when not paused", () => {
       expect(pauseMechanism.getPauseMetadata()).toBeNull();
     });

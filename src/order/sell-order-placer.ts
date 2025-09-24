@@ -260,7 +260,7 @@ export class SellOrderPlacer extends EventEmitter {
       );
     }
 
-    // Prepare order
+    // Initial order preparation
     const orderParams = await this.prepareOrder(
       btcToSell,
       currentPrice,
@@ -273,9 +273,10 @@ export class SellOrderPlacer extends EventEmitter {
     // Emit order placement event
     this.emit("orderPlacing", orderParams);
 
-    // Place order with retry logic
+    // Place order with retry logic for insufficient balance
     let lastError: Error | null = null;
     let attempt = 0;
+    let currentQuantity = orderParams.quantity;
 
     while (attempt < this.retryCount) {
       try {
@@ -287,9 +288,9 @@ export class SellOrderPlacer extends EventEmitter {
           side: "SELL" as OrderSide,
           type: "LIMIT" as OrderType,
           timeInForce: "IOC" as TimeInForce,
-          quantity: Number(orderParams.quantity.toString()),
+          quantity: Number(currentQuantity.toString()),
           price: Number(orderParams.limitPrice.toString()),
-          newClientOrderId: orderParams.clientOrderId,
+          newClientOrderId: `${orderParams.clientOrderId}_${attempt}`, // Unique ID per retry
         });
 
         const executionTime = Date.now() - startTime;
@@ -328,9 +329,83 @@ export class SellOrderPlacer extends EventEmitter {
         return result;
       } catch (error: unknown) {
         lastError = error as Error;
+        const errorMessage = lastError.message.toLowerCase();
 
-        // Check if error is retryable
-        if (this.isRetryableError(error)) {
+        // Check for INSUFFICIENT_BALANCE error
+        if (
+          errorMessage.includes("insufficient balance") ||
+          errorMessage.includes("account has insufficient") ||
+          (lastError as ErrorWithCode).code === "-2010"
+        ) {
+          logger.warn(
+            `Insufficient balance detected, retrying with refreshed balance`,
+            {
+              attempt,
+              originalQuantity: btcToSell.toString(),
+              currentQuantity: currentQuantity.toString(),
+            },
+          );
+
+          // Refresh balance from exchange
+          const btcBalance = await this.binanceClient.getBalance("BTC");
+          if (!btcBalance) {
+            throw new Error("Failed to get BTC balance from Binance");
+          }
+
+          const spotBtc = new Decimal(btcBalance.free);
+
+          // Calculate safe quantity: min(spot_btc, btc_accumulated)
+          const safeQuantity = Decimal.min(spotBtc, btcToSell);
+
+          // Round down to step size
+          const stepSize = this.tradingRulesCache?.stepSize || 0.00001;
+          const quantizedSafeQty = safeQuantity
+            .div(stepSize)
+            .floor()
+            .mul(stepSize);
+
+          logger.info(`Recalculated safe sell quantity`, {
+            spotBtc: spotBtc.toString(),
+            btcAccumulated: btcToSell.toString(),
+            safeQuantity: safeQuantity.toString(),
+            quantizedSafeQty: quantizedSafeQty.toString(),
+            stepSize,
+          });
+
+          // Check if quantized quantity is still valid
+          const minSellableQty = this.tradingRules.getMinimumSellableQuantity(
+            currentPrice.toNumber(),
+            this.symbol,
+          );
+
+          if (quantizedSafeQty.lt(minSellableQty)) {
+            logger.error(
+              `Adjusted quantity ${quantizedSafeQty} below minimum ${minSellableQty}`,
+            );
+            throw new Error(
+              `Cannot sell: adjusted quantity ${quantizedSafeQty} below minimum ${minSellableQty}`,
+            );
+          }
+
+          // Update current quantity for retry
+          currentQuantity = quantizedSafeQty;
+
+          attempt++;
+          if (attempt < this.retryCount) {
+            const delay = this.retryDelay * Math.pow(2, attempt - 1);
+            this.emit("orderRetry", {
+              attempt,
+              delay,
+              error,
+              adjustedQuantity: quantizedSafeQty.toString(),
+              reason: "INSUFFICIENT_BALANCE",
+            });
+            await this.sleep(delay);
+            continue;
+          }
+        }
+        // Check if error is otherwise retryable (network, rate limit, etc)
+        else if (this.isRetryableError(error)) {
           attempt++;
           if (attempt < this.retryCount) {
             const delay = this.retryDelay * Math.pow(2, attempt - 1);

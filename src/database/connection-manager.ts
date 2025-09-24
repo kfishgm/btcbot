@@ -138,7 +138,10 @@ export class ConnectionManager extends EventEmitter {
     super();
     this.config = this.validateConfig(config);
     this.metrics = this.initializeMetrics();
-    this.setupIdleCheck();
+    // Skip idle check timer in test environment to prevent Jest timeout
+    if (process.env.NODE_ENV !== "test") {
+      this.setupIdleCheck();
+    }
   }
 
   private validateConfig(config: ConnectionConfig): ConnectionConfig {

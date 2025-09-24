@@ -105,7 +105,6 @@ describe("Sell Trigger E2E", () => {
             {
               risePercentage: 0.005,
               dropPercentage: 0.003,
-              driftThresholdPct: 0.005,
               exchangeMinNotional: 10,
             },
             {
@@ -199,7 +198,6 @@ describe("Sell Trigger E2E", () => {
       {
         risePercentage: 0.005,
         dropPercentage: 0.003,
-        driftThresholdPct: 0.005,
         exchangeMinNotional: 10,
       },
       {
@@ -303,7 +301,6 @@ describe("Sell Trigger E2E", () => {
       {
         risePercentage: 0.005,
         dropPercentage: 0.003,
-        driftThresholdPct: 0.005,
         exchangeMinNotional: 10,
       },
       {

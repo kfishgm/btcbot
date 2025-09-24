@@ -110,7 +110,6 @@ describe("Multiple Cycles E2E", () => {
               maxPurchases: 10,
               minBuyUSDT: 10,
               exchangeMinNotional: 10,
-              driftThresholdPct: 0.005,
             },
             {
               close: currentPrice,
@@ -208,7 +207,6 @@ describe("Multiple Cycles E2E", () => {
             {
               risePercentage: 0.005,
               dropPercentage: 0.003,
-              driftThresholdPct: 0.005,
               exchangeMinNotional: 10,
             },
             {
@@ -366,7 +364,6 @@ describe("Multiple Cycles E2E", () => {
         maxPurchases: 10,
         minBuyUSDT: 10,
         exchangeMinNotional: 10,
-        driftThresholdPct: 0.005,
       },
       {
         close: newHighPrice,
@@ -392,9 +389,9 @@ describe("Multiple Cycles E2E", () => {
   it("should reset state correctly between cycles", async () => {
     const { components, mocks } = testOrchestrator;
 
-    // Simulate end of first cycle
+    // Simulate end of first cycle (READY status when cycle completes)
     const endOfCycleState = {
-      status: "COMPLETED" as const,
+      status: "READY" as const,
       capital_available: 1050, // Profit from cycle
       btc_accumulated: 0,
       purchases_remaining: 0,
@@ -451,9 +448,9 @@ describe("Multiple Cycles E2E", () => {
   it("should handle partial cycles and resume correctly", async () => {
     const { components, mocks } = testOrchestrator;
 
-    // Start with partial cycle in progress
+    // Start with partial cycle in progress (HOLDING status when BTC accumulated > 0)
     testOrchestrator.mocks.supabase.setCycleState("test-cycle", {
-      status: "READY",
+      status: "HOLDING",
       capital_available: 750,
       btc_accumulated: 0.0025,
       purchases_remaining: 7,
@@ -466,11 +463,15 @@ describe("Multiple Cycles E2E", () => {
       btc_dust: 0,
     });
 
+    // Set matching BTC balance in mock Binance client
+    testOrchestrator.mocks.binance.setBalance("BTC", 0.0025);
+    testOrchestrator.mocks.binance.setBalance("USDT", 750);
+
     await components.cycleStateManager.initialize();
     const partialState = await components.cycleStateManager.getCurrentState();
 
     // Should be able to continue from partial state
-    expect(partialState?.status).toBe("READY");
+    expect(partialState?.status).toBe("HOLDING");
     expect(partialState?.purchases_remaining).toBe(7);
     expect(partialState?.btc_accumulated).toBeGreaterThan(0);
 
@@ -499,7 +500,6 @@ describe("Multiple Cycles E2E", () => {
       {
         risePercentage: 0.005,
         dropPercentage: 0.003,
-        driftThresholdPct: 0.005,
         exchangeMinNotional: 10,
       },
       {
