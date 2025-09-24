@@ -245,11 +245,25 @@ export class HistoricalCandleManager extends EventEmitter {
     const recentClosedCandles = candlesToUse.slice(-this.config.maxCandles);
 
     let maxHigh = 0;
+    let athCandle: ExtendedKline | null = null;
     for (const candle of recentClosedCandles) {
       const high = parseFloat(candle.high);
       if (high > maxHigh) {
         maxHigh = high;
+        athCandle = candle;
       }
+    }
+
+    // Log ATH calculation details
+    if (athCandle) {
+      logger.info(`ATH calculated: ${maxHigh.toFixed(2)}`, {
+        symbol: this.symbol,
+        athPrice: maxHigh,
+        athTime: new Date(athCandle.openTime).toISOString(),
+        candlesUsed: recentClosedCandles.length,
+        windowSize: this.config.maxCandles,
+        excludedUnclosed: excludeUnclosed,
+      });
     }
 
     // Cache the result
