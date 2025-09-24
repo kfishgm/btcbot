@@ -110,6 +110,9 @@ async function createDependencies() {
   });
   const candleProcessor = new CandleProcessor();
 
+  // Connect candle processor to WebSocket manager
+  candleProcessor.attachToWebSocketManager(webSocketManager);
+
   const buyTriggerDetector = new BuyTriggerDetector(buyAmountCalculator);
   const sellTriggerDetector = new SellTriggerDetector();
 
@@ -128,17 +131,24 @@ async function createDependencies() {
     "BTCUSDT",
   );
 
-  const buyOrderStateUpdater = new BuyOrderStateUpdater(supabase);
-  const sellOrderStateUpdater = new SellOrderStateUpdater(supabase, {
-    maxPurchases: strategyConfig.maxPurchases,
-  });
-
   let discordNotifier: DiscordNotifier | undefined;
   if (process.env.DISCORD_WEBHOOK_URL) {
     discordNotifier = new DiscordNotifier({
       webhookUrl: process.env.DISCORD_WEBHOOK_URL,
     });
   }
+
+  const buyOrderStateUpdater = new BuyOrderStateUpdater(
+    supabase,
+    discordNotifier,
+  );
+  const sellOrderStateUpdater = new SellOrderStateUpdater(
+    supabase,
+    {
+      maxPurchases: strategyConfig.maxPurchases,
+    },
+    discordNotifier,
+  );
 
   // Add error handler to WebSocketManager to prevent unhandled errors
   webSocketManager.on("error", (error: { message: string; code?: number }) => {
