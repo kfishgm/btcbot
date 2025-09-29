@@ -269,28 +269,48 @@ export class BuyOrderStateUpdater extends EventEmitter {
     orderResult: OrderResult,
     levelsTriggered: number = 1,
   ): StateUpdateData {
-    // Calculate BTC amounts
+    // Calculate BTC amounts according to client's formula:
+    // btc_accum_net = executedQty - feeBTC
     const btcFilled = orderResult.executedQty;
     const btcFee = orderResult.feeBTC;
     const netBtcReceived = btcFilled.sub(btcFee);
 
-    // Calculate USDT amounts
+    // Calculate USDT amounts according to client's formula:
+    // cost_accum_usdt = fillPrice * executedQty
+    // Note: cummulativeQuoteQty from Binance = avgPrice * executedQty
     const usdtSpent = orderResult.cummulativeQuoteQty;
-    const usdtFee = orderResult.feeUSDT;
+    // const usdtFee = orderResult.feeUSDT; // Not used since fees are in BTC for buy orders
     // For Binance: BUY orders only have BTC fees (deducted from received amount)
     // The USDT cost is already the full amount paid (cummulativeQuoteQty)
     // DO NOT add fees - they're already reflected in reduced BTC quantity
-    const totalCostUsdt = usdtSpent; // No fee addition - fees handled via reduced BTC
+    const totalCostUsdt = usdtSpent; // This equals avgPrice * executedQty
 
-    // Debug logging for reference price calculation
-    logger.debug("Reference price calculation inputs:", {
-      btcFilled: btcFilled.toString(),
-      btcFee: btcFee.toString(),
-      netBtcReceived: netBtcReceived.toString(),
-      usdtSpent: usdtSpent.toString(),
-      usdtFee: usdtFee.toString(),
-      totalCostUsdt: totalCostUsdt.toString(),
-      avgPrice: orderResult.avgPrice.toString(),
+    // Debug logging for reference price calculation with client's formula verification
+    const verifyAvgPriceTimesQty = orderResult.avgPrice.mul(
+      orderResult.executedQty,
+    );
+    const commissionRate = new Decimal(0.001); // 0.1% commission
+    const expectedFeeBTC = btcFilled.mul(commissionRate);
+
+    logger.debug("Reference price calculation inputs (client's formula):", {
+      // Client's formula values
+      fillPrice: orderResult.avgPrice.toString(),
+      executedQty: btcFilled.toString(),
+      "fillPrice * executedQty": verifyAvgPriceTimesQty.toString(),
+      cummulativeQuoteQty: usdtSpent.toString(),
+      "Formula match?": verifyAvgPriceTimesQty.sub(usdtSpent).abs().lt(0.01)
+        ? "✅ YES"
+        : "❌ NO",
+
+      // BTC calculations
+      feeBTC_actual: btcFee.toString(),
+      feeBTC_expected: expectedFeeBTC.toString(),
+      "btc_accum_net (executedQty - feeBTC)": netBtcReceived.toString(),
+
+      // USDT calculations
+      cost_accum_usdt: totalCostUsdt.toString(),
+
+      // State values
       currentBtcAccum: currentState.btc_accumulated || 0,
       currentCostAccum: currentState.cost_accum_usdt || 0,
       currentBtcNet: currentState.btc_accum_net || 0,
@@ -328,18 +348,25 @@ export class BuyOrderStateUpdater extends EventEmitter {
       newBtcAccumNet, // Excludes dust - only current cycle BTC
     );
 
-    // More debug logging
-    logger.debug("Reference price calculation results:", {
-      newBtcAccumulated,
-      newCostAccumUsdt,
-      newBtcAccumNet,
-      dustAmount: currentState.btc_dust || 0,
-      calculatedReferencePrice: referencePrice,
-      expectedWithFee: (
-        totalCostUsdt.toNumber() / netBtcReceived.toNumber()
-      ).toFixed(2),
-      avgPriceFromOrder: orderResult.avgPrice.toString(),
-      note: "Reference price excludes dust for accurate cost basis",
+    // More debug logging with client's formula demonstration
+    logger.debug("Reference price calculation results (avg_cost_net):", {
+      // Client's formula: avg_cost_net = cost_accum_usdt / btc_accum_net
+      Formula: "avg_cost_net = cost_accum_usdt / btc_accum_net",
+      cost_accum_usdt: newCostAccumUsdt,
+      btc_accum_net: newBtcAccumNet,
+      "avg_cost_net (reference_price)": referencePrice,
+
+      // Verification
+      "Manual calculation": `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
+      "Fill price (no fees)": orderResult.avgPrice.toString(),
+      "Difference from fill price": `${((referencePrice / orderResult.avgPrice.toNumber() - 1) * 100).toFixed(4)}%`,
+      "Expected ~0.1% higher":
+        referencePrice > orderResult.avgPrice.toNumber() ? "✅ YES" : "❌ NO",
+
+      // Total BTC including dust
+      "btc_accumulated (with dust)": newBtcAccumulated,
+      "Dust amount": currentState.btc_dust || 0,
+      Note: "reference_price uses btc_accum_net (excludes dust) for accurate cost basis",
     });
 
     // Verify reference price accounts for fees
@@ -421,7 +448,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       ath_price: currentState.ath_price, // Preserve ATH price
       status: newStatus,
       buy_index: newBuyIndex,
-      buy_grid: currentState.buy_grid, // Preserve buy_grid
+      buy_grid: currentState.buy_grid || null, // Use the grid from state (which may be newly built)
     };
   }
 
