@@ -33,7 +33,8 @@ describe("SellOrderStateUpdater", () => {
     cost_accum_usdt: 500,
     capital_available: 500,
     purchases_remaining: 4,
-    reference_price: 50000,
+    ath_reference_price: 52000,
+    sell_reference_price: 50000,
     buy_amount: 200,
     buy_anchor_price: null,
     ath_price: 52000,
@@ -102,7 +103,7 @@ describe("SellOrderStateUpdater", () => {
         btc_accum_net: 0.02,
         btc_dust: 0,
         cost_accum_usdt: 1000,
-        reference_price: 50000,
+        sell_reference_price: 50000,
       });
 
       const orderResult = createOrderResult({
@@ -150,7 +151,7 @@ describe("SellOrderStateUpdater", () => {
         btc_accum_net: 0.01,
         btc_dust: 0,
         cost_accum_usdt: 500,
-        reference_price: 50000, // Bought at avg 50k
+        sell_reference_price: 50000, // Bought at avg 50k
         capital_available: 500,
       });
 
@@ -185,7 +186,7 @@ describe("SellOrderStateUpdater", () => {
         btc_accum_net: 0.01,
         btc_dust: 0,
         cost_accum_usdt: 500,
-        reference_price: 50000,
+        sell_reference_price: 50000,
         capital_available: 500,
       });
 
@@ -414,7 +415,7 @@ describe("SellOrderStateUpdater", () => {
       );
     });
 
-    it("should set reference_price to null on cycle reset for fresh start", async () => {
+    it("should set sell_reference_price to null on cycle reset for fresh start", async () => {
       // Arrange
       const currentState = createCycleState({
         btc_accumulated: 0.01,
@@ -432,7 +433,7 @@ describe("SellOrderStateUpdater", () => {
       expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
         "test-cycle-id",
         expect.objectContaining({
-          reference_price: null,
+          sell_reference_price: null,
           ath_price: null,
         }),
       );
@@ -477,7 +478,7 @@ describe("SellOrderStateUpdater", () => {
         btc_accum_net: 0.000001,
         btc_dust: 0,
         cost_accum_usdt: 0.05,
-        reference_price: 50000,
+        sell_reference_price: 50000,
       });
 
       const orderResult = createOrderResult({
@@ -555,7 +556,7 @@ describe("SellOrderStateUpdater", () => {
       const currentState = createCycleState({
         btc_accumulated: 0.01,
         ath_price: 55000,
-        reference_price: 50000,
+        sell_reference_price: 50000,
       });
 
       const orderResult = createOrderResult({
@@ -577,7 +578,7 @@ describe("SellOrderStateUpdater", () => {
           btc_dust: 0.000005, // Dust moved here for next cycle
           cost_accum_usdt: 0, // Reset cost accumulator
           purchases_remaining: 5, // Reset to max purchases (from config)
-          reference_price: null, // Reset to null for fresh cycle
+          sell_reference_price: null, // Reset to null for fresh cycle
           ath_price: null, // Reset to null for fresh cycle
           status: "READY",
           buy_grid: null, // Reset grid

@@ -46,7 +46,8 @@ describe("BuyOrderStateUpdater", () => {
       capital_available: 1000.0,
       btc_accumulated: 0,
       purchases_remaining: 5,
-      reference_price: null,
+      ath_reference_price: 50000.0,
+      sell_reference_price: null,
       buy_anchor_price: null,
       cost_accum_usdt: 0,
       btc_accum_net: 0,
@@ -105,7 +106,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -135,7 +136,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -162,7 +163,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -189,7 +190,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: expectedCapital,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -216,7 +217,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: expectedPurchasesRemaining,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -242,7 +243,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -258,11 +259,11 @@ describe("BuyOrderStateUpdater", () => {
       expect(result.status).toBe("HOLDING");
     });
 
-    it("should recalculate reference_price correctly", async () => {
+    it("should recalculate sell_reference_price correctly", async () => {
       // Arrange
       // cost_accum_usdt = 500.50
       // btc_accum_net = 0.00999
-      // reference_price = 500.50 / 0.00999 = 50150.15 (rounded to 2 decimals)
+      // sell_reference_price = 500.50 / 0.00999 = 50150.15 (rounded to 2 decimals)
       const expectedReferencePrice = 50150.15;
       const expectedUpdatedState = {
         ...mockCycleState,
@@ -272,7 +273,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: expectedReferencePrice,
+        sell_reference_price: expectedReferencePrice,
         status: "HOLDING" as const,
       };
 
@@ -285,7 +286,7 @@ describe("BuyOrderStateUpdater", () => {
       );
 
       // Assert
-      expect(result.reference_price).toBe(expectedReferencePrice);
+      expect(result.sell_reference_price).toBe(expectedReferencePrice);
     });
 
     it("should handle subsequent buy orders (already HOLDING)", async () => {
@@ -294,7 +295,7 @@ describe("BuyOrderStateUpdater", () => {
       mockCycleState.btc_accumulated = 0.005;
       mockCycleState.cost_accum_usdt = 250.0;
       mockCycleState.btc_accum_net = 0.00495;
-      mockCycleState.reference_price = 50505.05;
+      mockCycleState.sell_reference_price = 50505.05;
 
       const expectedUpdatedState = {
         ...mockCycleState,
@@ -303,7 +304,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accum_net: 0.01494, // 0.00495 + 0.00999
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50234.48, // recalculated
+        sell_reference_price: 50234.48, // recalculated
         status: "HOLDING" as const,
       };
 
@@ -334,7 +335,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_accum_net: 0.01, // No BTC fee
         capital_available: 497.5, // 1000 - 500 - 2.50 (includes USDT fee)
         purchases_remaining: 4,
-        reference_price: 50250.0,
+        sell_reference_price: 50250.0,
         status: "HOLDING" as const,
       };
 
@@ -365,7 +366,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 498.5, // 1000 - 500 - 1.50 (includes USDT fee)
         purchases_remaining: 4,
-        reference_price: 50250.25,
+        sell_reference_price: 50250.25,
         status: "HOLDING" as const,
       };
 
@@ -397,7 +398,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 999.95,
         purchases_remaining: 4,
-        reference_price: 51010.1,
+        sell_reference_price: 51010.1,
         status: "HOLDING" as const,
       };
 
@@ -458,7 +459,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 750.0, // 1000 - 250
         purchases_remaining: 4, // Still count as one purchase used
-        reference_price: 50200.4,
+        sell_reference_price: 50200.4,
         status: "HOLDING" as const,
       };
 
@@ -486,7 +487,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -523,7 +524,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         buy_anchor_price: 48500.0, // Should be set to execution price
         status: "HOLDING" as const,
       };
@@ -559,7 +560,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         buy_anchor_price: 49000.0, // Should remain unchanged
         status: "HOLDING" as const,
       };
@@ -592,7 +593,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -625,7 +626,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -657,7 +658,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 833.3335,
         purchases_remaining: 4,
-        reference_price: expectedReferencePrice,
+        sell_reference_price: expectedReferencePrice,
         status: "HOLDING" as const,
       };
 
@@ -670,7 +671,7 @@ describe("BuyOrderStateUpdater", () => {
       );
 
       // Assert
-      expect(result.reference_price).toBe(expectedReferencePrice);
+      expect(result.sell_reference_price).toBe(expectedReferencePrice);
     });
 
     it("should emit events for monitoring", async () => {
@@ -684,7 +685,7 @@ describe("BuyOrderStateUpdater", () => {
         btc_dust: 0,
         capital_available: 500.0,
         purchases_remaining: 4,
-        reference_price: 50150.15,
+        sell_reference_price: 50150.15,
         status: "HOLDING" as const,
       };
 
@@ -769,7 +770,7 @@ describe("BuyOrderStateUpdater", () => {
       expect(updates.btc_accum_net).toBe(0.00999);
       expect(updates.capital_available).toBe(500.0);
       expect(updates.purchases_remaining).toBe(4);
-      expect(updates.reference_price).toBe(50050.05); // 500 / 0.00999
+      expect(updates.sell_reference_price).toBe(50050.05); // 500 / 0.00999
       expect(updates.status).toBe("HOLDING");
     });
 

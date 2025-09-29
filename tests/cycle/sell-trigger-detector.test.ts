@@ -21,7 +21,7 @@ describe("SellTriggerDetector", () => {
     it("should trigger sell when price rises above threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01, // Holding BTC
@@ -64,7 +64,7 @@ describe("SellTriggerDetector", () => {
     it("should trigger sell exactly at threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.005,
@@ -104,7 +104,7 @@ describe("SellTriggerDetector", () => {
     it("should not trigger sell when price is below threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -147,7 +147,7 @@ describe("SellTriggerDetector", () => {
     it("should skip sell when no BTC accumulated", async () => {
       const state: CycleState = {
         status: "READY",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         btc_accumulated: 0, // No BTC to sell
@@ -187,7 +187,7 @@ describe("SellTriggerDetector", () => {
     it("should skip sell when insufficient BTC balance", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01, // Expecting 0.01 BTC
@@ -229,7 +229,7 @@ describe("SellTriggerDetector", () => {
     it("should skip sell when strategy is PAUSED", async () => {
       const state: CycleState = {
         status: "PAUSED", // Strategy paused
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -272,7 +272,7 @@ describe("SellTriggerDetector", () => {
     it("should skip sell when BTC drift exceeds threshold (insufficient BTC)", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -313,7 +313,7 @@ describe("SellTriggerDetector", () => {
     it("should pass drift check when within threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -352,7 +352,7 @@ describe("SellTriggerDetector", () => {
     it("should pass drift check with excess BTC (dust amounts)", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -391,7 +391,7 @@ describe("SellTriggerDetector", () => {
     it("should calculate drift correctly with zero BTC accumulated", async () => {
       const state: CycleState = {
         status: "READY",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         btc_accumulated: 0,
@@ -432,7 +432,7 @@ describe("SellTriggerDetector", () => {
     it("should handle edge case of exact drift threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.1,
@@ -475,7 +475,7 @@ describe("SellTriggerDetector", () => {
     it("should only sell btc_accumulated amount (cycle isolation)", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01, // Only 0.01 BTC from this cycle
@@ -516,7 +516,7 @@ describe("SellTriggerDetector", () => {
     it("should not sell BTC from other sources", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.002, // Small amount from cycle
@@ -559,7 +559,7 @@ describe("SellTriggerDetector", () => {
     it("should handle high precision decimal calculations", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000.12345678,
+        sell_reference_price: 50000.12345678,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.00123456789,
@@ -600,7 +600,7 @@ describe("SellTriggerDetector", () => {
     it("should handle null reference price", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: null, // No reference price set
+        sell_reference_price: null, // No reference price set
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -640,7 +640,7 @@ describe("SellTriggerDetector", () => {
     it("should handle very large numbers", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 1000000,
+        sell_reference_price: 1000000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 1.5,
@@ -680,7 +680,7 @@ describe("SellTriggerDetector", () => {
     it("should handle very small percentages", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -719,7 +719,7 @@ describe("SellTriggerDetector", () => {
     it("should handle very small BTC amounts", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.0002, // Very small BTC amount
@@ -761,7 +761,7 @@ describe("SellTriggerDetector", () => {
     it("should return detailed validation results for successful sell", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -809,7 +809,7 @@ describe("SellTriggerDetector", () => {
     it("should provide clear skip reason for each validation failure", async () => {
       const baseState: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -893,10 +893,10 @@ describe("SellTriggerDetector", () => {
 
   describe("STRATEGY.md Compliance", () => {
     it("should follow exact sell condition formula from STRATEGY.md", async () => {
-      // STRATEGY.md: if (btc_accumulated > 0 AND Close >= reference_price * (1 + %Rise))
+      // STRATEGY.md: if (btc_accumulated > 0 AND Close >= sell_reference_price * (1 + %Rise))
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 60000,
+        sell_reference_price: 60000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.015,
@@ -948,7 +948,7 @@ describe("SellTriggerDetector", () => {
       // Per STRATEGY.md execution order
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -994,7 +994,7 @@ describe("SellTriggerDetector", () => {
       // STRATEGY.md: SELL ALL btc_accumulated  // NEVER partial, always 100% of cycle BTC
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.025678, // Specific amount accumulated
@@ -1042,7 +1042,7 @@ describe("SellTriggerDetector", () => {
 
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -1087,7 +1087,7 @@ describe("SellTriggerDetector", () => {
 
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0, // No BTC, so should not trigger
@@ -1173,7 +1173,7 @@ describe("SellTriggerDetector", () => {
     it("should provide simplified interface via shouldExecuteSell", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -1212,7 +1212,7 @@ describe("SellTriggerDetector", () => {
     it("should provide validation details for debugging", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -1256,7 +1256,7 @@ describe("SellTriggerDetector", () => {
     it("should check if conditions would trigger a sell at specific price", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -1288,7 +1288,7 @@ describe("SellTriggerDetector", () => {
     it("should get the next sell threshold price", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 60000,
+        sell_reference_price: 60000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -1309,7 +1309,7 @@ describe("SellTriggerDetector", () => {
     it("should return null threshold when no reference price", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: null,
+        sell_reference_price: null,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -1329,7 +1329,7 @@ describe("SellTriggerDetector", () => {
     it("should validate state for sell trigger detection", async () => {
       const validState: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.01,
@@ -1348,7 +1348,7 @@ describe("SellTriggerDetector", () => {
 
       result = detector.validateState({
         ...validState,
-        reference_price: -50000,
+        sell_reference_price: -50000,
       });
       expect(result.isValid).toBe(false);
       expect(result.error).toContain("Negative reference price");
@@ -1392,7 +1392,7 @@ describe("SellTriggerDetector", () => {
     it("should get sell amount for the cycle", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.02345678, // Specific amount
@@ -1408,7 +1408,7 @@ describe("SellTriggerDetector", () => {
     it("should skip sell when status is READY (not holding)", async () => {
       const state: CycleState = {
         status: "READY", // Not in HOLDING status
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         btc_accumulated: 0, // No BTC yet
@@ -1448,7 +1448,7 @@ describe("SellTriggerDetector", () => {
     it("should skip sell when minimum notional not met", async () => {
       const state: CycleState = {
         status: "HOLDING",
-        reference_price: 50000,
+        sell_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 0,
         btc_accumulated: 0.0001, // Very small amount

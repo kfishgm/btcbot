@@ -32,7 +32,8 @@ describe("CycleStateManager", () => {
     capital_available: 300,
     btc_accumulated: 0,
     purchases_remaining: 10,
-    reference_price: null,
+    ath_reference_price: null,
+    sell_reference_price: null,
     cost_accum_usdt: 0,
     btc_accum_net: 0,
     btc_dust: 0,
@@ -165,7 +166,7 @@ describe("CycleStateManager", () => {
         });
       });
 
-      it("should set reference_price and ath_price to null initially", async () => {
+      it("should set ath_reference_price and sell_reference_price to null initially", async () => {
         cycleStateManager = new CycleStateManager(
           mockSupabase,
           config,
@@ -175,7 +176,8 @@ describe("CycleStateManager", () => {
         await cycleStateManager.initialize();
 
         const state = await cycleStateManager.getCurrentState();
-        expect(state?.reference_price).toBeNull();
+        expect(state?.ath_reference_price).toBeNull();
+        expect(state?.sell_reference_price).toBeNull();
         expect(state?.ath_price).toBeNull();
       });
 
@@ -203,7 +205,7 @@ describe("CycleStateManager", () => {
           capital_available: 150,
           btc_accumulated: 0.005,
           purchases_remaining: 5,
-          reference_price: 30000,
+          sell_reference_price: 30000,
           cost_accum_usdt: 150,
           btc_accum_net: 0.005,
           btc_dust: 0,
@@ -339,7 +341,7 @@ describe("CycleStateManager", () => {
           capital_available: 300,
           btc_accumulated: 0,
           purchases_remaining: 10,
-          reference_price: null,
+          sell_reference_price: null,
           cost_accum_usdt: 0,
           btc_accum_net: 0,
           btc_dust: 0,
@@ -373,14 +375,14 @@ describe("CycleStateManager", () => {
         expect(state?.status).toBe("PAUSED");
       });
 
-      it("should detect missing reference_price when holding", async () => {
+      it("should detect missing sell_reference_price when holding", async () => {
         const corruptedState = createValidCycleState({
           id: "corrupt-id",
           status: "HOLDING",
           capital_available: 150,
           btc_accumulated: 0.005,
           purchases_remaining: 5,
-          reference_price: null,
+          sell_reference_price: null,
           cost_accum_usdt: 150,
           btc_accum_net: 0.005,
           btc_dust: 0,
@@ -579,13 +581,13 @@ describe("CycleStateManager", () => {
       expect(cycleStateManager.validateState(invalidState)).toBe(false);
     });
 
-    it("should validate reference_price exists when holding", () => {
+    it("should validate sell_reference_price exists when holding", () => {
       const holdingWithPrice = createValidCycleState({
         status: "HOLDING",
         capital_available: 150,
         btc_accumulated: 0.005,
         purchases_remaining: 5,
-        reference_price: 30000,
+        sell_reference_price: 30000,
         cost_accum_usdt: 150,
         btc_accum_net: 0.005,
         btc_dust: 0,
@@ -597,7 +599,8 @@ describe("CycleStateManager", () => {
 
       const holdingWithoutPrice = {
         ...holdingWithPrice,
-        reference_price: null,
+        ath_reference_price: null,
+        sell_reference_price: null,
       };
       expect(cycleStateManager.validateState(holdingWithoutPrice)).toBe(false);
     });
@@ -628,7 +631,7 @@ describe("CycleStateManager", () => {
         status: "HOLDING",
         capital_available: 950,
         btc_accumulated: 0.05,
-        reference_price: 50000,
+        sell_reference_price: 50000,
       });
 
       const completionData = {
@@ -660,7 +663,7 @@ describe("CycleStateManager", () => {
                     btc_dust: 0.00000278,
                     purchases_remaining: 10,
                     buy_amount: 105,
-                    reference_price: null,
+                    sell_reference_price: null,
                     ath_price: null,
                     previous_cycle_id: "old-cycle-id",
                     strategy_config_id: "strategy-123",
@@ -714,7 +717,8 @@ describe("CycleStateManager", () => {
         btc_accumulated: 0.00000278,
         btc_dust: 0.00000278,
         purchases_remaining: 10,
-        reference_price: null,
+        ath_reference_price: null,
+        sell_reference_price: null,
         previous_cycle_id: "old-cycle-id",
       });
 

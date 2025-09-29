@@ -115,7 +115,8 @@ export class CycleStateManager {
           capital_available: existingState.capital_available,
           btc_accumulated: existingState.btc_accumulated,
           purchases_remaining: existingState.purchases_remaining,
-          reference_price: existingState.reference_price,
+          sell_reference_price: existingState.sell_reference_price,
+          ath_reference_price: existingState.ath_reference_price,
         });
       }
     } catch (error) {
@@ -134,7 +135,8 @@ export class CycleStateManager {
       capital_available: this.config.initialCapitalUSDT,
       btc_accumulated: 0,
       purchases_remaining: this.config.maxPurchases,
-      reference_price: null,
+      sell_reference_price: null,
+      ath_reference_price: null,
       cost_accum_usdt: 0,
       btc_accum_net: 0,
       btc_dust: 0,
@@ -255,12 +257,12 @@ export class CycleStateManager {
           "BTCUSDT",
         );
 
-        if (isTradable && !state.reference_price) {
+        if (isTradable && !state.sell_reference_price) {
           const minTradable = this.tradingRules.getMinTradableAmount("BTCUSDT");
           errors.push({
-            field: "reference_price",
-            error: `Reference price must be set when holding tradable BTC (≥ ${minTradable} BTC)`,
-            value: state.reference_price,
+            field: "sell_reference_price",
+            error: `Sell reference price must be set when holding tradable BTC (≥ ${minTradable} BTC)`,
+            value: state.sell_reference_price,
           });
         }
       } catch (error) {
@@ -269,11 +271,11 @@ export class CycleStateManager {
           "Could not fetch trading rules for validation, using fallback",
           { error },
         );
-        if (meaningfulBtc >= 0.00001 && !state.reference_price) {
+        if (meaningfulBtc >= 0.00001 && !state.sell_reference_price) {
           errors.push({
-            field: "reference_price",
-            error: "Reference price must be set when holding tradable BTC",
-            value: state.reference_price,
+            field: "sell_reference_price",
+            error: "Sell reference price must be set when holding tradable BTC",
+            value: state.sell_reference_price,
           });
         }
       }
@@ -383,7 +385,8 @@ export class CycleStateManager {
         purchases_remaining: data.purchases_remaining,
         buy_index: data.buy_index,
         ath_price: data.ath_price,
-        reference_price: data.reference_price,
+        sell_reference_price: data.sell_reference_price,
+        ath_reference_price: data.ath_reference_price,
       });
     }
 
@@ -398,7 +401,8 @@ export class CycleStateManager {
     this.currentState = newState;
     logger.info("Updated cached state", {
       btc_accumulated: newState.btc_accumulated,
-      reference_price: newState.reference_price,
+      sell_reference_price: newState.sell_reference_price,
+      ath_reference_price: newState.ath_reference_price,
       status: newState.status,
     });
   }
@@ -508,7 +512,8 @@ export class CycleStateManager {
       cost_accum_usdt: 0,
       purchases_remaining: strategyConfig.max_purchases,
       buy_amount: buyAmount,
-      reference_price: null,
+      sell_reference_price: null,
+      ath_reference_price: null,
       ath_price: null,
       buy_anchor_price: null,
       buy_grid: null,

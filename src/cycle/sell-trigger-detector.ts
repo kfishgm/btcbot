@@ -4,9 +4,9 @@
  * Implements sell trigger logic from STRATEGY_UPDATED.md:
  * - SELL CONDITION: if (btc_accumulated > 0 AND Close >= avg_cost * (1 + %Rise))
  * - avg_cost = cost_accum_usdt / btc_accum_net
- * - IMPORTANT: avg_cost is the economic reference, NOT the same as reference_price
- *   - reference_price = ATH when no BTC held (for grid anchoring)
- *   - reference_price = avg_cost when BTC held (for sell trigger)
+ * - IMPORTANT: Now using separate fields:
+ *   - ath_reference_price = ATH from rolling window (for first buy trigger)
+ *   - sell_reference_price = avg_cost when BTC held (for sell trigger)
  *
  * Pre-sell validations:
  * 1. Strategy is not PAUSED
@@ -23,7 +23,7 @@ import type { CommissionManager } from "../exchange/commission-manager.js";
 
 export interface CycleState {
   status: "READY" | "HOLDING" | "PAUSED";
-  reference_price: number | null;
+  sell_reference_price: number | null; // Average cost for sell trigger
   btc_accumulated: number;
   purchases_remaining: number;
   capital_available: number;
@@ -135,18 +135,21 @@ export class SellTriggerDetector {
       }
     }
 
-    // 3. Check if average cost is set (stored as reference_price)
-    if (state.reference_price === null || state.reference_price === undefined) {
+    // 3. Check if average cost is set (stored as sell_reference_price)
+    if (
+      state.sell_reference_price === null ||
+      state.sell_reference_price === undefined
+    ) {
       return {
         shouldSell: false,
-        reason: "Average cost is not set",
+        reason: "Average cost is not set (no sell reference price)",
         validations,
       };
     }
 
     // 4. Check if price meets sell threshold
     const sellThreshold = await this.calculateSellThreshold(
-      state.reference_price,
+      state.sell_reference_price,
       config.risePercentage,
     );
     validations.priceThresholdMet = candle.close >= sellThreshold;
@@ -188,7 +191,7 @@ export class SellTriggerDetector {
 
   /**
    * Calculate the sell threshold price accounting for commission
-   * @param referencePrice Average cost (reference_price = cost_accum_usdt / btc_accum_net)
+   * @param referencePrice Average cost (sell_reference_price = cost_accum_usdt / btc_accum_net)
    * @param risePercentage Rise percentage (e.g., 0.03 for 3%)
    * @returns Sell threshold price adjusted for commission
    */
@@ -377,12 +380,12 @@ export class SellTriggerDetector {
     state: CycleState,
     config: TradingConfig,
   ): Promise<number | null> {
-    if (state.reference_price === null) {
+    if (state.sell_reference_price === null) {
       return null;
     }
 
     return await this.calculateSellThreshold(
-      state.reference_price,
+      state.sell_reference_price,
       config.risePercentage,
     );
   }
@@ -408,8 +411,8 @@ export class SellTriggerDetector {
       return { isValid: false, error: "Negative BTC accumulated" };
     }
 
-    if (state.reference_price !== null && state.reference_price < 0) {
-      return { isValid: false, error: "Negative reference price" };
+    if (state.sell_reference_price !== null && state.sell_reference_price < 0) {
+      return { isValid: false, error: "Negative sell reference price" };
     }
 
     return { isValid: true };

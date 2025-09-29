@@ -59,7 +59,8 @@ describe("Buy Anchor Price End-to-End", () => {
       capital_available: 1000.0,
       btc_accumulated: 0,
       purchases_remaining: 10,
-      reference_price: 120000, // ATH
+      ath_reference_price: 120000, // ATH
+      sell_reference_price: null,
       buy_anchor_price: null, // No anchor yet
       cost_accum_usdt: 0,
       btc_accum_net: 0,
@@ -156,7 +157,8 @@ describe("Buy Anchor Price End-to-End", () => {
 
       const buyTriggerState: BuyTriggerCycleState = {
         status: mockCycleState.status as "READY" | "HOLDING" | "PAUSED",
-        reference_price: mockCycleState.reference_price,
+        ath_reference_price: mockCycleState.ath_reference_price,
+        sell_reference_price: mockCycleState.sell_reference_price,
         purchases_remaining: mockCycleState.purchases_remaining,
         capital_available: mockCycleState.capital_available,
         buy_amount: mockCycleState.buy_amount,
@@ -198,7 +200,7 @@ describe("Buy Anchor Price End-to-End", () => {
         btc_accumulated: 0.001,
         cost_accum_usdt: 117.5,
         btc_accum_net: 0.000999,
-        reference_price: 117617.62,
+        sell_reference_price: 117617.62,
       };
     });
 
@@ -229,7 +231,8 @@ describe("Buy Anchor Price End-to-End", () => {
 
       const buyTriggerState: BuyTriggerCycleState = {
         status: mockCycleState.status as "READY" | "HOLDING" | "PAUSED",
-        reference_price: mockCycleState.reference_price,
+        ath_reference_price: mockCycleState.ath_reference_price,
+        sell_reference_price: mockCycleState.sell_reference_price,
         purchases_remaining: mockCycleState.purchases_remaining,
         capital_available: mockCycleState.capital_available,
         buy_amount: mockCycleState.buy_amount,
@@ -445,7 +448,8 @@ describe("Buy Anchor Price End-to-End", () => {
 
       const buyTriggerState: BuyTriggerCycleState = {
         status: mockCycleState.status as "READY" | "HOLDING" | "PAUSED",
-        reference_price: mockCycleState.reference_price,
+        ath_reference_price: mockCycleState.ath_reference_price,
+        sell_reference_price: mockCycleState.sell_reference_price,
         purchases_remaining: mockCycleState.purchases_remaining,
         capital_available: mockCycleState.capital_available,
         buy_amount: mockCycleState.buy_amount,

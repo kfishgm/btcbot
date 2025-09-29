@@ -112,7 +112,6 @@ describe("Smart Rounding for Buy Orders", () => {
       const buyAmount = 30;
       const prices = [100000, 110000, 120000, 130000, 140000];
       let totalSpent = 0;
-      let totalBTC = 0;
 
       for (const price of prices) {
         const rawQuantity = buyAmount / price;
@@ -125,7 +124,6 @@ describe("Smart Rounding for Buy Orders", () => {
 
         const actualSpend = rounded * price;
         totalSpent += actualSpend;
-        totalBTC += rounded;
 
         // Each purchase should be close to target (within reason)
         // At some prices, rounding down is necessary to avoid excessive overspend

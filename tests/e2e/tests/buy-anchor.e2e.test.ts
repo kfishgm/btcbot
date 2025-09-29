@@ -33,7 +33,7 @@ describe("Buy Anchor E2E", () => {
       capital_available: 1000,
       btc_accumulated: 0,
       purchases_remaining: 10,
-      reference_price: 100000,
+      ath_reference_price: 100000,
       ath_price: 100000,
       buy_amount: 100,
       buy_anchor_price: null,
@@ -89,7 +89,8 @@ describe("Buy Anchor E2E", () => {
 
           const triggerState = {
             status: currentState.status as "READY" | "HOLDING" | "PAUSED",
-            reference_price: currentState.reference_price,
+            ath_reference_price: currentState.ath_reference_price,
+            sell_reference_price: currentState.sell_reference_price,
             purchases_remaining: currentState.purchases_remaining,
             capital_available: currentState.capital_available,
             buy_amount: currentState.buy_amount,
@@ -100,25 +101,26 @@ describe("Buy Anchor E2E", () => {
             buy_index: currentState.buy_index || 0,
           };
 
-          const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
-            triggerState,
-            {
-              dropPercentage: 0.003,
-              risePercentage: 0.005,
-              maxPurchases: 10,
-              minBuyUSDT: 10,
-              exchangeMinNotional: 10,
-            },
-            {
-              close: currentPrice,
-              high: currentPrice,
-              low: currentPrice,
-              open: currentPrice,
-              volume: 0,
-              timestamp: Date.now(),
-            },
-            balances,
-          );
+          const buyTrigger =
+            await components.buyTriggerDetector.checkBuyTrigger(
+              triggerState,
+              {
+                dropPercentage: 0.003,
+                risePercentage: 0.005,
+                maxPurchases: 10,
+                minBuyUSDT: 10,
+                exchangeMinNotional: 10,
+              },
+              {
+                close: currentPrice,
+                high: currentPrice,
+                low: currentPrice,
+                open: currentPrice,
+                volume: 0,
+                timestamp: Date.now(),
+              },
+              balances,
+            );
 
           if (buyTrigger.shouldBuy && buyTrigger.buyAmount) {
             console.log(
@@ -157,7 +159,7 @@ describe("Buy Anchor E2E", () => {
               currentState.btc_accumulated > 0
             ) {
               const oldValue =
-                (currentState.reference_price || currentPrice) *
+                (currentState.sell_reference_price || currentPrice) *
                 currentState.btc_accumulated;
               const newValue =
                 currentPrice * (buyTrigger.buyAmount / currentPrice) * 0.999;
@@ -170,7 +172,7 @@ describe("Buy Anchor E2E", () => {
               capital_available: newCapital,
               btc_accumulated: newBtcAccum,
               purchases_remaining: newPurchases,
-              reference_price: newRefPrice,
+              sell_reference_price: newRefPrice,
               buy_anchor_price: currentState.buy_anchor_price || currentPrice,
               buy_grid: buyTrigger.newGrid || currentState.buy_grid,
               buy_index:
@@ -266,7 +268,8 @@ describe("Buy Anchor E2E", () => {
     const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: updatedState!.status as "READY" | "HOLDING" | "PAUSED",
-        reference_price: updatedState!.reference_price,
+        ath_reference_price: updatedState!.ath_reference_price,
+        sell_reference_price: updatedState!.sell_reference_price,
         purchases_remaining: updatedState!.purchases_remaining,
         capital_available: updatedState!.capital_available,
         buy_amount: updatedState!.buy_amount,

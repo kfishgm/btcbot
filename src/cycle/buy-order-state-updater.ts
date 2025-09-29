@@ -25,7 +25,7 @@ export interface StateUpdateData {
   btc_dust?: number | null;
   capital_available: number;
   purchases_remaining: number;
-  reference_price: number;
+  sell_reference_price: number; // Average cost basis for sells
   status: "READY" | "HOLDING" | "PAUSED";
   buy_index?: number;
   buy_grid?: number[] | null;
@@ -93,7 +93,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
 
       logger.info("Calculated updates", {
         btc_accumulated: updates.btc_accumulated,
-        reference_price: updates.reference_price,
+        sell_reference_price: updates.sell_reference_price,
         capital_available: updates.capital_available,
       });
 
@@ -133,7 +133,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
         updateSummary: {
           btcAdded: orderResult.executedQty.sub(orderResult.feeBTC).toNumber(),
           usdtSpent: orderResult.cummulativeQuoteQty.toNumber(),
-          newReferencePrice: updates.reference_price,
+          newReferencePrice: updates.sell_reference_price,
           purchasesUsed: levelsTriggered,
         },
       };
@@ -148,40 +148,70 @@ export class BuyOrderStateUpdater extends EventEmitter {
       // Send Discord notification
       if (this.discordNotifier) {
         try {
+          // Calculate target sell price (3% profit after fees)
+          const targetSellPrice = (updates.sell_reference_price * 1.03) / 0.999;
+          const purchaseNumber =
+            currentState.purchases_remaining + 1 - updates.purchases_remaining;
+          const totalPurchases = currentState.purchases_remaining + 1;
+
           const fields = [
             {
-              name: "💵 Buy Price",
+              name: "💰 Buy Price",
               value: `$${orderResult.avgPrice.toFixed(2)}`,
               inline: false,
             },
             {
-              name: "🔢 Quantity",
+              name: "📦 BTC Bought",
               value: `${orderResult.executedQty.toFixed(8)} BTC`,
               inline: false,
             },
             {
-              name: "💰 Total Cost",
-              value: `${orderResult.cummulativeQuoteQty.toFixed(2)} USDT`,
+              name: "💵 USDT Spent",
+              value: `$${orderResult.cummulativeQuoteQty.toFixed(2)}`,
               inline: false,
             },
             {
-              name: "💸 Commission Paid",
-              value: `${orderResult.feeBTC.toFixed(8)} BTC`,
+              name: "📈 ATH Reference Price",
+              value: currentState.ath_reference_price
+                ? `$${currentState.ath_reference_price.toFixed(2)}`
+                : "Not set",
               inline: false,
             },
             {
-              name: "📊 New Reference Price",
-              value: `$${updates.reference_price.toFixed(2)}`,
+              name: "⚓ Buy Anchor Price",
+              value: updates.buy_anchor_price
+                ? `$${updates.buy_anchor_price.toFixed(2)}`
+                : "Not set",
               inline: false,
             },
             {
-              name: "🛒 Purchases Remaining",
-              value: updates.purchases_remaining.toString(),
+              name: "💹 Sell Reference Price",
+              value: `$${updates.sell_reference_price.toFixed(2)}`,
               inline: false,
             },
             {
-              name: "📉 BTC Accumulated",
+              name: "🎯 Target Sell Price",
+              value: `$${targetSellPrice.toFixed(2)} (+3% after fees)`,
+              inline: false,
+            },
+            {
+              name: "🛒 Purchases",
+              value: `${purchaseNumber}/${totalPurchases}`,
+              inline: false,
+            },
+            {
+              name: "📊 Total BTC Held",
               value: `${updates.btc_accumulated.toFixed(8)} BTC`,
+              inline: false,
+            },
+            {
+              name: "💼 Capital Remaining",
+              value: `$${updates.capital_available.toFixed(2)}`,
+              inline: false,
+            },
+            {
+              name: "🔄 Cycle Status",
+              value: updates.status,
               inline: false,
             },
           ];
@@ -354,7 +384,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       Formula: "avg_cost_net = cost_accum_usdt / btc_accum_net",
       cost_accum_usdt: newCostAccumUsdt,
       btc_accum_net: newBtcAccumNet,
-      "avg_cost_net (reference_price)": referencePrice,
+      "avg_cost_net (sell_reference_price)": referencePrice,
 
       // Verification
       "Manual calculation": `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
@@ -366,7 +396,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       // Total BTC including dust
       "btc_accumulated (with dust)": newBtcAccumulated,
       "Dust amount": currentState.btc_dust || 0,
-      Note: "reference_price uses btc_accum_net (excludes dust) for accurate cost basis",
+      Note: "sell_reference_price uses btc_accum_net (excludes dust) for accurate cost basis",
     });
 
     // Verify reference price accounts for fees
@@ -378,7 +408,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       logger.warn(
         "⚠️ Reference price is suspiciously close to average price!",
         {
-          new_reference_price: referencePrice,
+          new_sell_reference_price: referencePrice,
           cost_accum_usdt: newCostAccumUsdt,
           btc_accum_net: newBtcAccumNet,
           formula: `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
@@ -388,8 +418,8 @@ export class BuyOrderStateUpdater extends EventEmitter {
         },
       );
     } else {
-      logger.info("✅ Reference price calculated with fee accounting", {
-        new_reference_price: referencePrice,
+      logger.info("✅ Sell reference price calculated with fee accounting", {
+        new_sell_reference_price: referencePrice,
         cost_accum_usdt: newCostAccumUsdt,
         btc_accum_net: newBtcAccumNet,
         formula: `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
@@ -429,7 +459,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
         quantizedAnchorPrice: buyAnchorPrice,
         tickSize: this.tickSize,
         athPrice: currentState.ath_price,
-        referencePrice: currentState.reference_price,
+        sellReferencePrice: currentState.sell_reference_price,
       });
     }
 
@@ -440,7 +470,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       btc_dust: currentState.btc_dust, // Preserve dust from previous cycles
       capital_available: newCapitalAvailable,
       purchases_remaining: newPurchasesRemaining,
-      reference_price: referencePrice,
+      sell_reference_price: referencePrice, // This is the average cost basis
       buy_anchor_price: buyAnchorPrice,
       ath_price: currentState.ath_price, // Preserve ATH price
       status: newStatus,

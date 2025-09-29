@@ -186,7 +186,8 @@ export class MainOrchestrator extends EventEmitter {
           capitalAvailable: cycleState.capital_available,
           btcAccumulated: cycleState.btc_accumulated,
           purchasesRemaining: cycleState.purchases_remaining,
-          referencePrice: cycleState.reference_price,
+          athReferencePrice: cycleState.ath_reference_price,
+          sellReferencePrice: cycleState.sell_reference_price,
           buyAmount: cycleState.buy_amount,
         });
       }
@@ -422,15 +423,16 @@ export class MainOrchestrator extends EventEmitter {
         const previousStoredATH = workingState.ath_price || 0;
         workingState.ath_price = currentATH;
 
-        // Update reference price only if not holding meaningful BTC
+        // Update ATH reference price only if not holding meaningful BTC (for first buy trigger)
         if (shouldUpdateReferencePrice) {
-          workingState.reference_price = currentATH;
+          workingState.ath_reference_price = currentATH;
           logger.info(
-            `ATH tracked: ${currentATH.toFixed(2)}, Reference updated (${isDust ? "dust amount" : "not holding"})`,
+            `ATH tracked: ${currentATH.toFixed(2)}, ATH Reference updated (${isDust ? "dust amount" : "not holding"})`,
           );
         } else {
+          // When holding, ATH reference stays as-is, sell reference is used for sell trigger
           logger.info(
-            `ATH tracked: ${currentATH.toFixed(2)}, Reference kept at: ${workingState.reference_price?.toFixed(2) || "N/A"} (holding BTC)`,
+            `ATH tracked: ${currentATH.toFixed(2)}, ATH Reference: ${workingState.ath_reference_price?.toFixed(2) || "N/A"}, Sell Reference: ${workingState.sell_reference_price?.toFixed(2) || "N/A"} (holding BTC)`,
           );
         }
 
@@ -457,20 +459,20 @@ export class MainOrchestrator extends EventEmitter {
             workingState.id,
             {
               ath_price: currentATH,
-              reference_price: shouldUpdateReferencePrice
+              ath_reference_price: shouldUpdateReferencePrice
                 ? currentATH
-                : workingState.reference_price,
+                : workingState.ath_reference_price,
             },
           );
         } else if (
           shouldUpdateReferencePrice &&
-          workingState.reference_price !== currentATH
+          workingState.ath_reference_price !== currentATH
         ) {
-          // Even if ATH didn't change, we might need to update reference price for dust
+          // Even if ATH didn't change, we might need to update ATH reference price for dust
           await this.config.stateTransactionManager.updateStateAtomic(
             workingState.id,
             {
-              reference_price: currentATH,
+              ath_reference_price: currentATH,
             },
           );
         }
@@ -491,12 +493,12 @@ export class MainOrchestrator extends EventEmitter {
         // Calculate sell details for logging
         // Use commission-adjusted formula to match actual sell trigger
         const commissionRate = 0.001; // Default 0.1% commission
-        const referencePrice =
-          typeof workingState.reference_price === "number"
-            ? workingState.reference_price
+        const sellReferencePrice =
+          typeof workingState.sell_reference_price === "number"
+            ? workingState.sell_reference_price
             : 0;
-        const sellTarget = referencePrice
-          ? (referencePrice *
+        const sellTarget = sellReferencePrice
+          ? (sellReferencePrice *
               (1 + (this.strategyConfig?.risePercentage || 0.03))) /
             (1 - commissionRate)
           : null;
@@ -513,7 +515,7 @@ export class MainOrchestrator extends EventEmitter {
           await this.config.sellTriggerDetector.checkSellTrigger(
             {
               status: workingState.status as "READY" | "HOLDING" | "PAUSED",
-              reference_price: workingState.reference_price,
+              sell_reference_price: workingState.sell_reference_price,
               btc_accumulated: workingState.btc_accumulated || 0,
               purchases_remaining: workingState.purchases_remaining,
               capital_available: workingState.capital_available,
@@ -565,7 +567,8 @@ export class MainOrchestrator extends EventEmitter {
               capital_available: workingState.capital_available,
               cost_accum_usdt: workingState.cost_accum_usdt || 0,
               purchases_remaining: workingState.purchases_remaining,
-              reference_price: workingState.reference_price || 0,
+              ath_reference_price: workingState.ath_reference_price || 0,
+              sell_reference_price: workingState.sell_reference_price || 0,
               updated_at: workingState.updated_at || new Date().toISOString(),
             };
             const updateResult =
@@ -661,7 +664,8 @@ export class MainOrchestrator extends EventEmitter {
           await this.config.buyTriggerDetector.checkBuyTrigger(
             {
               status: workingState.status as "READY" | "HOLDING" | "PAUSED",
-              reference_price: workingState.reference_price,
+              ath_reference_price: workingState.ath_reference_price,
+              sell_reference_price: workingState.sell_reference_price,
               purchases_remaining: workingState.purchases_remaining,
               capital_available: workingState.capital_available,
               buy_amount: workingState.buy_amount,
@@ -700,8 +704,8 @@ export class MainOrchestrator extends EventEmitter {
             : null;
         const buyTarget =
           currentGridLevel ||
-          (workingState.reference_price
-            ? workingState.reference_price *
+          (workingState.ath_reference_price
+            ? workingState.ath_reference_price *
               (1 - (this.strategyConfig?.dropPercentage || 0.003))
             : null);
         const percentAway = buyTarget
@@ -747,7 +751,8 @@ export class MainOrchestrator extends EventEmitter {
               capital_available: workingState.capital_available,
               cost_accum_usdt: workingState.cost_accum_usdt || 0,
               purchases_remaining: workingState.purchases_remaining,
-              reference_price: workingState.reference_price || 0,
+              ath_reference_price: workingState.ath_reference_price || 0,
+              sell_reference_price: workingState.sell_reference_price || 0,
               updated_at: workingState.updated_at || new Date().toISOString(),
             };
             const updatedState =
@@ -759,7 +764,7 @@ export class MainOrchestrator extends EventEmitter {
             logger.info(`Buy order executed - State updated`, {
               btc_accumulated: updatedState.btc_accumulated,
               purchases_remaining: updatedState.purchases_remaining,
-              reference_price: updatedState.reference_price,
+              sell_reference_price: updatedState.sell_reference_price,
               buy_anchor_price: updatedState.buy_anchor_price,
               grid_level: updatedState.buy_index,
             });

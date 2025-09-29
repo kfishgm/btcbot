@@ -71,7 +71,7 @@ describe("Edge Cases E2E", () => {
       capital_available: 100, // Only enough for 1 more purchase
       btc_accumulated: 0.009,
       purchases_remaining: 1, // Last purchase available
-      reference_price: 98500,
+      sell_reference_price: 98500,
       ath_price: 100000,
       buy_amount: 100,
       buy_anchor_price: 99700,
@@ -97,7 +97,8 @@ describe("Edge Cases E2E", () => {
     const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
-        reference_price: 98500,
+        ath_reference_price: 100000,
+        sell_reference_price: 98500,
         purchases_remaining: 1,
         capital_available: 100,
         buy_amount: 100,
@@ -150,7 +151,7 @@ describe("Edge Cases E2E", () => {
       capital_available: 5, // Below minimum buy amount
       btc_accumulated: 0.001,
       purchases_remaining: 5,
-      reference_price: 99500,
+      sell_reference_price: 99500,
       ath_price: 100000,
       buy_amount: 100,
       buy_anchor_price: 99700,
@@ -173,7 +174,8 @@ describe("Edge Cases E2E", () => {
     const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
-        reference_price: 99500,
+        ath_reference_price: 100000,
+        sell_reference_price: 99500,
         purchases_remaining: 5,
         capital_available: 5, // Below minimum
         buy_amount: 100,
@@ -216,7 +218,7 @@ describe("Edge Cases E2E", () => {
       btc_accumulated: 0.01, // Increased to meet minimum notional
       btc_dust: 0.00000123, // Dust from fees/rounding
       purchases_remaining: 5,
-      reference_price: 99500,
+      sell_reference_price: 99500,
       ath_price: 100000,
       buy_amount: 100,
       buy_anchor_price: 99700,
@@ -250,7 +252,7 @@ describe("Edge Cases E2E", () => {
     const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
-        reference_price: 99500,
+        sell_reference_price: 99500,
         purchases_remaining: 5,
         capital_available: 500,
         btc_accumulated: 0.01,
@@ -295,7 +297,8 @@ describe("Edge Cases E2E", () => {
     const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
-        reference_price: 100000,
+        ath_reference_price: 100000,
+        sell_reference_price: 100000,
         purchases_remaining: 10,
         capital_available: 9, // Only $9 available
         buy_amount: 9,
@@ -339,7 +342,7 @@ describe("Edge Cases E2E", () => {
       capital_available: 1000,
       btc_accumulated: 0,
       purchases_remaining: 10,
-      reference_price: 100000,
+      sell_reference_price: 100000,
       ath_price: 100000,
       buy_amount: 100,
       buy_anchor_price: null,
@@ -356,7 +359,8 @@ describe("Edge Cases E2E", () => {
     const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
-        reference_price: 100000,
+        ath_reference_price: 100000,
+        sell_reference_price: 100000,
         purchases_remaining: 10,
         capital_available: 1000,
         buy_amount: 100,
@@ -407,7 +411,7 @@ describe("Edge Cases E2E", () => {
       capital_available: 650,
       btc_accumulated: 0.0035,
       purchases_remaining: 6,
-      reference_price: 99200,
+      sell_reference_price: 99200,
       ath_price: 100000,
       buy_amount: 108.33, // Adjusted for remaining purchases
       buy_anchor_price: 99700,

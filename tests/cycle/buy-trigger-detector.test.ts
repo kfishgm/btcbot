@@ -20,7 +20,8 @@ describe("BuyTriggerDetector", () => {
     overrides: Partial<CycleState> = {},
   ): CycleState => ({
     status: "READY",
-    reference_price: 50000,
+    ath_reference_price: 50000,
+    sell_reference_price: null,
     purchases_remaining: 5,
     capital_available: 500,
     buy_amount: 100,
@@ -124,7 +125,7 @@ describe("BuyTriggerDetector", () => {
     it("should trigger buy exactly at threshold", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 3,
         capital_available: 300,
         buy_amount: 100,
@@ -166,7 +167,7 @@ describe("BuyTriggerDetector", () => {
     it("should not trigger buy when price is above threshold", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -208,7 +209,7 @@ describe("BuyTriggerDetector", () => {
     it("should skip buy when no purchases remaining", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 0, // No purchases left
         capital_available: 500,
         buy_amount: 100,
@@ -247,7 +248,7 @@ describe("BuyTriggerDetector", () => {
     it("should skip buy when insufficient capital", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 5, // Very low capital
         buy_amount: 100,
@@ -295,7 +296,7 @@ describe("BuyTriggerDetector", () => {
     it("should skip buy when strategy is PAUSED", async () => {
       const state = createCycleState({
         status: "PAUSED", // Strategy paused
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -335,7 +336,7 @@ describe("BuyTriggerDetector", () => {
     it("should skip buy when amount below minimum", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 1,
         capital_available: 5, // Very small capital
         buy_amount: 100,
@@ -383,7 +384,7 @@ describe("BuyTriggerDetector", () => {
     it("should trigger buy regardless of balance mismatch (retry handles)", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -425,7 +426,7 @@ describe("BuyTriggerDetector", () => {
     it("should pass drift check when within threshold", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -466,7 +467,7 @@ describe("BuyTriggerDetector", () => {
     it("should calculate drift correctly with zero capital", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 0,
         buy_amount: 100,
@@ -510,7 +511,7 @@ describe("BuyTriggerDetector", () => {
     it("should handle edge case of balance mismatch", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 1000,
         buy_amount: 100,
@@ -554,7 +555,7 @@ describe("BuyTriggerDetector", () => {
     it("should handle high precision decimal calculations", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000.12345678,
+        ath_reference_price: 50000.12345678,
         purchases_remaining: 5,
         capital_available: 500.87654321,
         buy_amount: 100.1728395,
@@ -598,7 +599,7 @@ describe("BuyTriggerDetector", () => {
     it("should handle null reference price", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: null, // No reference price set
+        ath_reference_price: null, // No reference price set
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -637,7 +638,7 @@ describe("BuyTriggerDetector", () => {
     it("should handle null buy amount", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: null, // Not initialized
@@ -682,7 +683,7 @@ describe("BuyTriggerDetector", () => {
     it("should handle very large numbers", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 1000000,
+        ath_reference_price: 1000000,
         purchases_remaining: 10,
         capital_available: 1000000,
         buy_amount: 100000,
@@ -724,7 +725,7 @@ describe("BuyTriggerDetector", () => {
     it("should handle very small percentages", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -861,7 +862,7 @@ describe("BuyTriggerDetector", () => {
     it("should return detailed validation results for successful buy", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 3,
         capital_available: 300,
         buy_amount: 100,
@@ -920,7 +921,7 @@ describe("BuyTriggerDetector", () => {
       // Test each validation failure separately
       const baseState = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -1005,7 +1006,7 @@ describe("BuyTriggerDetector", () => {
     it("should use all capital for last purchase", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 1, // Last purchase
         capital_available: 150,
         buy_amount: 100,
@@ -1052,10 +1053,10 @@ describe("BuyTriggerDetector", () => {
 
   describe("STRATEGY.md Compliance", () => {
     it("should follow exact buy condition formula from STRATEGY.md", async () => {
-      // STRATEGY.md: if (Close ≤ reference_price * (1 - %Drop) AND purchases_remaining > 0 AND capital_available >= buy_amount)
+      // STRATEGY.md: if (Close ≤ ath_reference_price * (1 - %Drop) AND purchases_remaining > 0 AND capital_available >= buy_amount)
       const state = createCycleState({
         status: "READY",
-        reference_price: 60000,
+        ath_reference_price: 60000,
         purchases_remaining: 7,
         capital_available: 700,
         buy_amount: 100,
@@ -1109,7 +1110,7 @@ describe("BuyTriggerDetector", () => {
       // STRATEGY.md: drift_usdt = |USDT_SPOT - capital_available| / max(capital_available, 1)
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 1000,
         buy_amount: 200,
@@ -1163,7 +1164,7 @@ describe("BuyTriggerDetector", () => {
       // Per STRATEGY.md execution order
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -1215,7 +1216,7 @@ describe("BuyTriggerDetector", () => {
 
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -1261,7 +1262,7 @@ describe("BuyTriggerDetector", () => {
 
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 0,
         capital_available: 500,
         buy_amount: 100,
@@ -1304,9 +1305,9 @@ describe("BuyTriggerDetector", () => {
 
   describe("Helper Methods", () => {
     it("should detect buy trigger at correct threshold", async () => {
-      // Test that buy triggers at reference_price * (1 - dropPercentage)
+      // Test that buy triggers at ath_reference_price * (1 - dropPercentage)
       const state = createCycleState({
-        reference_price: 50000,
+        ath_reference_price: 50000,
         capital_available: 1000,
         purchases_remaining: 5,
         buy_amount: 200, // Add buy_amount for calculation
@@ -1339,7 +1340,7 @@ describe("BuyTriggerDetector", () => {
 
     it("should no longer validate drift through checkBuyTrigger", async () => {
       const state = createCycleState({
-        reference_price: 50000,
+        ath_reference_price: 50000,
         capital_available: 1000,
         purchases_remaining: 5,
         buy_amount: 200,
@@ -1373,7 +1374,7 @@ describe("BuyTriggerDetector", () => {
     it("should handle paused strategy state", async () => {
       const state = createCycleState({
         status: "PAUSED",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         capital_available: 1000,
         purchases_remaining: 5,
         buy_grid: [49000],
@@ -1402,7 +1403,7 @@ describe("BuyTriggerDetector", () => {
   describe("Delayed Grid Construction", () => {
     it("should build grid dynamically when price drops to first trigger level", async () => {
       const state = createCycleState({
-        reference_price: 50000,
+        ath_reference_price: 50000,
         capital_available: 1000,
         purchases_remaining: 5,
         buy_amount: 200, // Needed for amount calculation
@@ -1443,7 +1444,7 @@ describe("BuyTriggerDetector", () => {
 
     it("should not build grid when price is above first trigger level", async () => {
       const state = createCycleState({
-        reference_price: 50000,
+        ath_reference_price: 50000,
         capital_available: 1000,
         purchases_remaining: 5,
         buy_grid: null, // No grid initially
@@ -1476,7 +1477,7 @@ describe("BuyTriggerDetector", () => {
     it("should not rebuild grid if it already exists", async () => {
       const existingGrid = [49000, 48000, 47000, 46000, 45000];
       const state = createCycleState({
-        reference_price: 50000,
+        ath_reference_price: 50000,
         capital_available: 1000,
         purchases_remaining: 5,
         buy_amount: 200, // Add buy_amount
@@ -1509,7 +1510,7 @@ describe("BuyTriggerDetector", () => {
 
     it("should handle multiple levels triggered on grid construction", async () => {
       const state = createCycleState({
-        reference_price: 50000,
+        ath_reference_price: 50000,
         capital_available: 1000,
         purchases_remaining: 5,
         buy_amount: 200, // Add buy_amount
@@ -1549,7 +1550,7 @@ describe("BuyTriggerDetector", () => {
     it("should work with BuyAmountCalculator for regular purchases", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 5,
         capital_available: 500,
         buy_amount: 100,
@@ -1602,7 +1603,7 @@ describe("BuyTriggerDetector", () => {
     it("should work with BuyAmountCalculator for last purchase", async () => {
       const state = createCycleState({
         status: "READY",
-        reference_price: 50000,
+        ath_reference_price: 50000,
         purchases_remaining: 1,
         capital_available: 175.5,
         buy_amount: 100,

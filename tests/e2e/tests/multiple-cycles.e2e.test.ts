@@ -31,8 +31,9 @@ describe("Multiple Cycles E2E", () => {
       capital_available: 1000,
       btc_accumulated: 0,
       purchases_remaining: 10,
-      reference_price: 100000,
+      ath_reference_price: 100000,
       ath_price: 100000,
+      sell_reference_price: null,
       buy_amount: 100,
       buy_anchor_price: null,
       buy_grid: null,
@@ -91,7 +92,8 @@ describe("Multiple Cycles E2E", () => {
 
           const triggerState = {
             status: currentState.status as "READY" | "HOLDING" | "PAUSED",
-            reference_price: currentState.reference_price,
+            ath_reference_price: currentState.ath_reference_price,
+            sell_reference_price: currentState.sell_reference_price,
             purchases_remaining: currentState.purchases_remaining,
             capital_available: currentState.capital_available,
             buy_amount: currentState.buy_amount,
@@ -151,7 +153,7 @@ describe("Multiple Cycles E2E", () => {
               currentState.btc_accumulated > 0
             ) {
               const oldValue =
-                (currentState.reference_price || currentPrice) *
+                (currentState.sell_reference_price || currentPrice) *
                 currentState.btc_accumulated;
               const newValue =
                 currentPrice * (buyTrigger.buyAmount / currentPrice) * 0.999;
@@ -164,7 +166,7 @@ describe("Multiple Cycles E2E", () => {
               capital_available: newCapital,
               btc_accumulated: newBtcAccum,
               purchases_remaining: newPurchases,
-              reference_price: newRefPrice,
+              sell_reference_price: newRefPrice,
               buy_anchor_price: currentState.buy_anchor_price || currentPrice,
               buy_grid: buyTrigger.newGrid || currentState.buy_grid,
               buy_index:
@@ -192,7 +194,8 @@ describe("Multiple Cycles E2E", () => {
 
           const triggerState = {
             status: currentState.status as "READY" | "HOLDING" | "PAUSED",
-            reference_price: currentState.reference_price,
+            ath_reference_price: currentState.ath_reference_price,
+            sell_reference_price: currentState.sell_reference_price,
             purchases_remaining: currentState.purchases_remaining,
             capital_available: currentState.capital_available,
             buy_amount: currentState.buy_amount,
@@ -265,7 +268,8 @@ describe("Multiple Cycles E2E", () => {
               buy_anchor_price: null,
               buy_grid: null,
               buy_index: 0,
-              reference_price: currentPrice,
+              ath_reference_price: currentPrice,
+              sell_reference_price: null,
               ath_price: Math.max(
                 currentState.ath_price || 100000,
                 currentPrice,
@@ -322,8 +326,9 @@ describe("Multiple Cycles E2E", () => {
       capital_available: 1050, // Profit from first cycle
       btc_accumulated: 0,
       purchases_remaining: 10,
-      reference_price: 101000,
+      ath_reference_price: 101000,
       ath_price: 101000, // ATH from previous cycle
+      sell_reference_price: null,
       buy_amount: 105,
       buy_anchor_price: null,
       buy_grid: null,
@@ -350,7 +355,8 @@ describe("Multiple Cycles E2E", () => {
     const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
-        reference_price: 101000,
+        ath_reference_price: 101000,
+        sell_reference_price: null,
         purchases_remaining: 10,
         capital_available: 1050,
         buy_amount: 105,
@@ -397,8 +403,9 @@ describe("Multiple Cycles E2E", () => {
       capital_available: 1050, // Profit from cycle
       btc_accumulated: 0,
       purchases_remaining: 0,
-      reference_price: 100500,
+      ath_reference_price: 100500,
       ath_price: 100500,
+      sell_reference_price: 100500,
       buy_amount: 100,
       buy_anchor_price: 99700,
       buy_grid: [],
@@ -418,7 +425,8 @@ describe("Multiple Cycles E2E", () => {
       capital_available: 1050,
       btc_accumulated: 0,
       purchases_remaining: 10, // Reset to max
-      reference_price: 100500, // Current price becomes reference
+      ath_reference_price: 100500, // Current price becomes reference
+      sell_reference_price: null, // Reset for new cycle
       ath_price: 100500, // Preserve ATH
       buy_amount: 105, // Recalculate based on new capital
       buy_anchor_price: null, // Reset anchor
@@ -456,8 +464,9 @@ describe("Multiple Cycles E2E", () => {
       capital_available: 750,
       btc_accumulated: 0.0025,
       purchases_remaining: 7,
-      reference_price: 99600,
+      ath_reference_price: 100000,
       ath_price: 100000,
+      sell_reference_price: 99600,
       buy_amount: 107,
       buy_anchor_price: 99700,
       buy_grid: [99400, 99100, 98800, 98500, 98200, 97900, 97600],
@@ -484,7 +493,7 @@ describe("Multiple Cycles E2E", () => {
     // Test sell trigger to complete the partial cycle
     // Using commission-adjusted formula: (reference * 1.005) / (1 - 0.001)
     const sellPrice =
-      ((partialState?.reference_price || 99600) * 1.005) / 0.999;
+      ((partialState?.sell_reference_price || 99600) * 1.005) / 0.999;
 
     const btcBalance = await mocks.binance.getBalance("BTC");
     const usdtBalance = await mocks.binance.getBalance("USDT");
@@ -496,7 +505,7 @@ describe("Multiple Cycles E2E", () => {
     const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
-        reference_price: partialState!.reference_price,
+        sell_reference_price: partialState!.sell_reference_price,
         purchases_remaining: partialState!.purchases_remaining,
         capital_available: partialState!.capital_available,
         btc_accumulated: partialState!.btc_accumulated || 0,

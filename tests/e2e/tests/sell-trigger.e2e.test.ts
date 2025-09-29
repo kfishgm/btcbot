@@ -32,7 +32,7 @@ describe("Sell Trigger E2E", () => {
       capital_available: 700,
       btc_accumulated: 0.003, // Already have some BTC
       purchases_remaining: 7,
-      reference_price: 99700, // Reference from previous buys
+      sell_reference_price: 99700, // Reference from previous buys
       ath_price: 100000,
       buy_amount: 100,
       buy_anchor_price: 99700,
@@ -58,7 +58,7 @@ describe("Sell Trigger E2E", () => {
     await components.cycleStateManager.initialize();
 
     let currentState = await components.cycleStateManager.getCurrentState();
-    const referencePrice = currentState?.reference_price || 99700;
+    const referencePrice = currentState?.sell_reference_price || 99700;
     // With commission adjustment: (referencePrice * 1.005) / (1 - 0.001)
     const sellTriggerPrice = (referencePrice * 1.005) / 0.999; // Commission-adjusted 0.5% above reference
 
@@ -90,7 +90,7 @@ describe("Sell Trigger E2E", () => {
 
           const triggerState = {
             status: "HOLDING" as const,
-            reference_price: currentState.reference_price,
+            sell_reference_price: currentState.sell_reference_price,
             purchases_remaining: currentState.purchases_remaining,
             capital_available: currentState.capital_available,
             buy_amount: currentState.buy_amount,
@@ -177,7 +177,7 @@ describe("Sell Trigger E2E", () => {
 
     await components.cycleStateManager.initialize();
     const currentState = await components.cycleStateManager.getCurrentState();
-    const referencePrice = currentState?.reference_price || 99700;
+    const referencePrice = currentState?.sell_reference_price || 99700;
 
     // Test at 0.4% rise (should NOT trigger)
     const testPrice = referencePrice * 1.004;
@@ -192,7 +192,7 @@ describe("Sell Trigger E2E", () => {
     const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
-        reference_price: referencePrice,
+        sell_reference_price: referencePrice,
         purchases_remaining: 7,
         capital_available: 700,
         btc_accumulated: 0.003,
@@ -239,7 +239,7 @@ describe("Sell Trigger E2E", () => {
       // Buy 3: 0.00302 BTC at 99000 = 300 USDT
       // Total: 0.00603 BTC for 600 USDT
       // Reference = 600 / 0.00603 = 99502.48
-      reference_price: 99502.48,
+      sell_reference_price: 99502.48,
       ath_price: 100000,
       buy_amount: 150,
       buy_anchor_price: 100000,
@@ -252,11 +252,11 @@ describe("Sell Trigger E2E", () => {
     const state = await components.cycleStateManager.getCurrentState();
 
     // Reference price should be the weighted average
-    expect(state?.reference_price!).toBeCloseTo(99502.48, 1);
+    expect(state?.sell_reference_price || 0).toBeCloseTo(99502.48, 1);
 
     // Sell trigger price should be commission-adjusted: (reference * 1.005) / (1 - 0.001)
     const sellTriggerPrice =
-      ((state?.reference_price || 99502.48) * 1.005) / 0.999;
+      ((state?.sell_reference_price || 99502.48) * 1.005) / 0.999;
     expect(sellTriggerPrice).toBeCloseTo(100100.09, 1);
   });
 
@@ -270,7 +270,7 @@ describe("Sell Trigger E2E", () => {
       btc_accumulated: 0.003,
       btc_dust: 0.000001, // Small dust amount
       purchases_remaining: 7,
-      reference_price: 99700,
+      sell_reference_price: 99700,
       ath_price: 100000,
       buy_amount: 100,
       buy_anchor_price: 99700,
@@ -296,7 +296,7 @@ describe("Sell Trigger E2E", () => {
     const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
-        reference_price: 99700,
+        sell_reference_price: 99700,
         purchases_remaining: 7,
         capital_available: 700,
         btc_accumulated: 0.003,

@@ -25,7 +25,8 @@ import type { TradingRules } from "../exchange/trading-rules.js";
 
 export interface CycleState {
   status: "READY" | "HOLDING" | "PAUSED";
-  reference_price: number | null;
+  ath_reference_price: number | null; // ATH from rolling window for first buy
+  sell_reference_price: number | null; // Average cost for sell trigger
   purchases_remaining: number;
   capital_available: number;
   buy_amount: number | null;
@@ -154,20 +155,20 @@ export class BuyTriggerDetector {
     }
 
     // 3. Check if buy grid is valid and we have levels to check
-    // If grid is not initialized and we have a reference price, check if we should build it
+    // If grid is not initialized and we have ATH reference price, check if we should build it
     if (!state.buy_grid || state.buy_grid.length === 0) {
-      // Need reference price (ATH) to build grid
-      if (!state.reference_price || state.reference_price <= 0) {
+      // Need ATH reference price to build initial grid
+      if (!state.ath_reference_price || state.ath_reference_price <= 0) {
         return {
           shouldBuy: false,
-          reason: "No reference price (ATH) available to build grid",
+          reason: "No ATH reference price available to build grid",
           validations,
         };
       }
 
       // Check if current price has dropped to first grid level
       const firstGridLevel =
-        state.reference_price * (1 - config.dropPercentage);
+        state.ath_reference_price * (1 - config.dropPercentage);
 
       if (candle.close > firstGridLevel) {
         return {
@@ -178,17 +179,17 @@ export class BuyTriggerDetector {
       }
 
       // Price has reached first grid level - build the grid dynamically
-      // Use anchor if available, otherwise use ATH
+      // Use anchor if available (after first buy), otherwise use ATH (first buy)
       const newGrid = await this.buildBuyGrid(
-        state.reference_price,
+        state.ath_reference_price,
         config,
         state.buy_anchor_price,
       );
-      const basePrice = state.buy_anchor_price || state.reference_price;
+      const basePrice = state.buy_anchor_price || state.ath_reference_price;
       logger.info(
         `🏗️ Building buy grid from ${state.buy_anchor_price ? "anchor" : "ATH"} price: ${basePrice.toFixed(2)}`,
         {
-          athPrice: state.reference_price,
+          athPrice: state.ath_reference_price,
           anchorPrice: state.buy_anchor_price,
           basePrice,
           dropPercentage: config.dropPercentage,
