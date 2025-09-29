@@ -602,7 +602,7 @@ export class MainOrchestrator extends EventEmitter {
 
               // Log event
               await this.config.eventLogger.queueEvent({
-                event_type: "CYCLE_COMPLETED",
+                event_type: "CYCLE_COMPLETE",
                 severity: "INFO",
                 message: `Cycle ${updateResult.previousCycleId} completed with profit: ${updateResult.completionData.finalProfit}`,
                 metadata: {
