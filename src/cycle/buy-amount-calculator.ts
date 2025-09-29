@@ -54,20 +54,29 @@ export interface PurchaseDecision {
  */
 export class BuyAmountCalculator {
   // Constants from STRATEGY.md
-  private static readonly USDT_PRECISION_DECIMALS = 8;
+  private static readonly DEFAULT_USDT_PRECISION = 8;
 
   // Instance configuration
   private config: BuyAmountConfig | null = null;
   private exchangeMinNotional = 0;
+  private quotePrecision: number = BuyAmountCalculator.DEFAULT_USDT_PRECISION;
 
   /**
-   * Floor a number to specified decimal places
-   * @param value Value to floor
-   * @param decimals Number of decimal places
-   * @returns Floored value
+   * Set the quote asset precision for USDT
+   * @param precision Number of decimal places for USDT
    */
-  private static floorToPrecision(value: number, decimals: number): number {
-    const multiplier = Math.pow(10, decimals);
+  public setQuotePrecision(precision: number): void {
+    this.quotePrecision = precision;
+  }
+
+  /**
+   * Floor a number to USDT precision
+   * @param value Value to floor
+   * @returns Floored value using quote precision
+   */
+  private floorToQuotePrecision(value: number): number {
+    // Use roundToQuotePrecision but with floor behavior
+    const multiplier = Math.pow(10, this.quotePrecision);
     return Math.floor(value * multiplier) / multiplier;
   }
 
@@ -120,10 +129,7 @@ export class BuyAmountCalculator {
 
     // Formula from STRATEGY.md: buy_amount = floor(InitialCapitalUSDT / MaxPurchases)
     const rawAmount = config.initialCapitalUSDT / config.maxPurchases;
-    const buyAmount = BuyAmountCalculator.floorToPrecision(
-      rawAmount,
-      BuyAmountCalculator.USDT_PRECISION_DECIMALS,
-    );
+    const buyAmount = this.floorToQuotePrecision(rawAmount);
 
     // Validate the calculated amount meets minimum requirement
     if (config.minBuyUSDT > 0 && buyAmount < config.minBuyUSDT) {
@@ -150,10 +156,7 @@ export class BuyAmountCalculator {
     // Determine which amount to use based on STRATEGY.md rules
     const amountToUse = this.determineAmountToUse(state);
 
-    return BuyAmountCalculator.floorToPrecision(
-      amountToUse,
-      BuyAmountCalculator.USDT_PRECISION_DECIMALS,
-    );
+    return this.floorToQuotePrecision(amountToUse);
   }
 
   /**
@@ -296,10 +299,7 @@ export class BuyAmountCalculator {
       throw new Error("Buy amount must be greater than zero");
     }
 
-    return BuyAmountCalculator.floorToPrecision(
-      buyAmount,
-      BuyAmountCalculator.USDT_PRECISION_DECIMALS,
-    );
+    return this.floorToQuotePrecision(buyAmount);
   }
 
   /**
@@ -313,10 +313,7 @@ export class BuyAmountCalculator {
     }
 
     // Last purchase uses ALL remaining capital
-    return BuyAmountCalculator.floorToPrecision(
-      capitalAvailable,
-      BuyAmountCalculator.USDT_PRECISION_DECIMALS,
-    );
+    return this.floorToQuotePrecision(capitalAvailable);
   }
 
   /**
@@ -357,7 +354,7 @@ export class BuyAmountCalculator {
    * @returns Number of decimal places for USDT precision
    */
   public static getUSDTPrecisionDecimals(): number {
-    return BuyAmountCalculator.USDT_PRECISION_DECIMALS;
+    return BuyAmountCalculator.DEFAULT_USDT_PRECISION;
   }
 
   /**
@@ -420,10 +417,7 @@ export class BuyAmountCalculator {
    * @returns Floored value
    */
   public floorToPrecision(value: number): number {
-    return BuyAmountCalculator.floorToPrecision(
-      value,
-      BuyAmountCalculator.USDT_PRECISION_DECIMALS,
-    );
+    return this.floorToQuotePrecision(value);
   }
 
   /**

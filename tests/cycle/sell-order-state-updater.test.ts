@@ -1,11 +1,17 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import { SellOrderStateUpdater } from "../../src/cycle/sell-order-state-updater";
+import {
+  SellOrderStateUpdater,
+  type NewCycleSignal,
+  type StateUpdateResult,
+} from "../../src/cycle/sell-order-state-updater";
 import { StateTransactionManager } from "../../src/cycle/state-transaction-manager";
 import type { CycleState } from "../../src/cycle/cycle-state-manager";
 import type { OrderResult } from "../../src/order/buy-order-placer";
 import type { Database } from "../../types/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Decimal } from "decimal.js";
+import { MockTradingRules } from "../mocks/mock-trading-rules";
+import type { TradingRules } from "../../src/exchange/trading-rules";
 
 // Mock StateTransactionManager
 jest.mock("../../src/cycle/state-transaction-manager");
@@ -13,6 +19,7 @@ jest.mock("../../src/cycle/state-transaction-manager");
 describe("SellOrderStateUpdater", () => {
   let updater: SellOrderStateUpdater;
   let mockSupabase: SupabaseClient<Database>;
+  let mockTradingRules: TradingRules;
   let mockUpdateStateAtomic: jest.SpiedFunction<
     typeof StateTransactionManager.prototype.updateStateAtomic
   >;
@@ -32,8 +39,12 @@ describe("SellOrderStateUpdater", () => {
     ath_price: 52000,
     buy_grid: null,
     buy_index: 0,
-    version: 1,
+    completed_at: null,
+    final_profit: null,
+    previous_cycle_id: null,
+    strategy_config_id: null,
     updated_at: new Date().toISOString(),
+    version: 1,
     ...overrides,
   });
 
@@ -74,7 +85,13 @@ describe("SellOrderStateUpdater", () => {
       });
 
     const config = { maxPurchases: 5 };
-    updater = new SellOrderStateUpdater(mockSupabase, config);
+    mockTradingRules = new MockTradingRules() as unknown as TradingRules;
+    updater = new SellOrderStateUpdater(
+      mockSupabase,
+      config,
+      undefined,
+      mockTradingRules,
+    );
   });
 
   describe("updateAfterSellOrder", () => {
@@ -111,7 +128,9 @@ describe("SellOrderStateUpdater", () => {
         orderResult,
       );
 
-      // Assert
+      // Assert - Should return regular update (not cycle completion)
+      expect("type" in result).toBe(false); // Not a signal
+      const stateResult = result as CycleState;
       expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
         "test-cycle-id",
         expect.objectContaining({
@@ -120,8 +139,8 @@ describe("SellOrderStateUpdater", () => {
           status: "HOLDING", // Should remain HOLDING
         }),
       );
-      expect(result.status).toBe("HOLDING");
-      expect(result.btc_accumulated).toBe(0.01);
+      expect(stateResult.status).toBe("HOLDING");
+      expect(stateResult.btc_accumulated).toBe(0.01);
     });
 
     it("should handle complete sale with profit correctly", async () => {
@@ -148,33 +167,15 @@ describe("SellOrderStateUpdater", () => {
         orderResult,
       );
 
-      // Assert
-      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
-        "test-cycle-id",
-        expect.objectContaining({
-          btc_accumulated: 0,
-          btc_accum_net: 0,
-          btc_dust: 0,
-          cost_accum_usdt: 0,
-          // principal = 50000 * 0.01 = 500
-          // net_received = 525 - 0.525 = 524.475
-          // profit = max(0, 524.475 - 500) = 24.475
-          // capital = 500 + 500 + 24.475 = 1024.475
-          capital_available: 1024.475,
-          purchases_remaining: 5,
-          reference_price: 52000, // Reset to ATH
-          buy_amount: 204, // floor(1024.475 / 5) = 204
-          status: "READY",
-        }),
-      );
+      // Assert - Should return cycle completion signal
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+      expect(signal.previousCycleId).toBe("test-cycle-id");
+      expect(signal.completionData.finalProfit).toBeGreaterThan(0);
 
-      expect(result.updateSummary).toEqual({
-        btcSold: 0.01,
-        usdtReceived: 524.475,
-        principal: 500,
-        profit: expect.closeTo(24.475, 5), // Handle floating point precision
-        cycleComplete: true,
-      });
+      // Should NOT call updateStateAtomic for complete sale
+      expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
     });
 
     it("should handle complete sale with loss (profit = 0)", async () => {
@@ -201,21 +202,17 @@ describe("SellOrderStateUpdater", () => {
         orderResult,
       );
 
-      // Assert
-      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
-        "test-cycle-id",
-        expect.objectContaining({
-          btc_accumulated: 0,
-          // principal = 50000 * 0.01 = 500
-          // net_received = 480 - 0.48 = 479.52
-          // profit = max(0, 479.52 - 500) = 0 (never negative)
-          // capital = 500 + 500 + 0 = 1000
-          capital_available: 1000,
-          status: "READY",
-        }),
-      );
+      // Assert - Should return cycle completion signal (even with loss)
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+      expect(signal.previousCycleId).toBe("test-cycle-id");
+      // Profit should be 0 for loss (never negative)
+      expect(signal.completionData.finalProfit).toBe(0);
+      expect(signal.completionData.carryOverCapital).toBeCloseTo(979.52, 2);
 
-      expect(result.updateSummary?.profit).toBe(0);
+      // Should NOT call updateStateAtomic for complete sale
+      expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
     });
 
     it("should validate order result has executed quantity", async () => {
@@ -346,8 +343,11 @@ describe("SellOrderStateUpdater", () => {
         orderResult,
       );
 
-      // Assert
-      expect(result.status).toBe("HOLDING");
+      // Assert - result should be StateUpdateResult, not NewCycleSignal
+      expect("type" in result && result.type === "CREATE_NEW_CYCLE").toBe(
+        false,
+      );
+      expect((result as StateUpdateResult).status).toBe("HOLDING");
       expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
         "test-cycle-id",
         expect.objectContaining({
@@ -384,9 +384,12 @@ describe("SellOrderStateUpdater", () => {
 
     it("should recalculate buy_amount after cycle reset", async () => {
       // Arrange
-      const customUpdater = new SellOrderStateUpdater(mockSupabase, {
-        maxPurchases: 3,
-      });
+      const customUpdater = new SellOrderStateUpdater(
+        mockSupabase,
+        { maxPurchases: 3 },
+        undefined,
+        mockTradingRules,
+      );
       const currentState = createCycleState({
         btc_accumulated: 0.01,
         capital_available: 500,
@@ -405,13 +408,13 @@ describe("SellOrderStateUpdater", () => {
         "test-cycle-id",
         expect.objectContaining({
           // capital = 500 + 500 + 99.475 = 1099.475
-          // buy_amount = floor(1099.475 / 3) = 366
-          buy_amount: 366,
+          // buy_amount = floor(1099.475 / 3 * 10^8) / 10^8 = 366.49166666
+          buy_amount: 366.49166666,
         }),
       );
     });
 
-    it("should set reference_price to ATH on cycle reset", async () => {
+    it("should set reference_price to null on cycle reset for fresh start", async () => {
       // Arrange
       const currentState = createCycleState({
         btc_accumulated: 0.01,
@@ -429,16 +432,20 @@ describe("SellOrderStateUpdater", () => {
       expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
         "test-cycle-id",
         expect.objectContaining({
-          reference_price: 55000,
+          reference_price: null,
+          ath_price: null,
         }),
       );
     });
 
     it("should reset purchases_remaining to max_purchases on cycle complete", async () => {
       // Arrange
-      const customUpdater = new SellOrderStateUpdater(mockSupabase, {
-        maxPurchases: 10,
-      });
+      const customUpdater = new SellOrderStateUpdater(
+        mockSupabase,
+        { maxPurchases: 10 },
+        undefined,
+        mockTradingRules,
+      );
       const currentState = createCycleState({
         btc_accumulated: 0.01,
         purchases_remaining: 1,
@@ -449,15 +456,18 @@ describe("SellOrderStateUpdater", () => {
       });
 
       // Act
-      await customUpdater.updateAfterSellOrder(currentState, orderResult);
-
-      // Assert
-      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
-        "test-cycle-id",
-        expect.objectContaining({
-          purchases_remaining: 10,
-        }),
+      const result = await customUpdater.updateAfterSellOrder(
+        currentState,
+        orderResult,
       );
+
+      // Assert - Should return cycle completion signal
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+
+      // Should NOT call updateStateAtomic for complete sale
+      expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
     });
 
     it("should handle very small BTC amounts correctly", async () => {
@@ -489,8 +499,10 @@ describe("SellOrderStateUpdater", () => {
         orderResult,
       );
 
-      // Assert
-      expect(result.btc_accumulated).toBe(0.0000005);
+      // Assert - Should return regular update (not cycle completion)
+      expect("type" in result).toBe(false);
+      const stateResult = result as CycleState;
+      expect(stateResult.btc_accumulated).toBe(0.0000005);
     });
 
     it("should log state update to bot_events", async () => {
@@ -565,8 +577,8 @@ describe("SellOrderStateUpdater", () => {
           btc_dust: 0.000005, // Dust moved here for next cycle
           cost_accum_usdt: 0, // Reset cost accumulator
           purchases_remaining: 5, // Reset to max purchases (from config)
-          reference_price: 55000, // Reset to ATH price
-          ath_price: 55000, // Preserve ATH
+          reference_price: null, // Reset to null for fresh cycle
+          ath_price: null, // Reset to null for fresh cycle
           status: "READY",
           buy_grid: null, // Reset grid
           buy_index: 0, // Reset index

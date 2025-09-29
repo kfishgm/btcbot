@@ -152,11 +152,15 @@ export async function createTestOrchestrator(
 
   const candleProcessor = new CandleProcessor({});
 
-  const cycleStateManager = new CycleStateManager(supabaseClient, {
-    initialCapitalUSDT: initialCapital,
-    maxPurchases: maxPurchases,
-    minBuyUSDT: 10,
-  });
+  const cycleStateManager = new CycleStateManager(
+    supabaseClient,
+    {
+      initialCapitalUSDT: initialCapital,
+      maxPurchases: maxPurchases,
+      minBuyUSDT: 10,
+    },
+    tradingRules,
+  );
 
   const stateTransactionManager = new StateTransactionManager(supabaseClient);
 
@@ -169,9 +173,22 @@ export async function createTestOrchestrator(
   const referencePriceCalculator = new ReferencePriceCalculator();
   const buyAmountCalculator = new BuyAmountCalculator();
 
-  const buyTriggerDetector = new BuyTriggerDetector(buyAmountCalculator);
+  const buyTriggerDetector = new BuyTriggerDetector(
+    buyAmountCalculator,
+    tradingRules,
+  );
 
-  const sellTriggerDetector = new SellTriggerDetector();
+  // Create CommissionManager for SellTriggerDetector
+  const { CommissionManager } = await import(
+    "../../../src/exchange/commission-manager.js"
+  );
+  const commissionManager = new CommissionManager(binanceClient);
+  await commissionManager.initialize();
+
+  const sellTriggerDetector = new SellTriggerDetector(
+    tradingRules,
+    commissionManager,
+  );
 
   const balanceManager = new BalanceManager(binanceClient);
 
@@ -200,6 +217,7 @@ export async function createTestOrchestrator(
       maxPurchases: maxPurchases,
     },
     discordNotifier,
+    tradingRules,
   );
 
   // Import the logger from utils

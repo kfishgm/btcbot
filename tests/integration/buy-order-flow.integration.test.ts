@@ -222,7 +222,7 @@ describe("Buy Order Flow Integration", () => {
       };
 
       // Test buy trigger detection
-      const triggerResult = buyTriggerDetector.checkBuyTrigger(
+      const triggerResult = await buyTriggerDetector.checkBuyTrigger(
         cycleState,
         config,
         candle,
@@ -323,7 +323,7 @@ describe("Buy Order Flow Integration", () => {
           capital_available: updatedState.capital_available,
           btc_accumulated: updatedState.btc_accumulated,
           btc_accum_net: updatedState.btc_accum_net,
-        btc_dust: 0,
+          btc_dust: 0,
           cost_accum_usdt: updatedState.cost_accum_usdt,
           purchases_remaining: updatedState.purchases_remaining,
           buy_index: updatedState.buy_index,
@@ -446,7 +446,7 @@ describe("Buy Order Flow Integration", () => {
         maxPurchases: 10,
       };
 
-      const triggerResult = buyTriggerDetector.checkBuyTrigger(
+      const triggerResult = await buyTriggerDetector.checkBuyTrigger(
         cycleState,
         config,
         candle,
@@ -503,7 +503,7 @@ describe("Buy Order Flow Integration", () => {
         maxPurchases: 10,
       };
 
-      const triggerResult = buyTriggerDetector.checkBuyTrigger(
+      const triggerResult = await buyTriggerDetector.checkBuyTrigger(
         cycleState,
         config,
         candle,

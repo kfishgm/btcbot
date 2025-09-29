@@ -217,15 +217,16 @@ where:
 IMPORTANT: btc_accum_net excludes dust from previous cycles to prevent reference price distortion
 ```
 
-**Sell trigger price (gross threshold, fee handled by exchange netting):**
+**Sell trigger price (commission-adjusted for net profit):**
 
 ```
-sell_threshold = avg_cost * (1 + %Rise)
+sell_threshold = avg_cost * (1 + %Rise) / (1 - commission_rate)
 ```
 
+- **IMPORTANT**: We use the commission-adjusted formula to ensure %Rise reflects actual NET profit after fees
+- Commission rate is fetched dynamically from Binance (default 0.1% = 0.001)
+- This ensures when user sets 3% rise, they get 3% NET profit, not 3% gross before fees
 - Sell fees are deducted from **USDT proceeds**; avg_cost already reflects buy-side fees via `btc_accum_net`.
-- If you need a **net-of-sell-fee** target, apply:
-  `sell_price_target = avg_cost * (1 + %Rise) / (1 - fee_sell)`.
 - **Dust Exclusion**: Reference price calculation uses only current cycle BTC to maintain accurate cost basis.
 
 ### 4) Buy Amount Calculation

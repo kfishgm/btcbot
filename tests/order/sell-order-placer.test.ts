@@ -13,6 +13,7 @@ import type {
   BinanceTrade,
   OrderStatus,
   CreateOrderParams,
+  BinanceBalance,
 } from "../../src/exchange/types";
 
 // We'll create mocks without using jest.mock() to avoid complexity
@@ -29,6 +30,7 @@ type MockBinanceClient = {
   getMyTrades: jest.Mock<
     (symbol: string, orderId?: number) => Promise<BinanceTrade[]>
   >;
+  getBalance: jest.Mock<(asset: string) => Promise<BinanceBalance | null>>;
 };
 
 type MockTradingRules = {
@@ -96,6 +98,9 @@ describe("SellOrderPlacer", () => {
       getMyTrades: jest
         .fn<(symbol: string, orderId?: number) => Promise<BinanceTrade[]>>()
         .mockResolvedValue([]),
+      getBalance: jest
+        .fn<(asset: string) => Promise<BinanceBalance | null>>()
+        .mockResolvedValue(null),
     };
 
     mockTradingRules = {
@@ -400,7 +405,7 @@ describe("SellOrderPlacer", () => {
       expect(callArgs.timeInForce).toBe("IOC"); // Must be IOC per STRATEGY.md
       expect(callArgs.quantity).toBe(0.5);
       expect(callArgs.price).toBe(49850); // 50000 * (1 - 0.003)
-      expect(callArgs.newClientOrderId).toMatch(/^SELL_\d+_[a-z0-9]+$/);
+      expect(callArgs.newClientOrderId).toMatch(/^SELL_\d+_[a-z0-9]+_\d+$/);
 
       // Verify result processing
       expect(result.orderId).toBe(987654321);
@@ -536,9 +541,9 @@ describe("SellOrderPlacer", () => {
       const btcAccumulated = new Decimal("0.5");
       const currentPrice = new Decimal("50000");
 
-      mockBinanceClient.createOrder.mockRejectedValue(
-        new Error("Insufficient balance"),
-      );
+      // Mock a truly non-retryable error (not insufficient balance which is retryable)
+      const nonRetryableError = new Error("Invalid API key");
+      mockBinanceClient.createOrder.mockRejectedValue(nonRetryableError);
 
       await expect(
         sellOrderPlacer.placeOrder(
@@ -547,8 +552,9 @@ describe("SellOrderPlacer", () => {
           new Decimal("48000"),
           0.003,
         ),
-      ).rejects.toThrow("Insufficient balance");
+      ).rejects.toThrow("Invalid API key");
 
+      // Should only attempt once for non-retryable errors
       expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(1);
     });
   });

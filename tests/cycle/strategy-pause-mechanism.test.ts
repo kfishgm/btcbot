@@ -4,6 +4,8 @@ import type { Database } from "../../types/supabase";
 import { StrategyPauseMechanism } from "../../src/cycle/strategy-pause-mechanism";
 import { CycleStateManager } from "../../src/cycle/cycle-state-manager";
 import { DiscordNotifier } from "../../src/notifications/discord-notifier";
+import { MockTradingRules } from "../mocks/mock-trading-rules";
+import type { TradingRules } from "../../src/exchange/trading-rules";
 
 describe("StrategyPauseMechanism", () => {
   let pauseMechanism: StrategyPauseMechanism;
@@ -57,11 +59,16 @@ describe("StrategyPauseMechanism", () => {
     } as unknown as SupabaseClient<Database>;
 
     // Create mock instances
-    mockCycleStateManager = new CycleStateManager(mockSupabase, {
-      initialCapitalUSDT: 1000,
-      maxPurchases: 10,
-      minBuyUSDT: 10,
-    });
+    const mockTradingRules = new MockTradingRules() as unknown as TradingRules;
+    mockCycleStateManager = new CycleStateManager(
+      mockSupabase,
+      {
+        initialCapitalUSDT: 1000,
+        maxPurchases: 10,
+        minBuyUSDT: 10,
+      },
+      mockTradingRules,
+    );
 
     mockDiscordNotifier = new DiscordNotifier({
       webhookUrl: "https://discord.webhook.url",
@@ -100,6 +107,10 @@ describe("StrategyPauseMechanism", () => {
     buy_anchor_price: null,
     cost_accum_usdt: null,
     reference_price: null,
+    completed_at: null,
+    final_profit: null,
+    previous_cycle_id: null,
+    strategy_config_id: null,
     updated_at: null,
     buy_grid: null,
     buy_index: 0,
@@ -164,7 +175,7 @@ describe("StrategyPauseMechanism", () => {
         availableBalance: 50,
       };
 
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockResolvedValue(
         createMockCycleState({
           btc_accumulated: 0.01,
           purchases_remaining: 5,
@@ -179,7 +190,7 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should not double-pause on multiple errors", async () => {
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockResolvedValue(
         createMockCycleState({
           btc_accumulated: 0.01,
           purchases_remaining: 5,
@@ -203,7 +214,7 @@ describe("StrategyPauseMechanism", () => {
   describe("Resume", () => {
     beforeEach(async () => {
       // Pause the strategy first
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockResolvedValue(
         createMockCycleState({
           btc_accumulated: 0.01,
           purchases_remaining: 5,
@@ -214,7 +225,7 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should successfully resume when validation passes", async () => {
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockResolvedValue(
         createMockCycleState({
           status: "PAUSED",
           btc_accumulated: 0.01,
@@ -222,7 +233,9 @@ describe("StrategyPauseMechanism", () => {
         }),
       );
 
-      jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(true);
+      jest
+        .spyOn(mockCycleStateManager, "validateState")
+        .mockResolvedValue(true);
 
       const result = await pauseMechanism.resumeStrategy(false);
 
@@ -232,7 +245,7 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should fail to resume when state validation fails", async () => {
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockResolvedValue(
         createMockCycleState({
           status: "PAUSED",
           capital_available: -100, // Invalid negative value
@@ -241,7 +254,9 @@ describe("StrategyPauseMechanism", () => {
         }),
       );
 
-      jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(false);
+      jest
+        .spyOn(mockCycleStateManager, "validateState")
+        .mockResolvedValue(false);
 
       const result = await pauseMechanism.resumeStrategy(false);
 
@@ -251,7 +266,7 @@ describe("StrategyPauseMechanism", () => {
     });
 
     it("should allow force resume bypassing validation", async () => {
-      jest.spyOn(mockCycleStateManager, "getCurrentState").mockReturnValue(
+      jest.spyOn(mockCycleStateManager, "getCurrentState").mockResolvedValue(
         createMockCycleState({
           status: "PAUSED",
           btc_accumulated: 0.01,
@@ -259,7 +274,9 @@ describe("StrategyPauseMechanism", () => {
         }),
       );
 
-      jest.spyOn(mockCycleStateManager, "validateState").mockReturnValue(false);
+      jest
+        .spyOn(mockCycleStateManager, "validateState")
+        .mockResolvedValue(false);
 
       const result = await pauseMechanism.resumeStrategy(true); // Force resume
 

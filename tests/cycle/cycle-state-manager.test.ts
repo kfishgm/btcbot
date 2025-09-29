@@ -14,11 +14,14 @@ import {
   type CycleState,
 } from "../../src/cycle/cycle-state-manager.js";
 import { createMockSupabaseClient } from "../mocks/supabase-mock.js";
+import { MockTradingRules } from "../mocks/mock-trading-rules.js";
+import type { TradingRules } from "../../src/exchange/trading-rules.js";
 
 describe("CycleStateManager", () => {
   let mockSupabase: SupabaseClient<Database>;
   let cycleStateManager: CycleStateManager;
   let config: CycleStateManagerConfig;
+  let mockTradingRules: TradingRules;
 
   // Helper to create valid CycleState with all required fields
   const createValidCycleState = (
@@ -40,6 +43,10 @@ describe("CycleStateManager", () => {
     buy_index: 0,
     version: 1,
     updated_at: new Date().toISOString(),
+    completed_at: null,
+    final_profit: null,
+    previous_cycle_id: null,
+    strategy_config_id: null,
     ...overrides,
   });
 
@@ -51,6 +58,8 @@ describe("CycleStateManager", () => {
       maxPurchases: 10,
       minBuyUSDT: 10,
     };
+
+    mockTradingRules = new MockTradingRules() as unknown as TradingRules;
   });
 
   afterEach(() => {
@@ -74,14 +83,18 @@ describe("CycleStateManager", () => {
       });
 
       it("should create initial cycle state with READY status", async () => {
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
         // Verify that cycle_state was accessed - the mock was configured for it
         expect(mockSupabase.from).toHaveBeenCalled();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state).toMatchObject({
           status: "READY",
           capital_available: 300,
@@ -122,20 +135,28 @@ describe("CycleStateManager", () => {
             },
           });
 
-          const manager = new CycleStateManager(localMockSupabase, localConfig);
+          const manager = new CycleStateManager(
+            localMockSupabase,
+            localConfig,
+            mockTradingRules,
+          );
           await manager.initialize();
 
-          const state = manager.getCurrentState();
+          const state = await manager.getCurrentState();
           expect(state?.buy_amount).toBe(testConfig.expected);
         }
       });
 
       it("should set all initial accumulators to zero", async () => {
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state).toMatchObject({
           btc_accumulated: 0,
           cost_accum_usdt: 0,
@@ -145,17 +166,25 @@ describe("CycleStateManager", () => {
       });
 
       it("should set reference_price and ath_price to null initially", async () => {
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state?.reference_price).toBeNull();
         expect(state?.ath_price).toBeNull();
       });
 
       it("should log bot event for initialization", async () => {
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
@@ -190,11 +219,15 @@ describe("CycleStateManager", () => {
       });
 
       it("should recover existing state", async () => {
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state).toMatchObject({
           id: "existing-id",
           status: "HOLDING",
@@ -205,22 +238,30 @@ describe("CycleStateManager", () => {
       });
 
       it("should not create new state when valid state exists", async () => {
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
         // Verify no insert was called since state already exists
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state).not.toBeNull();
         expect(state?.id).toBe("existing-id");
       });
 
       it("should validate recovered state", async () => {
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state).not.toBeNull();
         if (state) {
           expect(cycleStateManager.validateState(state)).toBe(true);
@@ -248,11 +289,15 @@ describe("CycleStateManager", () => {
           },
         });
 
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state?.status).toBe("PAUSED");
       });
 
@@ -275,11 +320,15 @@ describe("CycleStateManager", () => {
           },
         });
 
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state?.status).toBe("PAUSED");
       });
 
@@ -312,11 +361,15 @@ describe("CycleStateManager", () => {
           },
         });
 
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state?.status).toBe("PAUSED");
       });
 
@@ -348,11 +401,15 @@ describe("CycleStateManager", () => {
           },
         });
 
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state?.status).toBe("PAUSED");
       });
 
@@ -375,13 +432,17 @@ describe("CycleStateManager", () => {
           },
         });
 
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await cycleStateManager.initialize();
 
         // Verify corruption was logged
         expect(mockSupabase.from).toHaveBeenCalled();
-        const state = cycleStateManager.getCurrentState();
+        const state = await cycleStateManager.getCurrentState();
         expect(state?.status).toBe("PAUSED");
       });
     });
@@ -394,7 +455,11 @@ describe("CycleStateManager", () => {
           },
         });
 
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await expect(cycleStateManager.initialize()).rejects.toThrow(
           "Failed to query cycle state",
@@ -409,7 +474,11 @@ describe("CycleStateManager", () => {
           },
         });
 
-        cycleStateManager = new CycleStateManager(mockSupabase, config);
+        cycleStateManager = new CycleStateManager(
+          mockSupabase,
+          config,
+          mockTradingRules,
+        );
 
         await expect(cycleStateManager.initialize()).rejects.toThrow(
           "Failed to create initial cycle state",
@@ -419,11 +488,15 @@ describe("CycleStateManager", () => {
   });
 
   describe("getCurrentState()", () => {
-    it("should return null before initialization", () => {
+    it("should return null before initialization", async () => {
       mockSupabase = createMockSupabaseClient({});
-      cycleStateManager = new CycleStateManager(mockSupabase, config);
+      cycleStateManager = new CycleStateManager(
+        mockSupabase,
+        config,
+        mockTradingRules,
+      );
 
-      expect(cycleStateManager.getCurrentState()).toBeNull();
+      expect(await cycleStateManager.getCurrentState()).toBeNull();
     });
 
     it("should return immutable copy of state", async () => {
@@ -435,11 +508,15 @@ describe("CycleStateManager", () => {
         },
       });
 
-      cycleStateManager = new CycleStateManager(mockSupabase, config);
+      cycleStateManager = new CycleStateManager(
+        mockSupabase,
+        config,
+        mockTradingRules,
+      );
       await cycleStateManager.initialize();
 
-      const state1 = cycleStateManager.getCurrentState();
-      const state2 = cycleStateManager.getCurrentState();
+      const state1 = await cycleStateManager.getCurrentState();
+      const state2 = await cycleStateManager.getCurrentState();
 
       expect(state1).not.toBe(state2);
       expect(state1).toEqual(state2);
@@ -449,7 +526,11 @@ describe("CycleStateManager", () => {
   describe("validateState()", () => {
     beforeEach(() => {
       mockSupabase = createMockSupabaseClient({});
-      cycleStateManager = new CycleStateManager(mockSupabase, config);
+      cycleStateManager = new CycleStateManager(
+        mockSupabase,
+        config,
+        mockTradingRules,
+      );
     });
 
     it("should validate capital_available is non-negative", () => {
@@ -472,7 +553,7 @@ describe("CycleStateManager", () => {
       expect(cycleStateManager.validateState(invalidState)).toBe(false);
     });
 
-    it("should validate purchases_remaining does not exceed max_purchases", () => {
+    it("should validate purchases_remaining does not exceed max_purchases", async () => {
       const validState = createValidCycleState();
 
       expect(cycleStateManager.validateState(validState)).toBe(true);
@@ -481,7 +562,7 @@ describe("CycleStateManager", () => {
       expect(cycleStateManager.validateState(invalidState)).toBe(false);
     });
 
-    it("should validate status is a valid enum value", () => {
+    it("should validate status is a valid enum value", async () => {
       const validStatuses = ["READY", "HOLDING", "PAUSED"];
 
       for (const status of validStatuses) {
@@ -528,6 +609,194 @@ describe("CycleStateManager", () => {
 
       const invalidState = { ...validState, buy_amount: 5 };
       expect(cycleStateManager.validateState(invalidState)).toBe(false);
+    });
+  });
+
+  describe("createNewCycleAfterCompletion()", () => {
+    beforeEach(() => {
+      mockSupabase = createMockSupabaseClient({});
+      cycleStateManager = new CycleStateManager(
+        mockSupabase,
+        config,
+        mockTradingRules,
+      );
+    });
+
+    it("should mark previous cycle as COMPLETED and create new cycle", async () => {
+      const previousCycle = createValidCycleState({
+        id: "old-cycle-id",
+        status: "HOLDING",
+        capital_available: 950,
+        btc_accumulated: 0.05,
+        reference_price: 50000,
+      });
+
+      const completionData = {
+        finalProfit: 50,
+        carryOverCapital: 1050,
+        carryOverDust: 0.00000278,
+      };
+
+      // Mock the update for marking as completed
+      const mockFrom = mockSupabase.from as unknown as jest.Mock;
+      mockFrom.mockImplementation((table: unknown) => {
+        const tableName = table as string;
+        if (tableName === "cycle_state") {
+          return {
+            update: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                data: null,
+                error: null,
+              }),
+            }),
+            insert: jest.fn().mockReturnValue({
+              select: jest.fn().mockReturnValue({
+                single: jest.fn(async () => ({
+                  data: createValidCycleState({
+                    id: "new-cycle-id",
+                    status: "READY",
+                    capital_available: 1050,
+                    btc_accumulated: 0.00000278,
+                    btc_dust: 0.00000278,
+                    purchases_remaining: 10,
+                    buy_amount: 105,
+                    reference_price: null,
+                    ath_price: null,
+                    previous_cycle_id: "old-cycle-id",
+                    strategy_config_id: "strategy-123",
+                  }),
+                  error: null,
+                })),
+              }),
+            }),
+            select: jest.fn(),
+            delete: jest.fn(),
+            upsert: jest.fn(),
+          };
+        } else if (tableName === "strategy_config") {
+          return {
+            select: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                single: jest.fn(async () => ({
+                  data: {
+                    id: "strategy-123",
+                    max_purchases: 10,
+                    initial_capital_usdt: 1000,
+                    is_active: true,
+                  },
+                  error: null,
+                })),
+              }),
+            }),
+            insert: jest.fn(),
+            update: jest.fn(),
+            delete: jest.fn(),
+            upsert: jest.fn(),
+          };
+        }
+        return {
+          select: jest.fn(),
+          insert: jest.fn(),
+          update: jest.fn(),
+          delete: jest.fn(),
+          upsert: jest.fn(),
+        };
+      });
+
+      const newCycle = await cycleStateManager.createNewCycleAfterCompletion(
+        previousCycle,
+        completionData,
+      );
+
+      expect(newCycle).toMatchObject({
+        status: "READY",
+        capital_available: 1050,
+        btc_accumulated: 0.00000278,
+        btc_dust: 0.00000278,
+        purchases_remaining: 10,
+        reference_price: null,
+        previous_cycle_id: "old-cycle-id",
+      });
+
+      // Verify the old cycle was marked as completed
+      expect(mockSupabase.from).toHaveBeenCalledWith("cycle_state");
+    });
+
+    it("should calculate correct buy amount for new cycle", async () => {
+      const previousCycle = createValidCycleState({
+        id: "old-cycle-id",
+      });
+
+      const completionData = {
+        finalProfit: 100,
+        carryOverCapital: 1100,
+        carryOverDust: 0,
+      };
+
+      // Mock the strategy config to return 5 max purchases
+      const mockFrom = mockSupabase.from as unknown as jest.Mock;
+      mockFrom.mockImplementation((table: unknown) => {
+        const tableName = table as string;
+        if (tableName === "cycle_state") {
+          return {
+            update: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                data: null,
+                error: null,
+              }),
+            }),
+            insert: jest.fn().mockReturnValue({
+              select: jest.fn().mockReturnValue({
+                single: jest.fn(async () => ({
+                  data: createValidCycleState({
+                    id: "new-cycle-id",
+                    buy_amount: 220, // 1100 / 5 = 220
+                  }),
+                  error: null,
+                })),
+              }),
+            }),
+            select: jest.fn(),
+            delete: jest.fn(),
+            upsert: jest.fn(),
+          };
+        } else if (tableName === "strategy_config") {
+          return {
+            select: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                single: jest.fn(async () => ({
+                  data: {
+                    id: "strategy-123",
+                    max_purchases: 5,
+                    initial_capital_usdt: 1000,
+                    is_active: true,
+                  },
+                  error: null,
+                })),
+              }),
+            }),
+            insert: jest.fn(),
+            update: jest.fn(),
+            delete: jest.fn(),
+            upsert: jest.fn(),
+          };
+        }
+        return {
+          select: jest.fn(),
+          insert: jest.fn(),
+          update: jest.fn(),
+          delete: jest.fn(),
+          upsert: jest.fn(),
+        };
+      });
+
+      const newCycle = await cycleStateManager.createNewCycleAfterCompletion(
+        previousCycle,
+        completionData,
+      );
+
+      // 1100 / 5 = 220
+      expect(newCycle.buy_amount).toBe(220);
     });
   });
 });

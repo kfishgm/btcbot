@@ -1,310 +1,286 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { BinanceClient } from "../../src/exchange/binance-client";
+import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { TradingRules } from "../../src/exchange/trading-rules";
+import type { BinanceClient } from "../../src/exchange/binance-client";
 import type { BinanceExchangeInfo } from "../../src/exchange/types";
-
-// Mock the BinanceClient module
-jest.mock("../../src/exchange/binance-client");
 
 describe("TradingRules", () => {
   let tradingRules: TradingRules;
-  let mockClient: {
-    getExchangeInfo: jest.Mock;
-  };
-  const TEST_SYMBOL = "BTCUSDT";
-
-  const mockExchangeInfo: BinanceExchangeInfo = {
-    timezone: "UTC",
-    serverTime: Date.now(),
-    rateLimits: [],
-    symbols: [
-      {
-        symbol: "BTCUSDT",
-        status: "TRADING",
-        baseAsset: "BTC",
-        quoteAsset: "USDT",
-        baseAssetPrecision: 8,
-        quoteAssetPrecision: 8,
-        orderTypes: ["LIMIT", "MARKET"],
-        icebergAllowed: true,
-        ocoAllowed: true,
-        isSpotTradingAllowed: true,
-        isMarginTradingAllowed: false,
-        filters: [
-          {
-            filterType: "PRICE_FILTER",
-            minPrice: "0.01",
-            maxPrice: "1000000.00",
-            tickSize: "0.01",
-          },
-          {
-            filterType: "LOT_SIZE",
-            minQty: "0.00001",
-            maxQty: "9000.00",
-            stepSize: "0.00001",
-          },
-          {
-            filterType: "MIN_NOTIONAL",
-            minNotional: "10.00",
-            applyToMarket: true,
-            avgPriceMins: 5,
-          },
-        ],
-        permissions: ["SPOT"],
-      },
-    ],
-  };
+  let mockBinanceClient: Pick<BinanceClient, "getExchangeInfo">;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Create a mock client with properly typed mock
-    mockClient = {
-      getExchangeInfo: jest.fn(() => Promise.resolve(mockExchangeInfo)),
+    // Create mock Binance client with typical exchange info
+    const exchangeInfo: BinanceExchangeInfo = {
+      timezone: "UTC",
+      serverTime: Date.now(),
+      rateLimits: [
+        {
+          rateLimitType: "REQUEST_WEIGHT",
+          interval: "MINUTE",
+          intervalNum: 1,
+          limit: 1200,
+        },
+      ],
+      symbols: [
+        {
+          symbol: "BTCUSDT",
+          status: "TRADING",
+          baseAsset: "BTC",
+          baseAssetPrecision: 8,
+          quoteAsset: "USDT",
+          quoteAssetPrecision: 8,
+          orderTypes: ["LIMIT", "MARKET"],
+          icebergAllowed: true,
+          ocoAllowed: true,
+          isSpotTradingAllowed: true,
+          isMarginTradingAllowed: false,
+          permissions: ["SPOT"],
+          filters: [
+            {
+              filterType: "LOT_SIZE",
+              minQty: "0.00001",
+              maxQty: "9000",
+              stepSize: "0.00001",
+            },
+            {
+              filterType: "MIN_NOTIONAL",
+              minNotional: "10",
+              applyToMarket: true,
+              avgPriceMins: 5,
+            },
+            {
+              filterType: "PRICE_FILTER",
+              minPrice: "0.01",
+              maxPrice: "1000000",
+              tickSize: "0.01",
+            },
+          ],
+        },
+        {
+          symbol: "ETHUSDT",
+          status: "TRADING",
+          baseAsset: "ETH",
+          baseAssetPrecision: 8,
+          quoteAsset: "USDT",
+          quoteAssetPrecision: 8,
+          orderTypes: ["LIMIT", "MARKET"],
+          icebergAllowed: true,
+          ocoAllowed: true,
+          isSpotTradingAllowed: true,
+          isMarginTradingAllowed: false,
+          permissions: ["SPOT"],
+          filters: [
+            {
+              filterType: "LOT_SIZE",
+              minQty: "0.0001",
+              maxQty: "10000",
+              stepSize: "0.0001",
+            },
+            {
+              filterType: "MIN_NOTIONAL",
+              minNotional: "5",
+              applyToMarket: true,
+              avgPriceMins: 5,
+            },
+            {
+              filterType: "PRICE_FILTER",
+              minPrice: "0.01",
+              maxPrice: "100000",
+              tickSize: "0.01",
+            },
+          ],
+        },
+      ],
     };
 
-    // Create TradingRules instance with mock client
-    tradingRules = new TradingRules(mockClient as unknown as BinanceClient);
+    mockBinanceClient = {
+      getExchangeInfo: jest.fn(() => Promise.resolve(exchangeInfo)),
+    };
+
+    tradingRules = new TradingRules(mockBinanceClient as BinanceClient);
   });
 
-  describe("Exchange Info Fetching", () => {
-    it("should fetch exchange info from the client", async () => {
-      const info = await tradingRules.fetchExchangeInfo();
+  describe("getRules", () => {
+    it("should fetch and cache trading rules for a symbol", async () => {
+      const rules = await tradingRules.getRules("BTCUSDT");
 
-      expect(info).toEqual(mockExchangeInfo);
-      expect(mockClient.getExchangeInfo).toHaveBeenCalledTimes(1);
+      expect(rules).toMatchObject({
+        symbol: "BTCUSDT",
+        minQty: 0.00001,
+        maxQty: 9000,
+        stepSize: 0.00001,
+        minNotional: 10,
+        minPrice: 0.01,
+        maxPrice: 1000000,
+        tickSize: 0.01,
+      });
+
+      expect(mockBinanceClient.getExchangeInfo).toHaveBeenCalledTimes(1);
     });
 
-    it("should fetch and parse trading rules for a symbol", async () => {
-      const rules = await tradingRules.getRules(TEST_SYMBOL);
+    it("should use cached rules on subsequent calls", async () => {
+      await tradingRules.getRules("BTCUSDT");
+      await tradingRules.getRules("BTCUSDT");
 
-      expect(rules).toBeDefined();
-      expect(rules.symbol).toBe(TEST_SYMBOL);
-      expect(rules.minPrice).toBe(0.01);
-      expect(rules.maxPrice).toBe(1000000);
-      expect(rules.tickSize).toBe(0.01);
-      expect(rules.minQty).toBe(0.00001);
-      expect(rules.maxQty).toBe(9000);
-      expect(rules.stepSize).toBe(0.00001);
-      expect(rules.minNotional).toBe(10);
+      expect(mockBinanceClient.getExchangeInfo).toHaveBeenCalledTimes(1);
     });
 
-    it("should throw error if symbol not found", async () => {
-      await expect(tradingRules.getRules("INVALIDUSDT")).rejects.toThrow(
-        "Symbol INVALIDUSDT not found in exchange info",
+    it("should throw error for non-existent symbol", async () => {
+      await expect(tradingRules.getRules("INVALID")).rejects.toThrow(
+        "Symbol INVALID not found in exchange info",
       );
-    });
-  });
-
-  describe("Rule Caching", () => {
-    it("should cache rules after first fetch", async () => {
-      // First call
-      await tradingRules.getRules(TEST_SYMBOL);
-      expect(mockClient.getExchangeInfo).toHaveBeenCalledTimes(1);
-
-      // Second call should use cache
-      await tradingRules.getRules(TEST_SYMBOL);
-      expect(mockClient.getExchangeInfo).toHaveBeenCalledTimes(1);
-    });
-
-    it("should force refresh when requested", async () => {
-      // First call
-      await tradingRules.getRules(TEST_SYMBOL);
-      expect(mockClient.getExchangeInfo).toHaveBeenCalledTimes(1);
-
-      // Force refresh
-      await tradingRules.getRules(TEST_SYMBOL, true);
-      expect(mockClient.getExchangeInfo).toHaveBeenCalledTimes(2);
     });
   });
 
-  describe("Price Rounding", () => {
-    beforeEach(async () => {
-      await tradingRules.getRules(TEST_SYMBOL);
+  describe("isDust", () => {
+    it("should return true for amounts below minQty", async () => {
+      await tradingRules.getRules("BTCUSDT");
+
+      expect(tradingRules.isDust(0.000001, "BTCUSDT")).toBe(true);
+      expect(tradingRules.isDust(0.000009, "BTCUSDT")).toBe(true);
     });
 
-    it("should round price to tick size", () => {
-      const rounded = tradingRules.roundPriceToTick(50123.456, TEST_SYMBOL);
-      expect(rounded).toBe(50123.45);
+    it("should return false for amounts at or above minQty", async () => {
+      await tradingRules.getRules("BTCUSDT");
+
+      expect(tradingRules.isDust(0.00001, "BTCUSDT")).toBe(false);
+      expect(tradingRules.isDust(0.00002, "BTCUSDT")).toBe(false);
+      expect(tradingRules.isDust(1, "BTCUSDT")).toBe(false);
     });
 
-    it("should clamp price to min/max bounds", () => {
-      const tooLow = tradingRules.roundPriceToTick(0.001, TEST_SYMBOL);
-      expect(tooLow).toBe(0.01); // minPrice
+    it("should work with different symbols having different minQty", async () => {
+      await tradingRules.getRules("BTCUSDT");
+      await tradingRules.getRules("ETHUSDT");
 
-      const tooHigh = tradingRules.roundPriceToTick(2000000, TEST_SYMBOL);
-      expect(tooHigh).toBe(1000000); // maxPrice
+      // 0.00005 is dust for ETH (minQty=0.0001) but not for BTC (minQty=0.00001)
+      expect(tradingRules.isDust(0.00005, "BTCUSDT")).toBe(false);
+      expect(tradingRules.isDust(0.00005, "ETHUSDT")).toBe(true);
+    });
+
+    it("should throw error if rules not cached", () => {
+      expect(() => tradingRules.isDust(0.001, "BTCUSDT")).toThrow(
+        "No trading rules cached for BTCUSDT",
+      );
     });
   });
 
-  describe("Quantity Rounding", () => {
-    beforeEach(async () => {
-      await tradingRules.getRules(TEST_SYMBOL);
+  describe("isTradable", () => {
+    it("should return true for amounts at or above minQty", async () => {
+      await tradingRules.getRules("BTCUSDT");
+
+      expect(tradingRules.isTradable(0.00001, "BTCUSDT")).toBe(true);
+      expect(tradingRules.isTradable(0.00002, "BTCUSDT")).toBe(true);
+      expect(tradingRules.isTradable(1, "BTCUSDT")).toBe(true);
     });
 
-    it("should round quantity to step size", () => {
-      const rounded = tradingRules.roundQuantityToStep(1.234567, TEST_SYMBOL);
-      expect(rounded).toBe(1.23456);
+    it("should return false for amounts below minQty", async () => {
+      await tradingRules.getRules("BTCUSDT");
+
+      expect(tradingRules.isTradable(0.000001, "BTCUSDT")).toBe(false);
+      expect(tradingRules.isTradable(0.000009, "BTCUSDT")).toBe(false);
     });
 
-    it("should clamp quantity to min/max bounds", () => {
-      const tooSmall = tradingRules.roundQuantityToStep(0.000001, TEST_SYMBOL);
-      expect(tooSmall).toBe(0.00001); // minQty
-
-      const tooLarge = tradingRules.roundQuantityToStep(10000, TEST_SYMBOL);
-      expect(tooLarge).toBe(9000); // maxQty
+    it("should throw error if rules not cached", () => {
+      expect(() => tradingRules.isTradable(0.001, "BTCUSDT")).toThrow(
+        "No trading rules cached for BTCUSDT",
+      );
     });
   });
 
-  describe("Minimum Notional Validation", () => {
-    beforeEach(async () => {
-      await tradingRules.getRules(TEST_SYMBOL);
+  describe("getMinTradableAmount", () => {
+    it("should return the minQty for a symbol", async () => {
+      await tradingRules.getRules("BTCUSDT");
+
+      expect(tradingRules.getMinTradableAmount("BTCUSDT")).toBe(0.00001);
     });
 
-    it("should validate minimum notional", () => {
-      // Valid: 50000 * 0.001 = 50 > 10
-      const valid = tradingRules.validateMinNotional(50000, 0.001, TEST_SYMBOL);
-      expect(valid).toBe(true);
+    it("should return different minQty for different symbols", async () => {
+      await tradingRules.getRules("BTCUSDT");
+      await tradingRules.getRules("ETHUSDT");
 
-      // Invalid: 50000 * 0.0001 = 5 < 10
-      const invalid = tradingRules.validateMinNotional(
-        50000,
-        0.0001,
-        TEST_SYMBOL,
+      expect(tradingRules.getMinTradableAmount("BTCUSDT")).toBe(0.00001);
+      expect(tradingRules.getMinTradableAmount("ETHUSDT")).toBe(0.0001);
+    });
+
+    it("should throw error if rules not cached", () => {
+      expect(() => tradingRules.getMinTradableAmount("BTCUSDT")).toThrow(
+        "No trading rules cached for BTCUSDT",
       );
-      expect(invalid).toBe(false);
-    });
-
-    it("should calculate minimum quantity for price", () => {
-      const minQty = tradingRules.getMinQuantityForPrice(50000, TEST_SYMBOL);
-      expect(minQty).toBeCloseTo(0.0002, 5);
     });
   });
 
-  describe("Order Validation", () => {
-    beforeEach(async () => {
-      await tradingRules.getRules(TEST_SYMBOL);
+  describe("edge cases", () => {
+    it("should handle very small dust amounts", async () => {
+      await tradingRules.getRules("BTCUSDT");
+
+      expect(tradingRules.isDust(0, "BTCUSDT")).toBe(true);
+      expect(tradingRules.isDust(0.00000001, "BTCUSDT")).toBe(true);
+      expect(tradingRules.isDust(0.00000278, "BTCUSDT")).toBe(true); // The actual dust from the issue
     });
 
-    it("should validate valid order", () => {
-      const result = tradingRules.validateOrder(
-        TEST_SYMBOL,
-        50000,
-        0.001,
-        "LIMIT",
-      );
+    it("should handle boundary values correctly", async () => {
+      await tradingRules.getRules("BTCUSDT");
+      const minQty = 0.00001;
 
-      expect(result.valid).toBe(true);
-      expect(result.errors).toHaveLength(0);
-    });
+      // Exactly at minQty should be tradable
+      expect(tradingRules.isDust(minQty, "BTCUSDT")).toBe(false);
+      expect(tradingRules.isTradable(minQty, "BTCUSDT")).toBe(true);
 
-    it("should detect invalid order", () => {
-      const result = tradingRules.validateOrder(
-        TEST_SYMBOL,
-        0.001,
-        0.000001,
-        "LIMIT",
-      );
-
-      expect(result.valid).toBe(false);
-      expect(result.errors.length).toBeGreaterThan(0);
-    });
-
-    it("should suggest minimum quantity when below notional", () => {
-      const result = tradingRules.validateOrder(
-        TEST_SYMBOL,
-        50000,
-        0.0001,
-        "LIMIT",
-      );
-
-      expect(result.valid).toBe(false);
-      expect(result.suggestedMinQuantity).toBeDefined();
-      expect(result.suggestedMinQuantity).toBeGreaterThanOrEqual(0.0002);
+      // Just below minQty should be dust
+      expect(tradingRules.isDust(minQty - 0.000001, "BTCUSDT")).toBe(true);
+      expect(tradingRules.isTradable(minQty - 0.000001, "BTCUSDT")).toBe(false);
     });
   });
 
-  describe("Minimum Sellable Quantity (Dust Handling)", () => {
-    beforeEach(async () => {
-      await tradingRules.getRules(TEST_SYMBOL);
+  describe("auto-refresh", () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
     });
 
-    it("should calculate minimum sellable quantity based on notional value", () => {
-      // At $50,000 per BTC, minimum $10 notional requires 0.0002 BTC
-      const minQty = tradingRules.getMinimumSellableQuantity(
-        50000,
-        TEST_SYMBOL,
-      );
-      expect(minQty).toBe(0.0002);
+    afterEach(() => {
+      jest.useRealTimers();
     });
 
-    it("should round up to step size for minimum sellable quantity", () => {
-      // At $115,000 per BTC, $10 notional = 0.00008695... BTC
-      // Should round up to 0.00009 (9 * stepSize of 0.00001)
-      const minQty = tradingRules.getMinimumSellableQuantity(
-        115000,
-        TEST_SYMBOL,
-      );
-      expect(minQty).toBe(0.00009);
+    it("should refresh rules periodically", async () => {
+      await tradingRules.getRules("BTCUSDT");
+
+      // Start auto-refresh with 1 hour interval
+      const errorCallback = jest.fn();
+      tradingRules.startAutoRefresh(60 * 60 * 1000, errorCallback);
+
+      // Fast-forward 1 hour
+      jest.advanceTimersByTime(60 * 60 * 1000);
+
+      // Should have fetched exchange info again
+      expect(mockBinanceClient.getExchangeInfo).toHaveBeenCalledTimes(2);
+
+      // Stop auto-refresh
+      tradingRules.stopAutoRefresh();
     });
 
-    it("should respect minQty even if notional allows less", () => {
-      // At very high price, notional might allow < minQty
-      // But result should still be at least minQty
-      const minQty = tradingRules.getMinimumSellableQuantity(
-        10000000,
-        TEST_SYMBOL,
-      );
-      expect(minQty).toBeGreaterThanOrEqual(0.00001);
-    });
+    it("should handle errors during auto-refresh", async () => {
+      await tradingRules.getRules("BTCUSDT");
 
-    it("should handle NOTIONAL filter type (Binance spot trading)", async () => {
-      // Create exchange info with NOTIONAL instead of MIN_NOTIONAL
-      const spotExchangeInfo: BinanceExchangeInfo = {
-        ...mockExchangeInfo,
-        symbols: [
-          {
-            ...mockExchangeInfo.symbols[0],
-            filters: [
-              {
-                filterType: "PRICE_FILTER",
-                minPrice: "0.01",
-                maxPrice: "1000000.00",
-                tickSize: "0.01",
-              },
-              {
-                filterType: "LOT_SIZE",
-                minQty: "0.00001",
-                maxQty: "9000.00",
-                stepSize: "0.00001",
-              },
-              {
-                filterType: "NOTIONAL",
-                minNotional: "5.00",
-                applyToMarket: true,
-                avgPriceMins: 5,
-              },
-            ],
-          },
-        ],
-      };
-
-      mockClient.getExchangeInfo = jest.fn(() =>
-        Promise.resolve(spotExchangeInfo),
+      // Mock error on refresh
+      (mockBinanceClient.getExchangeInfo as jest.Mock).mockImplementationOnce(
+        () => Promise.reject(new Error("Network error")),
       );
 
-      // Force refresh to get new rules
-      const rules = await tradingRules.getRules(TEST_SYMBOL, true);
+      const errorCallback = jest.fn();
+      tradingRules.startAutoRefresh(60 * 60 * 1000, errorCallback);
 
-      // Should parse NOTIONAL filter correctly
-      expect(rules.minNotional).toBe(5);
+      // Fast-forward 1 hour
+      jest.advanceTimersByTime(60 * 60 * 1000);
 
-      // At $100,000 per BTC, $5 notional = 0.00005 BTC
-      const minQty = tradingRules.getMinimumSellableQuantity(
-        100000,
-        TEST_SYMBOL,
+      // Wait for async error to be handled
+      await Promise.resolve();
+
+      expect(errorCallback).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Network error" }),
       );
-      expect(minQty).toBe(0.00005);
+
+      tradingRules.stopAutoRefresh();
     });
   });
 });

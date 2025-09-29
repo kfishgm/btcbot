@@ -100,7 +100,7 @@ describe("Buy Anchor E2E", () => {
             buy_index: currentState.buy_index || 0,
           };
 
-          const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+          const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
             triggerState,
             {
               dropPercentage: 0.003,
@@ -263,7 +263,7 @@ describe("Buy Anchor E2E", () => {
     const testPrice = 99400;
     const updatedState = await components.cycleStateManager.getCurrentState();
 
-    const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+    const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: updatedState!.status as "READY" | "HOLDING" | "PAUSED",
         reference_price: updatedState!.reference_price,

@@ -12,7 +12,7 @@ describe("Grid Anchoring Strategy", () => {
   });
 
   describe("Grid Quantization", () => {
-    it("should quantize grid levels to tick size using floor operation", () => {
+    it("should quantize grid levels to tick size using floor operation", async () => {
       const config = {
         dropPercentage: 0.003, // 0.3%
         risePercentage: 0.005,
@@ -25,7 +25,7 @@ describe("Grid Anchoring Strategy", () => {
       const anchorPrice = 116557.79; // First buy price
 
       // Build grid from anchor (simulating what happens after first buy)
-      const gridFromAnchor = detector.buildGridFromAnchor(anchorPrice, config);
+      const gridFromAnchor = await detector.buildGridFromAnchor(anchorPrice, config);
 
       // All grid levels should be quantized to 0.01 (tick size)
       gridFromAnchor.forEach((level: number, index: number) => {
@@ -46,7 +46,7 @@ describe("Grid Anchoring Strategy", () => {
   });
 
   describe("Grid Rebuild After First Buy", () => {
-    it("should rebuild grid from anchor price after first buy", () => {
+    it("should rebuild grid from anchor price after first buy", async () => {
       const config = {
         dropPercentage: 0.003, // 0.3%
         risePercentage: 0.005,
@@ -58,7 +58,7 @@ describe("Grid Anchoring Strategy", () => {
       const firstBuyPrice = 116557.79;
 
       // After first buy, rebuild grid from anchor
-      const gridFromAnchor = detector.buildGridFromAnchor(
+      const gridFromAnchor = await detector.buildGridFromAnchor(
         firstBuyPrice,
         config,
       );
@@ -78,7 +78,7 @@ describe("Grid Anchoring Strategy", () => {
       expect(gapPercent).toBeCloseTo(0.3, 1); // Should be close to drop percentage
     });
 
-    it("should set buy_index to 0 after grid rebuild", () => {
+    it("should set buy_index to 0 after grid rebuild", async () => {
       // This tests the logic that after rebuilding the grid from anchor,
       // the buy_index should be reset to 0 (not 1)
       // This is critical to prevent skipping the first level of the new grid
@@ -92,7 +92,7 @@ describe("Grid Anchoring Strategy", () => {
       };
 
       const anchorPrice = 116557.79;
-      const newGrid = detector.buildGridFromAnchor(anchorPrice, config);
+      const newGrid = await detector.buildGridFromAnchor(anchorPrice, config);
 
       // When grid is rebuilt, the correct buy_index should be 0
       // This means the next buy will trigger at newGrid[0]
@@ -113,7 +113,7 @@ describe("Grid Anchoring Strategy", () => {
   });
 
   describe("Client's Actual Scenario", () => {
-    it("should handle the reported bug case correctly", () => {
+    it("should handle the reported bug case correctly", async () => {
       // Reproduce the exact scenario from the client's bug report
       const config = {
         dropPercentage: 0.003, // 0.3%
@@ -132,7 +132,7 @@ describe("Grid Anchoring Strategy", () => {
       expect(problemLevel).toBeGreaterThan(firstBuyExecutedAt);
 
       // Solution: Rebuild grid from anchor (first buy price)
-      const anchoredGrid = detector.buildGridFromAnchor(
+      const anchoredGrid = await detector.buildGridFromAnchor(
         firstBuyExecutedAt,
         config,
       );
@@ -153,7 +153,7 @@ describe("Grid Anchoring Strategy", () => {
   });
 
   describe("Reference Price Calculation", () => {
-    it("should calculate reference price including fees", () => {
+    it("should calculate reference price including fees", async () => {
       // Test that reference price = cost_accum_usdt / btc_accum_net
       const btcBought = 0.00857;
       const btcFee = 0.00000857; // 0.1% fee
@@ -173,7 +173,7 @@ describe("Grid Anchoring Strategy", () => {
   });
 
   describe("Sell Threshold Calculation", () => {
-    it("should calculate sell threshold from reference price", () => {
+    it("should calculate sell threshold from reference price", async () => {
       const referencePrice = 116700.5;
       const risePercentage = 0.005; // 0.5%
 
@@ -184,7 +184,7 @@ describe("Grid Anchoring Strategy", () => {
       expect(sellThreshold).toBeCloseTo(117284, 0);
     });
 
-    it("should calculate gap to trigger correctly", () => {
+    it("should calculate gap to trigger correctly", async () => {
       const buyPrice = 116557.79;
       const referencePrice = 116700.5;
       const risePercentage = 0.005;

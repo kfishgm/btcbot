@@ -102,25 +102,26 @@ describe("Multiple Cycles E2E", () => {
             buy_index: currentState.buy_index || 0,
           };
 
-          const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
-            triggerState,
-            {
-              dropPercentage: 0.003,
-              risePercentage: 0.005,
-              maxPurchases: 10,
-              minBuyUSDT: 10,
-              exchangeMinNotional: 10,
-            },
-            {
-              close: currentPrice,
-              high: currentPrice,
-              low: currentPrice,
-              open: currentPrice,
-              volume: 0,
-              timestamp: Date.now(),
-            },
-            balances,
-          );
+          const buyTrigger =
+            await components.buyTriggerDetector.checkBuyTrigger(
+              triggerState,
+              {
+                dropPercentage: 0.003,
+                risePercentage: 0.005,
+                maxPurchases: 10,
+                minBuyUSDT: 10,
+                exchangeMinNotional: 10,
+              },
+              {
+                close: currentPrice,
+                high: currentPrice,
+                low: currentPrice,
+                open: currentPrice,
+                volume: 0,
+                timestamp: Date.now(),
+              },
+              balances,
+            );
 
           if (buyTrigger.shouldBuy && buyTrigger.buyAmount) {
             console.log(`Cycle ${currentCycle}: BUY at ${currentPrice}`);
@@ -202,23 +203,24 @@ describe("Multiple Cycles E2E", () => {
             buy_index: currentState.buy_index || 0,
           };
 
-          const sellTrigger = components.sellTriggerDetector.checkSellTrigger(
-            triggerState,
-            {
-              risePercentage: 0.005,
-              dropPercentage: 0.003,
-              exchangeMinNotional: 10,
-            },
-            {
-              close: currentPrice,
-              high: currentPrice,
-              low: currentPrice,
-              open: currentPrice,
-              volume: 0,
-              timestamp: Date.now(),
-            },
-            balances,
-          );
+          const sellTrigger =
+            await components.sellTriggerDetector.checkSellTrigger(
+              triggerState,
+              {
+                risePercentage: 0.005,
+                dropPercentage: 0.003,
+                exchangeMinNotional: 10,
+              },
+              {
+                close: currentPrice,
+                high: currentPrice,
+                low: currentPrice,
+                open: currentPrice,
+                volume: 0,
+                timestamp: Date.now(),
+              },
+              balances,
+            );
 
           if (sellTrigger.shouldSell) {
             console.log(`Cycle ${currentCycle}: SELL at ${currentPrice}`);
@@ -345,7 +347,7 @@ describe("Multiple Cycles E2E", () => {
     };
 
     // This should update ATH even though we're not buying
-    const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+    const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
         reference_price: 101000,
@@ -480,7 +482,9 @@ describe("Multiple Cycles E2E", () => {
     expect(nextGridLevel).toBe(98500);
 
     // Test sell trigger to complete the partial cycle
-    const sellPrice = (partialState?.reference_price || 99600) * 1.005;
+    // Using commission-adjusted formula: (reference * 1.005) / (1 - 0.001)
+    const sellPrice =
+      ((partialState?.reference_price || 99600) * 1.005) / 0.999;
 
     const btcBalance = await mocks.binance.getBalance("BTC");
     const usdtBalance = await mocks.binance.getBalance("USDT");
@@ -489,7 +493,7 @@ describe("Multiple Cycles E2E", () => {
       usdtSpot: parseFloat(usdtBalance?.free || "0"),
     };
 
-    const sellTrigger = components.sellTriggerDetector.checkSellTrigger(
+    const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
         reference_price: partialState!.reference_price,

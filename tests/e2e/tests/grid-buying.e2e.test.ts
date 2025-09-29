@@ -91,7 +91,7 @@ describe("Grid Buying E2E", () => {
             buy_index: currentState.buy_index || 0,
           };
 
-          const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+          const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
             triggerState,
             {
               dropPercentage: 0.003,
@@ -213,7 +213,7 @@ describe("Grid Buying E2E", () => {
       usdtSpot: parseFloat(usdtBalance?.free || "0"),
     };
 
-    const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+    const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
         reference_price: 100000,
@@ -281,7 +281,7 @@ describe("Grid Buying E2E", () => {
     const testPrice = 99400;
     const currentState = await components.cycleStateManager.getCurrentState();
 
-    const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+    const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY", // BuyTriggerDetector only accepts READY/HOLDING/PAUSED
         reference_price: currentState!.reference_price,

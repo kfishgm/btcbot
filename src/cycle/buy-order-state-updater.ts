@@ -7,6 +7,7 @@ import { StateTransactionManager } from "./state-transaction-manager";
 import { Decimal } from "decimal.js";
 import { logger } from "../utils/logger";
 import type { DiscordNotifier } from "../notifications/discord-notifier";
+import { calculateTradeableBTC } from "../utils/btc-utils";
 
 export interface StateUpdateResult extends CycleState {
   updateSummary?: {
@@ -36,15 +37,34 @@ export class BuyOrderStateUpdater extends EventEmitter {
   private supabase: SupabaseClient<Database>;
   private transactionManager: StateTransactionManager;
   private discordNotifier?: DiscordNotifier;
+  private stepSize: number;
+  private baseAssetPrecision: number;
+  private tickSize: number;
 
   constructor(
     supabase: SupabaseClient<Database>,
     discordNotifier?: DiscordNotifier,
+    stepSize: number = 0.00001, // Default BTCUSDT stepSize
+    baseAssetPrecision: number = 8, // Default BTC precision
+    tickSize: number = 0.01, // Default BTCUSDT tickSize
   ) {
     super();
     this.supabase = supabase;
     this.transactionManager = new StateTransactionManager(supabase);
     this.discordNotifier = discordNotifier;
+    this.stepSize = stepSize;
+    this.baseAssetPrecision = baseAssetPrecision;
+    this.tickSize = tickSize;
+  }
+
+  setTradingRules(
+    stepSize: number,
+    baseAssetPrecision: number,
+    tickSize: number,
+  ): void {
+    this.stepSize = stepSize;
+    this.baseAssetPrecision = baseAssetPrecision;
+    this.tickSize = tickSize;
   }
 
   async updateAfterBuyOrder(
@@ -130,7 +150,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
         try {
           const fields = [
             {
-              name: "📉 Buy Price",
+              name: "💵 Buy Price",
               value: `$${orderResult.avgPrice.toFixed(2)}`,
               inline: false,
             },
@@ -140,8 +160,13 @@ export class BuyOrderStateUpdater extends EventEmitter {
               inline: false,
             },
             {
-              name: "💵 Total Cost",
+              name: "💰 Total Cost",
               value: `${orderResult.cummulativeQuoteQty.toFixed(2)} USDT`,
+              inline: false,
+            },
+            {
+              name: "💸 Commission Paid",
+              value: `${orderResult.feeBTC.toFixed(8)} BTC`,
               inline: false,
             },
             {
@@ -155,7 +180,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
               inline: false,
             },
             {
-              name: "📈 BTC Accumulated",
+              name: "📉 BTC Accumulated",
               value: `${updates.btc_accumulated.toFixed(8)} BTC`,
               inline: false,
             },
@@ -365,11 +390,10 @@ export class BuyOrderStateUpdater extends EventEmitter {
     // Set anchor price on first buy (when it's not set yet)
     const isFirstBuy = !currentState.buy_anchor_price;
 
-    // Quantize anchor price to tickSize (0.01) using floor operation
-    const tickSize = 0.01;
+    // Quantize anchor price to tickSize using floor operation
     const rawAnchorPrice = orderResult.avgPrice.toNumber();
     const quantizedAnchorPrice =
-      Math.floor(rawAnchorPrice / tickSize) * tickSize;
+      Math.floor(rawAnchorPrice / this.tickSize) * this.tickSize;
 
     const buyAnchorPrice = isFirstBuy
       ? quantizedAnchorPrice
@@ -379,7 +403,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       logger.info("Setting buy anchor price on first buy (quantized)", {
         rawExecutionPrice: rawAnchorPrice,
         quantizedAnchorPrice: buyAnchorPrice,
-        tickSize,
+        tickSize: this.tickSize,
         athPrice: currentState.ath_price,
         referencePrice: currentState.reference_price,
       });
@@ -405,21 +429,47 @@ export class BuyOrderStateUpdater extends EventEmitter {
     costAccumUsdt: number,
     btcAccumNet: number,
   ): number {
-    if (btcAccumNet === 0) {
-      logger.warn("btcAccumNet is 0, returning 0 for reference price");
+    // Calculate tradeable BTC (exclude dust) using Binance's precision
+    const tradeableBTC = calculateTradeableBTC(
+      btcAccumNet,
+      this.stepSize,
+      this.baseAssetPrecision,
+    );
+
+    if (tradeableBTC === 0) {
+      logger.warn(
+        "No tradeable BTC available (all is dust), returning 0 for reference price",
+        {
+          btcAccumNet,
+          stepSize: this.stepSize,
+          baseAssetPrecision: this.baseAssetPrecision,
+          dustAmount: btcAccumNet,
+        },
+      );
       return 0;
     }
 
-    // Calculate reference price and round to 2 decimal places
-    const referencePrice = costAccumUsdt / btcAccumNet;
+    // Calculate reference price using ONLY tradeable BTC
+    const referencePrice = costAccumUsdt / tradeableBTC;
     const rounded = Math.round(referencePrice * 100) / 100;
 
-    logger.debug("calculateReferencePrice details:", {
+    // Log the difference for transparency
+    const dustAmount = btcAccumNet - tradeableBTC;
+    const oldReferencePrice = btcAccumNet > 0 ? costAccumUsdt / btcAccumNet : 0;
+
+    logger.debug("calculateReferencePrice with tradeable BTC:", {
       costAccumUsdt,
       btcAccumNet,
+      tradeableBTC,
+      dustAmount,
+      stepSize: this.stepSize,
+      baseAssetPrecision: this.baseAssetPrecision,
       rawReferencePrice: referencePrice,
       roundedReferencePrice: rounded,
-      formula: `${costAccumUsdt} / ${btcAccumNet} = ${referencePrice}`,
+      oldCalculation: oldReferencePrice.toFixed(2),
+      newCalculation: referencePrice.toFixed(2),
+      difference: (referencePrice - oldReferencePrice).toFixed(2),
+      formula: `${costAccumUsdt} / ${tradeableBTC} (tradeable) = ${referencePrice}`,
     });
 
     return rounded;

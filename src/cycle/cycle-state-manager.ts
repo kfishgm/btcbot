@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/supabase.js";
 import { logger } from "../utils/logger.js";
+import type { TradingRules } from "../exchange/trading-rules.js";
 
 export interface CycleStateManagerConfig {
   initialCapitalUSDT: number;
@@ -24,13 +25,16 @@ export class CycleStateManager {
   private supabase: SupabaseClient<Database>;
   private config: CycleStateManagerConfig;
   private currentState: CycleState | null = null;
+  private tradingRules: TradingRules;
 
   constructor(
     supabase: SupabaseClient<Database>,
     config: CycleStateManagerConfig,
+    tradingRules: TradingRules,
   ) {
     this.supabase = supabase;
     this.config = config;
+    this.tradingRules = tradingRules;
   }
 
   async initialize(): Promise<void> {
@@ -160,7 +164,7 @@ export class CycleStateManager {
   }
 
   private async validateAndHandleState(state: CycleState): Promise<boolean> {
-    const validationErrors = this.getValidationErrors(state);
+    const validationErrors = await this.getValidationErrors(state);
 
     if (validationErrors.length > 0) {
       logger.error("Cycle state validation failed", { validationErrors });
@@ -172,7 +176,9 @@ export class CycleStateManager {
     return true;
   }
 
-  private getValidationErrors(state: CycleState): ValidationError[] {
+  private async getValidationErrors(
+    state: CycleState,
+  ): Promise<ValidationError[]> {
     const errors: ValidationError[] = [];
 
     if (state.capital_available < 0) {
@@ -235,13 +241,42 @@ export class CycleStateManager {
       });
     }
 
-    const btcAccumCheck = state.btc_accumulated ?? 0;
-    if (btcAccumCheck > 0 && !state.reference_price) {
-      errors.push({
-        field: "reference_price",
-        error: "Reference price must be set when holding BTC",
-        value: state.reference_price,
-      });
+    // Check reference price requirement using trading rules
+    const btcAccumulated = state.btc_accumulated ?? 0;
+    const btcDust = state.btc_dust ?? 0;
+    const meaningfulBtc = btcAccumulated - btcDust;
+
+    if (meaningfulBtc > 0) {
+      // Ensure we have trading rules cached for BTCUSDT
+      try {
+        await this.tradingRules.getRules("BTCUSDT");
+        const isTradable = this.tradingRules.isTradable(
+          meaningfulBtc,
+          "BTCUSDT",
+        );
+
+        if (isTradable && !state.reference_price) {
+          const minTradable = this.tradingRules.getMinTradableAmount("BTCUSDT");
+          errors.push({
+            field: "reference_price",
+            error: `Reference price must be set when holding tradable BTC (≥ ${minTradable} BTC)`,
+            value: state.reference_price,
+          });
+        }
+      } catch (error) {
+        // If we can't get trading rules, fall back to a reasonable default
+        logger.warn(
+          "Could not fetch trading rules for validation, using fallback",
+          { error },
+        );
+        if (meaningfulBtc >= 0.00001 && !state.reference_price) {
+          errors.push({
+            field: "reference_price",
+            error: "Reference price must be set when holding tradable BTC",
+            value: state.reference_price,
+          });
+        }
+      }
     }
 
     const netValue = state.btc_accum_net ?? 0;
@@ -328,6 +363,7 @@ export class CycleStateManager {
     const { data, error } = await this.supabase
       .from("cycle_state")
       .select("*")
+      .in("status", ["READY", "HOLDING", "PAUSED"])
       .order("updated_at", { ascending: false })
       .limit(1)
       .single();
@@ -346,6 +382,8 @@ export class CycleStateManager {
         btc_accumulated: data.btc_accumulated,
         purchases_remaining: data.purchases_remaining,
         buy_index: data.buy_index,
+        ath_price: data.ath_price,
+        reference_price: data.reference_price,
       });
     }
 
@@ -365,8 +403,9 @@ export class CycleStateManager {
     });
   }
 
-  validateState(state: CycleState): boolean {
-    return this.getValidationErrors(state).length === 0;
+  async validateState(state: CycleState): Promise<boolean> {
+    const errors = await this.getValidationErrors(state);
+    return errors.length === 0;
   }
 
   async updateConfiguration(
@@ -399,5 +438,109 @@ export class CycleStateManager {
         });
       }
     }
+  }
+
+  /**
+   * Create a new cycle after the previous one completes
+   * @param previousCycle The cycle that just completed
+   * @param completionData Data from the completed cycle
+   * @returns The newly created cycle
+   */
+  async createNewCycleAfterCompletion(
+    previousCycle: CycleState,
+    completionData: {
+      finalProfit: number;
+      carryOverCapital: number;
+      carryOverDust: number;
+    },
+  ): Promise<CycleState> {
+    // Mark previous cycle as COMPLETED
+    // Note: COMPLETED status will be available after migration is run
+    const completedStatus = "COMPLETED" as CycleState["status"];
+    const { error: updateError } = await this.supabase
+      .from("cycle_state")
+      .update({
+        status: completedStatus,
+        completed_at: new Date().toISOString(),
+        final_profit: completionData.finalProfit,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", previousCycle.id);
+
+    if (updateError) {
+      logger.error("Failed to mark previous cycle as completed", {
+        cycleId: previousCycle.id,
+        error: updateError,
+      });
+      throw new Error(
+        `Failed to complete previous cycle: ${updateError.message}`,
+      );
+    }
+
+    // Get active strategy config
+    const { data: strategyConfig, error: configError } = await this.supabase
+      .from("strategy_config")
+      .select("*")
+      .eq("is_active", true)
+      .single();
+
+    if (configError || !strategyConfig) {
+      logger.error("No active strategy configuration found", {
+        error: configError,
+      });
+      throw new Error("No active strategy configuration found");
+    }
+
+    // Calculate buy amount for new cycle with proper precision
+    const buyAmount =
+      Math.floor(
+        (completionData.carryOverCapital / strategyConfig.max_purchases) *
+          100000000,
+      ) / 100000000;
+
+    // Create new cycle with fresh ID
+    const newCycleData: CycleStateInsert = {
+      status: "READY",
+      capital_available: completionData.carryOverCapital,
+      btc_accumulated: completionData.carryOverDust,
+      btc_dust: completionData.carryOverDust,
+      btc_accum_net: 0,
+      cost_accum_usdt: 0,
+      purchases_remaining: strategyConfig.max_purchases,
+      buy_amount: buyAmount,
+      reference_price: null,
+      ath_price: null,
+      buy_anchor_price: null,
+      buy_grid: null,
+      buy_index: 0,
+      strategy_config_id: strategyConfig.id,
+      previous_cycle_id: previousCycle.id,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: newCycle, error: insertError } = await this.supabase
+      .from("cycle_state")
+      .insert(newCycleData)
+      .select()
+      .single();
+
+    if (insertError || !newCycle) {
+      logger.error("Failed to create new cycle", { error: insertError });
+      throw new Error(`Failed to create new cycle: ${insertError?.message}`);
+    }
+
+    logger.info("New cycle created after completion", {
+      previousCycleId: previousCycle.id,
+      newCycleId: newCycle.id,
+      carryOverCapital: completionData.carryOverCapital,
+      carryOverDust: completionData.carryOverDust,
+      finalProfit: completionData.finalProfit,
+      strategyConfigId: strategyConfig.id,
+    });
+
+    // Update cached state
+    this.currentState = newCycle;
+
+    return newCycle;
   }
 }

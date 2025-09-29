@@ -67,19 +67,19 @@
     {
       "openTime": 1704070560000,
       "open": 100190,
-      "high": 100250,
+      "high": 100300,
       "low": 100180,
-      "close": 100199,
+      "close": 100299,
       "volume": 22,
       "closeTime": 1704071159999,
-      "comment": "Rise to 100199 (+0.500% from 99700), SELL TRIGGERS"
+      "comment": "Rise to 100299 (commission-adjusted 0.5% from 99700), SELL TRIGGERS"
     },
     {
       "openTime": 1704071160000,
-      "open": 100199,
-      "high": 100300,
-      "low": 100150,
-      "close": 100250,
+      "open": 100299,
+      "high": 100350,
+      "low": 100200,
+      "close": 100300,
       "volume": 25,
       "closeTime": 1704071759999,
       "comment": "Continue rising after sell"
@@ -115,11 +115,11 @@
     },
     {
       "type": "sell",
-      "price": 100199,
+      "price": 100299,
       "rise_percentage": 0.5,
       "candle": 7,
-      "comment": "Exactly 0.5% rise - SELL TRIGGERS"
+      "comment": "Commission-adjusted 0.5% rise - SELL TRIGGERS"
     }
   ],
-  "notes": "Demonstrates precise 0.5% sell trigger threshold. Reference price is 99700, sell should occur at 99700 * 1.005 = 100198.5"
+  "notes": "Demonstrates precise 0.5% sell trigger threshold with commission adjustment. Reference price is 99700, sell should occur at (99700 * 1.005) / 0.999 = 100298.80"
 }

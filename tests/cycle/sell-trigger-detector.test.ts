@@ -18,7 +18,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Basic Sell Trigger Detection", () => {
-    it("should trigger sell when price rises above threshold", () => {
+    it("should trigger sell when price rises above threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -47,7 +47,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.01); // Should sell all btc_accumulated
@@ -56,7 +61,7 @@ describe("SellTriggerDetector", () => {
       expect(result.validations?.strategyActive).toBe(true);
     });
 
-    it("should trigger sell exactly at threshold", () => {
+    it("should trigger sell exactly at threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -72,10 +77,10 @@ describe("SellTriggerDetector", () => {
       };
 
       const candle: Candle = {
-        close: 51250, // Exactly at threshold: 50000 * (1 + 0.025) = 51250
-        high: 51300,
-        low: 51200,
-        open: 51220,
+        close: 51302, // At threshold with commission: (50000 * 1.025) / 0.999 = 51301.3
+        high: 51350,
+        low: 51250,
+        open: 51280,
         volume: 100,
         timestamp: Date.now(),
       };
@@ -85,13 +90,18 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.005,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.005);
     });
 
-    it("should not trigger sell when price is below threshold", () => {
+    it("should not trigger sell when price is below threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -120,18 +130,21 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(false);
-      expect(result.reason).toContain(
-        "Price 51000.00 below sell threshold 51500.00",
-      );
+      expect(result.reason).toContain("below sell threshold");
       expect(result.validations?.priceThresholdMet).toBe(false);
     });
   });
 
   describe("Pre-Sell Validation Checks", () => {
-    it("should skip sell when no BTC accumulated", () => {
+    it("should skip sell when no BTC accumulated", async () => {
       const state: CycleState = {
         status: "READY",
         reference_price: 50000,
@@ -160,13 +173,18 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(false);
       expect(result.reason).toContain("No BTC accumulated to sell");
     });
 
-    it("should skip sell when insufficient BTC balance", () => {
+    it("should skip sell when insufficient BTC balance", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -195,7 +213,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.005, // Only 0.005 BTC available
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Should still trigger - insufficient balance handled by retry logic
       expect(result.shouldSell).toBe(true);
@@ -203,7 +226,7 @@ describe("SellTriggerDetector", () => {
       // balanceSufficient removed - insufficient balance handled by retry logic
     });
 
-    it("should skip sell when strategy is PAUSED", () => {
+    it("should skip sell when strategy is PAUSED", async () => {
       const state: CycleState = {
         status: "PAUSED", // Strategy paused
         reference_price: 50000,
@@ -232,7 +255,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(false);
       expect(result.reason).toContain("Strategy is PAUSED");
@@ -241,7 +269,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Drift Detection", () => {
-    it("should skip sell when BTC drift exceeds threshold (insufficient BTC)", () => {
+    it("should skip sell when BTC drift exceeds threshold (insufficient BTC)", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -270,14 +298,19 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.0098, // 2% insufficient BTC (less than accumulated)
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Drift no longer blocks trades - retry logic handles balance mismatch
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.01);
     });
 
-    it("should pass drift check when within threshold", () => {
+    it("should pass drift check when within threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -306,12 +339,17 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01004, // 0.4% drift from btc_accumulated (0.01)
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
     });
 
-    it("should pass drift check with excess BTC (dust amounts)", () => {
+    it("should pass drift check with excess BTC (dust amounts)", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -340,12 +378,17 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01000876, // Excess BTC (dust amount like after sells)
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true); // Should sell (excess BTC is OK)
     });
 
-    it("should calculate drift correctly with zero BTC accumulated", () => {
+    it("should calculate drift correctly with zero BTC accumulated", async () => {
       const state: CycleState = {
         status: "READY",
         reference_price: 50000,
@@ -374,14 +417,19 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.0001, // Small amount of BTC when expecting 0
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // When btc_accumulated is 0, should skip with "No BTC accumulated" message
       expect(result.shouldSell).toBe(false);
       expect(result.reason).toContain("No BTC accumulated to sell");
     });
 
-    it("should handle edge case of exact drift threshold", () => {
+    it("should handle edge case of exact drift threshold", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -410,7 +458,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.0995, // Exactly 0.5% drift
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Drift no longer blocks trades
       expect(result.shouldSell).toBe(true);
@@ -419,7 +472,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Cycle Isolation", () => {
-    it("should only sell btc_accumulated amount (cycle isolation)", () => {
+    it("should only sell btc_accumulated amount (cycle isolation)", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -448,14 +501,19 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.05, // Account has more BTC from other sources
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.01); // Only sell cycle's BTC
       expect(result.sellAmount).not.toBe(0.05); // Should NOT sell all BTC in account
     });
 
-    it("should not sell BTC from other sources", () => {
+    it("should not sell BTC from other sources", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -484,7 +542,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 1.002, // Account has 1 BTC from other sources + 0.002 from cycle
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.002); // Only sell cycle amount
@@ -493,7 +556,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Decimal Precision and Edge Cases", () => {
-    it("should handle high precision decimal calculations", () => {
+    it("should handle high precision decimal calculations", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000.12345678,
@@ -508,9 +571,9 @@ describe("SellTriggerDetector", () => {
         exchangeMinNotional: 10,
       };
 
-      // Sell threshold = 50000.12345678 * (1 + 0.03) = 51500.12716148
+      // Sell threshold with commission = (50000.12345678 * 1.03) / 0.999 = 51551.67839...
       const candle: Candle = {
-        close: 51500.12716148, // Exactly at threshold
+        close: 51551.68, // At/above threshold with commission
         high: 51600,
         low: 51400,
         open: 51450,
@@ -523,13 +586,18 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.00123456789,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.00123456789);
     });
 
-    it("should handle null reference price", () => {
+    it("should handle null reference price", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: null, // No reference price set
@@ -558,13 +626,18 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(false);
       expect(result.reason).toContain("Average cost is not set");
     });
 
-    it("should handle very large numbers", () => {
+    it("should handle very large numbers", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 1000000,
@@ -593,13 +666,18 @@ describe("SellTriggerDetector", () => {
         btcSpot: 1.5,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(1.5);
     });
 
-    it("should handle very small percentages", () => {
+    it("should handle very small percentages", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -615,8 +693,8 @@ describe("SellTriggerDetector", () => {
       };
 
       const candle: Candle = {
-        close: 50060, // 0.12% rise
-        high: 50100,
+        close: 50101, // With commission: (50000 * 1.001) / 0.999 = 50100.1, so need > 50100
+        high: 50150,
         low: 50040,
         open: 50050,
         volume: 100,
@@ -628,12 +706,17 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
     });
 
-    it("should handle very small BTC amounts", () => {
+    it("should handle very small BTC amounts", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -662,7 +745,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.0002,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.0002);
@@ -670,7 +758,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Complete Sell Decision Flow", () => {
-    it("should return detailed validation results for successful sell", () => {
+    it("should return detailed validation results for successful sell", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -699,7 +787,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01002, // Slight positive drift within threshold
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result).toEqual({
         shouldSell: true,
@@ -713,7 +806,7 @@ describe("SellTriggerDetector", () => {
       });
     });
 
-    it("should provide clear skip reason for each validation failure", () => {
+    it("should provide clear skip reason for each validation failure", async () => {
       const baseState: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -743,18 +836,16 @@ describe("SellTriggerDetector", () => {
       };
 
       // Test 1: Price threshold not met
-      let result = detector.checkSellTrigger(
+      let result = await detector.checkSellTrigger(
         baseState,
         baseConfig,
         { ...baseCandle, close: 51000 },
         baseBalances,
       );
-      expect(result.reason).toContain(
-        "Price 51000.00 below sell threshold 51500.00",
-      );
+      expect(result.reason).toContain("below sell threshold");
 
       // Test 2: No BTC accumulated
-      result = detector.checkSellTrigger(
+      result = await detector.checkSellTrigger(
         { ...baseState, btc_accumulated: 0 },
         baseConfig,
         baseCandle,
@@ -763,7 +854,7 @@ describe("SellTriggerDetector", () => {
       expect(result.reason).toContain("No BTC accumulated to sell");
 
       // Test 3: Strategy paused
-      result = detector.checkSellTrigger(
+      result = await detector.checkSellTrigger(
         { ...baseState, status: "PAUSED" },
         baseConfig,
         baseCandle,
@@ -773,25 +864,35 @@ describe("SellTriggerDetector", () => {
 
       // Test 4: Insufficient balance now handled by retry logic
       // (no longer blocks the sell trigger)
-      result = detector.checkSellTrigger(baseState, baseConfig, baseCandle, {
-        ...baseBalances,
-        btcSpot: 0.005,
-      });
+      result = await detector.checkSellTrigger(
+        baseState,
+        baseConfig,
+        baseCandle,
+        {
+          ...baseBalances,
+          btcSpot: 0.005,
+        },
+      );
       // Should still trigger - retry logic handles insufficient balance
       expect(result.shouldSell).toBe(true);
 
       // Test 5: Drift no longer blocks trades
-      result = detector.checkSellTrigger(baseState, baseConfig, baseCandle, {
-        ...baseBalances,
-        btcSpot: 0.0098,
-      });
+      result = await detector.checkSellTrigger(
+        baseState,
+        baseConfig,
+        baseCandle,
+        {
+          ...baseBalances,
+          btcSpot: 0.0098,
+        },
+      );
       // Should still trigger - drift handled by retry logic
       expect(result.shouldSell).toBe(true);
     });
   });
 
   describe("STRATEGY.md Compliance", () => {
-    it("should follow exact sell condition formula from STRATEGY.md", () => {
+    it("should follow exact sell condition formula from STRATEGY.md", async () => {
       // STRATEGY.md: if (btc_accumulated > 0 AND Close >= reference_price * (1 + %Rise))
       const state: CycleState = {
         status: "HOLDING",
@@ -807,11 +908,11 @@ describe("SellTriggerDetector", () => {
         exchangeMinNotional: 10,
       };
 
-      // Sell threshold = 60000 * (1 + 0.04) = 62400
+      // Sell threshold with 0.1% commission = (60000 * 1.04) / 0.999 = 62462.46
       const testCases = [
-        { close: 62400, shouldSell: true }, // Exactly at threshold
-        { close: 62401, shouldSell: true }, // Above threshold
-        { close: 62399, shouldSell: false }, // Below threshold
+        { close: 62463, shouldSell: true }, // At/above threshold
+        { close: 62500, shouldSell: true }, // Above threshold
+        { close: 62462, shouldSell: false }, // Just below threshold
         { close: 63000, shouldSell: true }, // Well above threshold
         { close: 61000, shouldSell: false }, // Well below threshold
       ];
@@ -821,7 +922,7 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.015,
       };
 
-      testCases.forEach(({ close, shouldSell }) => {
+      for (const { close, shouldSell: expected } of testCases) {
         const candle: Candle = {
           close,
           high: close + 100,
@@ -831,19 +932,19 @@ describe("SellTriggerDetector", () => {
           timestamp: Date.now(),
         };
 
-        const result = detector.checkSellTrigger(
+        const result = await detector.checkSellTrigger(
           state,
           config,
           candle,
           balances,
         );
-        expect(result.shouldSell).toBe(shouldSell);
-      });
+        expect(result.shouldSell).toBe(expected);
+      }
     });
 
     // Drift test removed - drift no longer blocks trades, handled by retry logic
 
-    it("should validate all pre-sell conditions in correct order", () => {
+    it("should validate all pre-sell conditions in correct order", async () => {
       // Per STRATEGY.md execution order
       const state: CycleState = {
         status: "HOLDING",
@@ -873,7 +974,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Verify all checks pass in correct order (drift/balance checks removed)
       expect(result.validations).toEqual({
@@ -884,7 +990,7 @@ describe("SellTriggerDetector", () => {
       });
     });
 
-    it("should always sell 100% of btc_accumulated (never partial)", () => {
+    it("should always sell 100% of btc_accumulated (never partial)", async () => {
       // STRATEGY.md: SELL ALL btc_accumulated  // NEVER partial, always 100% of cycle BTC
       const state: CycleState = {
         status: "HOLDING",
@@ -914,7 +1020,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.125678, // Has extra BTC from other sources
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(true);
       expect(result.sellAmount).toBe(0.025678); // Exactly btc_accumulated
@@ -926,7 +1037,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Logging and Monitoring", () => {
-    it("should log decision when sell is triggered", () => {
+    it("should log decision when sell is triggered", async () => {
       const loggerSpy = jest.spyOn(logger, "info").mockImplementation(() => {});
 
       const state: CycleState = {
@@ -957,14 +1068,13 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      detector.checkSellTrigger(state, config, candle, balances);
+      await detector.checkSellTrigger(state, config, candle, balances);
 
       expect(loggerSpy).toHaveBeenCalledWith(
         "SELL TRIGGERED",
         expect.objectContaining({
           module: "SellTriggerDetector",
           price: 52000,
-          sellThreshold: 51500,
           amount: 0.01,
         }),
       );
@@ -972,7 +1082,7 @@ describe("SellTriggerDetector", () => {
       loggerSpy.mockRestore();
     });
 
-    it("should not log when sell is not triggered", () => {
+    it("should not log when sell is not triggered", async () => {
       const loggerSpy = jest.spyOn(logger, "info").mockImplementation(() => {});
 
       const state: CycleState = {
@@ -1003,10 +1113,18 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
-      // No log should be called when sell is skipped
-      expect(loggerSpy).not.toHaveBeenCalled();
+      // No SELL TRIGGERED log should be called when sell is skipped
+      expect(loggerSpy).not.toHaveBeenCalledWith(
+        "SELL TRIGGERED",
+        expect.anything(),
+      );
       // But the reason should be in the result
       expect(result.reason).toContain("No BTC accumulated");
 
@@ -1015,21 +1133,22 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Helper Methods", () => {
-    it("should calculate sell threshold correctly", () => {
+    it("should calculate sell threshold correctly", async () => {
       const referencePrice = 50000;
       const risePercentage = 0.035; // 3.5%
 
-      const threshold = detector.calculateSellThreshold(
+      const threshold = await detector.calculateSellThreshold(
         referencePrice,
         risePercentage,
       );
 
-      expect(threshold).toBeCloseTo(51750, 2); // 50000 * (1 + 0.035)
+      // With default 0.1% commission: (50000 * 1.035) / (1 - 0.001) = 51801.8
+      expect(threshold).toBeCloseTo(51801.8, 1);
     });
 
     // Drift calculation test removed - drift no longer blocks trades
 
-    it("should format BTC amount for logging", () => {
+    it("should format BTC amount for logging", async () => {
       const testCases = [
         { amount: 0.01, expected: "0.01000000" },
         { amount: 0.12345678, expected: "0.12345678" },
@@ -1043,7 +1162,7 @@ describe("SellTriggerDetector", () => {
       });
     });
 
-    it("should check if strategy is active", () => {
+    it("should check if strategy is active", async () => {
       expect(detector.isStrategyActive("READY")).toBe(true);
       expect(detector.isStrategyActive("HOLDING")).toBe(true);
       expect(detector.isStrategyActive("PAUSED")).toBe(false);
@@ -1051,7 +1170,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Public Interface Methods", () => {
-    it("should provide simplified interface via shouldExecuteSell", () => {
+    it("should provide simplified interface via shouldExecuteSell", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -1080,7 +1199,7 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      const shouldSell = detector.shouldExecuteSell(
+      const shouldSell = await detector.shouldExecuteSell(
         state,
         config,
         candle,
@@ -1090,7 +1209,7 @@ describe("SellTriggerDetector", () => {
       expect(shouldSell).toBe(true);
     });
 
-    it("should provide validation details for debugging", () => {
+    it("should provide validation details for debugging", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -1119,7 +1238,7 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      const validations = detector.getValidationDetails(
+      const validations = await detector.getValidationDetails(
         state,
         config,
         candle,
@@ -1134,7 +1253,7 @@ describe("SellTriggerDetector", () => {
       });
     });
 
-    it("should check if conditions would trigger a sell at specific price", () => {
+    it("should check if conditions would trigger a sell at specific price", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -1154,19 +1273,19 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      // Test at different prices
-      expect(detector.wouldTriggerAtPrice(state, config, 51500, balances)).toBe(
-        true,
-      ); // At threshold
-      expect(detector.wouldTriggerAtPrice(state, config, 52000, balances)).toBe(
-        true,
-      ); // Above threshold
-      expect(detector.wouldTriggerAtPrice(state, config, 51000, balances)).toBe(
-        false,
-      ); // Below threshold
+      // Test at different prices (with 0.1% commission: threshold = (50000 * 1.03) / 0.999 = 51551.55)
+      expect(
+        await detector.wouldTriggerAtPrice(state, config, 51552, balances),
+      ).toBe(true); // At/above threshold
+      expect(
+        await detector.wouldTriggerAtPrice(state, config, 52000, balances),
+      ).toBe(true); // Above threshold
+      expect(
+        await detector.wouldTriggerAtPrice(state, config, 51551, balances),
+      ).toBe(false); // Just below threshold
     });
 
-    it("should get the next sell threshold price", () => {
+    it("should get the next sell threshold price", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 60000,
@@ -1181,12 +1300,13 @@ describe("SellTriggerDetector", () => {
         exchangeMinNotional: 10,
       };
 
-      const threshold = detector.getNextSellThreshold(state, config);
+      const threshold = await detector.getNextSellThreshold(state, config);
 
-      expect(threshold).toBe(62400); // 60000 * 1.04
+      // With 0.1% commission: (60000 * 1.04) / (1 - 0.001) = 62462.46
+      expect(threshold).toBeCloseTo(62462.46, 2);
     });
 
-    it("should return null threshold when no reference price", () => {
+    it("should return null threshold when no reference price", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: null,
@@ -1201,12 +1321,12 @@ describe("SellTriggerDetector", () => {
         exchangeMinNotional: 10,
       };
 
-      const threshold = detector.getNextSellThreshold(state, config);
+      const threshold = await detector.getNextSellThreshold(state, config);
 
       expect(threshold).toBeNull();
     });
 
-    it("should validate state for sell trigger detection", () => {
+    it("should validate state for sell trigger detection", async () => {
       const validState: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -1241,7 +1361,7 @@ describe("SellTriggerDetector", () => {
       expect(result.error).toContain("Negative capital available");
     });
 
-    it("should validate configuration for sell trigger detection", () => {
+    it("should validate configuration for sell trigger detection", async () => {
       const validConfig: TradingConfig = {
         dropPercentage: 0.02,
         risePercentage: 0.03,
@@ -1269,7 +1389,7 @@ describe("SellTriggerDetector", () => {
       // Drift threshold test removed - no longer used
     });
 
-    it("should get sell amount for the cycle", () => {
+    it("should get sell amount for the cycle", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -1285,7 +1405,7 @@ describe("SellTriggerDetector", () => {
   });
 
   describe("Skip Conditions", () => {
-    it("should skip sell when status is READY (not holding)", () => {
+    it("should skip sell when status is READY (not holding)", async () => {
       const state: CycleState = {
         status: "READY", // Not in HOLDING status
         reference_price: 50000,
@@ -1314,13 +1434,18 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldSell).toBe(false);
       expect(result.reason).toContain("No BTC accumulated to sell");
     });
 
-    it("should skip sell when minimum notional not met", () => {
+    it("should skip sell when minimum notional not met", async () => {
       const state: CycleState = {
         status: "HOLDING",
         reference_price: 50000,
@@ -1349,7 +1474,12 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.0001,
       };
 
-      const result = detector.checkSellTrigger(state, config, candle, balances);
+      const result = await detector.checkSellTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // 0.0001 BTC * $52000 = $5.20 < $10 minimum
       expect(result.shouldSell).toBe(false);

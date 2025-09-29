@@ -66,6 +66,10 @@ describe("Buy Anchor Price End-to-End", () => {
       btc_dust: 0,
       ath_price: 120000,
       buy_amount: 100,
+      completed_at: null,
+      final_profit: null,
+      previous_cycle_id: null,
+      strategy_config_id: null,
       updated_at: new Date().toISOString(),
       buy_grid: null, // No grid yet
       buy_index: 0,
@@ -126,7 +130,7 @@ describe("Buy Anchor Price End-to-End", () => {
       updateSpy.mockRestore();
     });
 
-    it("should limit first buy to single level even if multiple crossed", () => {
+    it("should limit first buy to single level even if multiple crossed", async () => {
       const config: TradingConfig = {
         dropPercentage: 0.03,
         risePercentage: 0.03,
@@ -162,7 +166,7 @@ describe("Buy Anchor Price End-to-End", () => {
         buy_index: mockCycleState.buy_index || 0,
       };
 
-      const result = buyTriggerDetector.checkBuyTrigger(
+      const result = await buyTriggerDetector.checkBuyTrigger(
         buyTriggerState,
         config,
         candle,
@@ -198,7 +202,7 @@ describe("Buy Anchor Price End-to-End", () => {
       };
     });
 
-    it("should allow multiple levels to be triggered after anchor is set", () => {
+    it("should allow multiple levels to be triggered after anchor is set", async () => {
       const config: TradingConfig = {
         dropPercentage: 0.03,
         risePercentage: 0.03,
@@ -235,7 +239,7 @@ describe("Buy Anchor Price End-to-End", () => {
         buy_index: mockCycleState.buy_index || 0,
       };
 
-      const result = buyTriggerDetector.checkBuyTrigger(
+      const result = await buyTriggerDetector.checkBuyTrigger(
         buyTriggerState,
         config,
         candle,
@@ -295,7 +299,7 @@ describe("Buy Anchor Price End-to-End", () => {
   });
 
   describe("Grid Rebuild from Anchor", () => {
-    it("should rebuild grid from anchor after first buy", () => {
+    it("should rebuild grid from anchor after first buy", async () => {
       const config: TradingConfig = {
         dropPercentage: 0.03,
         risePercentage: 0.03,
@@ -305,7 +309,10 @@ describe("Buy Anchor Price End-to-End", () => {
       };
 
       const anchorPrice = 117500;
-      const grid = buyTriggerDetector.buildGridFromAnchor(anchorPrice, config);
+      const grid = await buyTriggerDetector.buildGridFromAnchor(
+        anchorPrice,
+        config,
+      );
 
       // Verify grid is built from anchor with proper quantization
       expect(grid).toHaveLength(10);
@@ -407,7 +414,7 @@ describe("Buy Anchor Price End-to-End", () => {
       updateSpy.mockRestore();
     });
 
-    it("should handle case where all remaining purchases are triggered", () => {
+    it("should handle case where all remaining purchases are triggered", async () => {
       mockCycleState.buy_anchor_price = 117500;
       mockCycleState.buy_grid = [110000, 105000, 100000];
       mockCycleState.buy_index = 0;
@@ -448,7 +455,7 @@ describe("Buy Anchor Price End-to-End", () => {
         buy_index: mockCycleState.buy_index || 0,
       };
 
-      const result = buyTriggerDetector.checkBuyTrigger(
+      const result = await buyTriggerDetector.checkBuyTrigger(
         buyTriggerState,
         config,
         candle,

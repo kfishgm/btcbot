@@ -18,6 +18,8 @@
  */
 
 import { logger } from "../utils/logger.js";
+import type { TradingRules } from "../exchange/trading-rules.js";
+import type { CommissionManager } from "../exchange/commission-manager.js";
 
 export interface CycleState {
   status: "READY" | "HOLDING" | "PAUSED";
@@ -60,6 +62,24 @@ export interface SellTriggerResult {
 }
 
 export class SellTriggerDetector {
+  private baseAssetPrecision: number = 8; // Default BTC precision
+  private quoteAssetPrecision: number = 8; // Default USDT precision
+
+  constructor(
+    private tradingRules?: TradingRules,
+    private commissionManager?: CommissionManager,
+  ) {}
+
+  /**
+   * Set trading precision values
+   */
+  public setTradingPrecision(
+    baseAssetPrecision: number,
+    quoteAssetPrecision: number,
+  ): void {
+    this.baseAssetPrecision = baseAssetPrecision;
+    this.quoteAssetPrecision = quoteAssetPrecision;
+  }
   /**
    * Check if conditions are met to trigger a sell order
    * @param state Current cycle state
@@ -68,12 +88,12 @@ export class SellTriggerDetector {
    * @param balances Current balance information
    * @returns Sell trigger result with decision and validations
    */
-  public checkSellTrigger(
+  public async checkSellTrigger(
     state: CycleState,
     config: TradingConfig,
     candle: Candle,
     _balances: BalanceInfo, // Kept for interface compatibility, no longer used for drift check
-  ): SellTriggerResult {
+  ): Promise<SellTriggerResult> {
     // Initialize validations object
     const validations = {
       strategyActive: false,
@@ -92,7 +112,7 @@ export class SellTriggerDetector {
       };
     }
 
-    // 2. Check if we have BTC to sell
+    // 2. Check if we have meaningful BTC to sell (not dust)
     validations.hasAccumulatedBTC = state.btc_accumulated > 0;
     if (!validations.hasAccumulatedBTC) {
       return {
@@ -100,6 +120,19 @@ export class SellTriggerDetector {
         reason: "No BTC accumulated to sell",
         validations,
       };
+    }
+
+    // 2b. Check if accumulated BTC is just dust
+    if (this.tradingRules) {
+      await this.tradingRules.getRules("BTCUSDT");
+      const isDust = this.tradingRules.isDust(state.btc_accumulated, "BTCUSDT");
+      if (isDust) {
+        return {
+          shouldSell: false,
+          reason: `BTC amount (${state.btc_accumulated}) is dust (below minimum tradable)`,
+          validations,
+        };
+      }
     }
 
     // 3. Check if average cost is set (stored as reference_price)
@@ -112,7 +145,7 @@ export class SellTriggerDetector {
     }
 
     // 4. Check if price meets sell threshold
-    const sellThreshold = this.calculateSellThreshold(
+    const sellThreshold = await this.calculateSellThreshold(
       state.reference_price,
       config.risePercentage,
     );
@@ -154,18 +187,43 @@ export class SellTriggerDetector {
   }
 
   /**
-   * Calculate the sell threshold price
+   * Calculate the sell threshold price accounting for commission
    * @param referencePrice Average cost (reference_price = cost_accum_usdt / btc_accum_net)
    * @param risePercentage Rise percentage (e.g., 0.03 for 3%)
-   * @returns Sell threshold price
+   * @returns Sell threshold price adjusted for commission
    */
-  public calculateSellThreshold(
+  public async calculateSellThreshold(
     referencePrice: number,
     risePercentage: number,
-  ): number {
-    // Formula from STRATEGY_UPDATED.md: avg_cost * (1 + %Rise)
-    // where avg_cost is stored as reference_price
-    return referencePrice * (1 + risePercentage);
+  ): Promise<number> {
+    // Get current taker commission rate (for market orders)
+    let commissionRate = 0.001; // Default 0.1%
+
+    if (this.commissionManager) {
+      try {
+        commissionRate = await this.commissionManager.getTakerCommission();
+      } catch (error) {
+        logger.warn("Failed to get commission rate, using default 0.1%", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // New formula: (Reference Price × (1 + %Rise)) / (1 - fee_sell)
+    // This ensures that after selling and paying commission, we achieve the target %Rise
+    const targetGrossPrice = referencePrice * (1 + risePercentage);
+    const adjustedSellPrice = targetGrossPrice / (1 - commissionRate);
+
+    logger.debug("Sell threshold calculated with commission adjustment", {
+      referencePrice,
+      risePercentage,
+      commissionRate,
+      targetNetPrice: targetGrossPrice,
+      adjustedSellPrice,
+      adjustment: adjustedSellPrice - targetGrossPrice,
+    });
+
+    return adjustedSellPrice;
   }
 
   /**
@@ -186,7 +244,9 @@ export class SellTriggerDetector {
     if (price === null || price === undefined || isNaN(price)) {
       return "0.00";
     }
-    return price.toFixed(2);
+    // Use dynamic precision based on quote asset
+    const precision = Math.min(2, this.quoteAssetPrecision);
+    return price.toFixed(precision);
   }
 
   /**
@@ -196,9 +256,10 @@ export class SellTriggerDetector {
    */
   public formatBTC(btc: number): string {
     if (btc === null || btc === undefined || isNaN(btc)) {
-      return "0.00000000";
+      return "0".padEnd(this.baseAssetPrecision + 1, "0");
     }
-    return btc.toFixed(8);
+    // Use dynamic precision based on base asset
+    return btc.toFixed(this.baseAssetPrecision);
   }
 
   /**
@@ -235,13 +296,13 @@ export class SellTriggerDetector {
    * @param balances Current balances
    * @returns True if sell should be executed
    */
-  public shouldExecuteSell(
+  public async shouldExecuteSell(
     state: CycleState,
     config: TradingConfig,
     candle: Candle,
     balances: BalanceInfo,
-  ): boolean {
-    const result = this.checkSellTrigger(state, config, candle, balances);
+  ): Promise<boolean> {
+    const result = await this.checkSellTrigger(state, config, candle, balances);
     return result.shouldSell;
   }
 
@@ -253,13 +314,13 @@ export class SellTriggerDetector {
    * @param balances Current balances
    * @returns Detailed validation results
    */
-  public getValidationDetails(
+  public async getValidationDetails(
     state: CycleState,
     config: TradingConfig,
     candle: Candle,
     balances: BalanceInfo,
-  ): SellTriggerResult["validations"] {
-    const result = this.checkSellTrigger(state, config, candle, balances);
+  ): Promise<SellTriggerResult["validations"]> {
+    const result = await this.checkSellTrigger(state, config, candle, balances);
     return result.validations;
   }
 
@@ -282,12 +343,12 @@ export class SellTriggerDetector {
    * @param balances Current balances
    * @returns True if sell would trigger at test price
    */
-  public wouldTriggerAtPrice(
+  public async wouldTriggerAtPrice(
     state: CycleState,
     config: TradingConfig,
     testPrice: number,
     balances: BalanceInfo,
-  ): boolean {
+  ): Promise<boolean> {
     const testCandle: Candle = {
       close: testPrice,
       high: testPrice,
@@ -297,7 +358,12 @@ export class SellTriggerDetector {
       timestamp: Date.now(),
     };
 
-    const result = this.checkSellTrigger(state, config, testCandle, balances);
+    const result = await this.checkSellTrigger(
+      state,
+      config,
+      testCandle,
+      balances,
+    );
     return result.shouldSell;
   }
 
@@ -307,15 +373,15 @@ export class SellTriggerDetector {
    * @param config Trading configuration
    * @returns Next sell threshold price or null if no reference price
    */
-  public getNextSellThreshold(
+  public async getNextSellThreshold(
     state: CycleState,
     config: TradingConfig,
-  ): number | null {
+  ): Promise<number | null> {
     if (state.reference_price === null) {
       return null;
     }
 
-    return this.calculateSellThreshold(
+    return await this.calculateSellThreshold(
       state.reference_price,
       config.risePercentage,
     );
@@ -376,12 +442,31 @@ export class SellTriggerDetector {
   }
 
   /**
-   * Check if we're holding BTC (cycle status)
+   * Check if we're holding meaningful BTC (not dust)
    * @param state Current cycle state
-   * @returns True if holding BTC
+   * @returns True if holding BTC above dust threshold
    */
   public isHoldingBTC(state: CycleState): boolean {
-    return state.btc_accumulated > 0 && state.status === "HOLDING";
+    if (state.btc_accumulated <= 0 || state.status !== "HOLDING") {
+      return false;
+    }
+
+    // If we have TradingRules, check if it's dust
+    if (this.tradingRules) {
+      try {
+        // Note: This is a synchronous check, rules should already be cached
+        const isDust = this.tradingRules.isDust(
+          state.btc_accumulated,
+          "BTCUSDT",
+        );
+        return !isDust;
+      } catch {
+        // If rules aren't cached, fall back to simple check
+        return state.btc_accumulated > 0;
+      }
+    }
+
+    return state.btc_accumulated > 0;
   }
 
   /**

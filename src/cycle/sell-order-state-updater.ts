@@ -7,6 +7,7 @@ import { StateTransactionManager } from "./state-transaction-manager";
 import { Decimal } from "decimal.js";
 import { logger } from "../utils/logger";
 import type { DiscordNotifier } from "../notifications/discord-notifier";
+import type { TradingRules } from "../exchange/trading-rules";
 
 export interface StateUpdateResult extends CycleState {
   updateSummary?: {
@@ -31,34 +32,60 @@ export interface StateUpdateData {
   ath_price?: number | null;
   buy_grid?: number[] | null;
   buy_index?: number | null;
+  buy_anchor_price?: number | null;
 }
 
 export interface SellOrderStateUpdaterConfig {
   maxPurchases: number;
 }
 
+export interface NewCycleSignal {
+  type: "CREATE_NEW_CYCLE";
+  previousCycleId: string;
+  completionData: {
+    finalProfit: number;
+    carryOverCapital: number;
+    carryOverDust: number;
+  };
+}
+
+export interface CycleUpdateSignal {
+  type: "UPDATE_CYCLE";
+  updates: StateUpdateData;
+}
+
 export class SellOrderStateUpdater extends EventEmitter {
   private supabase: SupabaseClient<Database>;
   private transactionManager: StateTransactionManager;
-  private config: SellOrderStateUpdaterConfig;
   private discordNotifier?: DiscordNotifier;
+  private tradingRules: TradingRules;
 
   constructor(
     supabase: SupabaseClient<Database>,
-    config: SellOrderStateUpdaterConfig,
-    discordNotifier?: DiscordNotifier,
+    _config: SellOrderStateUpdaterConfig, // Prefix with _ to indicate unused
+    discordNotifier: DiscordNotifier | undefined,
+    tradingRules: TradingRules,
   ) {
     super();
     this.supabase = supabase;
     this.transactionManager = new StateTransactionManager(supabase);
-    this.config = config;
+    // Note: config parameter is kept for API compatibility but not currently used
     this.discordNotifier = discordNotifier;
+    this.tradingRules = tradingRules;
+  }
+
+  /**
+   * Get the TradingRules instance for dust checking
+   * Used by orchestrator to check if amounts are dust
+   */
+  getTradingRules(): TradingRules {
+    return this.tradingRules;
   }
 
   async updateAfterSellOrder(
     currentState: CycleState,
     orderResult: OrderResult,
-  ): Promise<StateUpdateResult> {
+  ): Promise<StateUpdateResult | NewCycleSignal> {
     // Emit start event
     this.emit("stateUpdateStarted", {
       cycleId: currentState.id,
@@ -70,8 +97,59 @@ export class SellOrderStateUpdater extends EventEmitter {
       this.validateOrderResult(orderResult);
       this.validateCycleState(currentState, orderResult);
 
-      // Calculate all updates
-      const updates = this.calculateUpdates(currentState, orderResult);
+      // Calculate all updates or signal for new cycle
+      const updateResult = await this.calculateUpdates(
+        currentState,
+        orderResult,
+      );
+
+      // Check if this is a cycle completion signal
+      if ("type" in updateResult && updateResult.type === "CREATE_NEW_CYCLE") {
+        // Don't update the current cycle, just return the signal
+        logger.info(
+          "Cycle completion detected, signaling for new cycle creation",
+          {
+            previousCycleId: updateResult.previousCycleId,
+            profit: updateResult.completionData.finalProfit,
+          },
+        );
+
+        // Send Discord notification for cycle completion
+        if (this.discordNotifier) {
+          try {
+            const fields = [
+              {
+                name: "💰 Realized P&L",
+                value: `$${updateResult.completionData.finalProfit.toFixed(2)}`,
+                inline: false,
+              },
+              {
+                name: "📦 BTC Remaining (Dust)",
+                value: `${updateResult.completionData.carryOverDust.toFixed(8)} BTC`,
+                inline: false,
+              },
+              {
+                name: "💵 New Capital",
+                value: `$${updateResult.completionData.carryOverCapital.toFixed(2)}`,
+                inline: false,
+              },
+              {
+                name: "🔄 Cycle Reset",
+                value: "✅ New cycle will be created",
+                inline: false,
+              },
+            ];
+            await this.discordNotifier.sendCycleCompleteNotification(fields);
+          } catch (error) {
+            logger.error("Failed to send Discord notification", { error });
+          }
+        }
+
+        return updateResult;
+      }
+
+      // Regular partial sale update
+      const updates = updateResult.updates;
 
       // Execute update atomically
       const updatedState = await this.transactionManager.updateStateAtomic(
@@ -83,43 +161,30 @@ export class SellOrderStateUpdater extends EventEmitter {
       const btcSold = orderResult.executedQty
         .sub(orderResult.feeBTC)
         .toNumber();
-      const usdtReceived = orderResult.cummulativeQuoteQty
-        .sub(orderResult.feeUSDT)
-        .toNumber();
-      const cycleComplete = updates.btc_accumulated < 0.00001;
-
-      let principal: number | undefined;
-      let profit: number | undefined;
-
-      if (cycleComplete && currentState.reference_price) {
-        // Per STRATEGY.md line 116-118
-        principal =
-          currentState.reference_price * orderResult.executedQty.toNumber();
-        const netUsdtReceived = orderResult.cummulativeQuoteQty
-          .sub(orderResult.feeUSDT)
-          .toNumber();
-        profit = Math.max(0, netUsdtReceived - principal);
-      }
+      const usdtReceivedDecimal = orderResult.cummulativeQuoteQty.sub(
+        orderResult.feeUSDT,
+      );
+      const usdtReceived = usdtReceivedDecimal.toNumber();
 
       const result: StateUpdateResult = {
         ...updatedState,
         updateSummary: {
           btcSold,
           usdtReceived,
-          principal,
-          profit,
-          cycleComplete,
+          principal: undefined,
+          profit: undefined,
+          cycleComplete: false,
         },
       };
 
       // Log successful update
       logger.info(
-        `Sell order state update completed. Cycle complete: ${cycleComplete}, ATH: ${currentState.ath_price}, New ref price: ${updates.reference_price}`,
+        `Sell order state update completed. Partial sale, cycle continues`,
         {
           cycleId: currentState.id,
           orderId: orderResult.orderId,
           updates,
-          cycleComplete,
+          cycleComplete: false,
           currentAthPrice: currentState.ath_price,
           newReferencePrice: updates.reference_price,
         },
@@ -128,75 +193,55 @@ export class SellOrderStateUpdater extends EventEmitter {
       // Log to database
       await this.logStateUpdate(currentState.id, orderResult.orderId, updates);
 
-      // Send Discord notifications
+      // Send Discord notifications for partial sale
       if (this.discordNotifier) {
         try {
-          if (cycleComplete) {
-            // Cycle complete notification
-            const fields = [
-              {
-                name: "💰 Realized P&L",
-                value: `$${(profit || 0).toFixed(2)}`,
-                inline: false,
-              },
-              {
-                name: "📦 BTC Remaining",
-                value: `${updates.btc_accumulated.toFixed(8)} BTC`,
-                inline: false,
-              },
-              {
-                name: "💵 New Capital",
-                value: `$${updates.capital_available.toFixed(2)}`,
-                inline: false,
-              },
-              {
-                name: "📊 New Reference Price",
-                value: `$${(updates.reference_price || 0).toFixed(2)}`,
-                inline: false,
-              },
-              {
-                name: "🔄 Cycle Reset",
-                value: "✅ Complete",
-                inline: false,
-              },
-            ];
-            await this.discordNotifier.sendCycleCompleteNotification(fields);
-          } else {
-            // Regular sell notification
-            const fields = [
-              {
-                name: "📉 Sell Price",
-                value: `$${orderResult.avgPrice.toFixed(2)}`,
-                inline: false,
-              },
-              {
-                name: "🔢 Quantity Sold",
-                value: `${orderResult.executedQty.toFixed(8)} BTC`,
-                inline: false,
-              },
-              {
-                name: "💵 Total Received",
-                value: `$${usdtReceived.toFixed(2)}`,
-                inline: false,
-              },
-              {
-                name: "📦 BTC Remaining",
-                value: `${updates.btc_accumulated.toFixed(8)} BTC`,
-                inline: false,
-              },
-              {
-                name: "💰 Capital Available",
-                value: `$${updates.capital_available.toFixed(2)}`,
-                inline: false,
-              },
-              {
-                name: "📊 Current ATH",
-                value: `$${(currentState.ath_price || 0).toFixed(2)}`,
-                inline: false,
-              },
-            ];
-            await this.discordNotifier.sendSellNotification(fields);
-          }
+          // Regular sell notification
+          const grossProceeds = orderResult.cummulativeQuoteQty.toNumber();
+          const commissionUSDT = orderResult.feeUSDT.toNumber();
+          const netProceeds = usdtReceived; // Already calculated as net
+
+          const fields = [
+            {
+              name: "💵 Sell Price",
+              value: `$${orderResult.avgPrice.toFixed(2)}`,
+              inline: false,
+            },
+            {
+              name: "🔢 Quantity Sold",
+              value: `${orderResult.executedQty.toFixed(8)} BTC`,
+              inline: false,
+            },
+            {
+              name: "💰 Gross Proceeds",
+              value: `${grossProceeds.toFixed(2)} USDT`,
+              inline: false,
+            },
+            {
+              name: "💸 Commission Paid",
+              value: `${commissionUSDT.toFixed(2)} USDT`,
+              inline: false,
+            },
+            {
+              name: "📊 Net Proceeds",
+              value: `${netProceeds.toFixed(2)} USDT`,
+              inline: false,
+            },
+            {
+              name: "📉 BTC Remaining",
+              value:
+                updates.btc_accumulated > 0.00000001
+                  ? `${updates.btc_accumulated.toFixed(8)} BTC (Dust)`
+                  : `${updates.btc_accumulated.toFixed(8)} BTC`,
+              inline: false,
+            },
+            {
+              name: "🏦 Capital Available",
+              value: `${updates.capital_available.toFixed(2)} USDT`,
+              inline: false,
+            },
+          ];
+          await this.discordNotifier.sendSellNotification(fields);
         } catch (error) {
           logger.error("Failed to send Discord notification", { error });
         }
@@ -268,10 +313,10 @@ export class SellOrderStateUpdater extends EventEmitter {
     }
   }
 
-  calculateUpdates(
+  async calculateUpdates(
     currentState: CycleState,
     orderResult: OrderResult,
-  ): StateUpdateData {
+  ): Promise<CycleUpdateSignal | NewCycleSignal> {
     // Calculate actual BTC sold from fills
     let actualBtcSold = new Decimal(0);
     let actualUsdtReceived = new Decimal(0);
@@ -313,12 +358,15 @@ export class SellOrderStateUpdater extends EventEmitter {
     const netUsdtReceived = usdtReceived.sub(usdtFee);
 
     // Check if this is a complete sale (cycle reset)
-    // Dust is BTC that cannot be sold due to minimum constraints
-    // We consider the cycle complete when remaining BTC is below minQty (0.00001)
-    const isCycleComplete = newBtcAccumulated < 0.00001;
+    // Use trading rules to determine if remaining BTC is just dust
+    await this.tradingRules.getRules("BTCUSDT"); // Ensure rules are cached
+    const isCycleComplete = this.tradingRules.isDust(
+      newBtcAccumulated,
+      "BTCUSDT",
+    );
 
     if (isCycleComplete) {
-      // CYCLE RESET - Per STRATEGY.md lines 279-295
+      // CYCLE COMPLETE - Return signal to create new cycle
 
       // Calculate profit using actual BTC sold (per STRATEGY.md lines 116-118)
       const referencePrice = currentState.reference_price ?? 0;
@@ -332,49 +380,31 @@ export class SellOrderStateUpdater extends EventEmitter {
         .add(profit)
         .toNumber();
 
-      // Recalculate buy amount (per STRATEGY.md line 293)
-      const newBuyAmount = Math.floor(
-        newCapitalAvailable / this.config.maxPurchases,
-      );
-
-      // Use ATH price as new reference, but validate it first
-      const newReferencePrice =
-        currentState.ath_price && currentState.ath_price > 0
-          ? currentState.ath_price
-          : currentState.reference_price || 0; // Fallback to current reference if ATH is invalid
-
-      if (!currentState.ath_price || currentState.ath_price === 0) {
-        logger.warn(
-          "⚠️ ATH price is null/zero during cycle reset, using current reference price as fallback",
-          {
-            ath_price: currentState.ath_price,
-            reference_price: currentState.reference_price,
-            newReferencePrice,
-          },
-        );
-      }
-
       // Log dust preservation
       if (newBtcAccumulated > 0) {
         logger.info("Preserving dust for next cycle", {
           dustAmount: newBtcAccumulated,
           dustValue: newBtcAccumulated * (currentState.reference_price || 0),
+          minTradable: this.tradingRules.getMinTradableAmount("BTCUSDT"),
         });
       }
 
+      // Return signal to create new cycle
+      logger.info("🔄 Cycle complete, signaling for new cycle creation", {
+        previousCycleId: currentState.id,
+        finalProfit: profit.toNumber(),
+        carryOverCapital: newCapitalAvailable,
+        carryOverDust: newBtcAccumulated,
+      });
+
       return {
-        btc_accumulated: newBtcAccumulated, // Total BTC including dust
-        btc_accum_net: 0, // Reset to 0 for new cycle - only tracks current cycle BTC
-        btc_dust: newBtcAccumulated, // Save dust separately to exclude from reference price
-        cost_accum_usdt: 0, // Reset cost accumulator for clean profit tracking
-        capital_available: newCapitalAvailable,
-        purchases_remaining: this.config.maxPurchases,
-        reference_price: newReferencePrice, // Reset to ATH (per STRATEGY.md line 294)
-        ath_price: currentState.ath_price, // Preserve ATH price
-        buy_amount: newBuyAmount,
-        status: "READY",
-        buy_grid: null, // Reset grid for new cycle
-        buy_index: 0, // Reset index for new cycle
+        type: "CREATE_NEW_CYCLE",
+        previousCycleId: currentState.id,
+        completionData: {
+          finalProfit: profit.toNumber(),
+          carryOverCapital: newCapitalAvailable,
+          carryOverDust: newBtcAccumulated,
+        },
       };
     } else {
       // PARTIAL SALE - Cycle continues
@@ -386,17 +416,20 @@ export class SellOrderStateUpdater extends EventEmitter {
 
       // Keep current btc_accum_net and cost_accum_usdt as they track the full cycle
       return {
-        btc_accumulated: newBtcAccumulated,
-        btc_accum_net: currentState.btc_accum_net ?? 0,
-        cost_accum_usdt: currentState.cost_accum_usdt ?? 0,
-        capital_available: newCapitalAvailable,
-        purchases_remaining: currentState.purchases_remaining,
-        reference_price: currentState.reference_price,
-        ath_price: currentState.ath_price, // Preserve ATH price
-        buy_amount: currentState.buy_amount,
-        status: "HOLDING", // Still holding some BTC
-        buy_grid: currentState.buy_grid, // Preserve buy_grid
-        buy_index: currentState.buy_index ?? undefined, // Preserve buy_index
+        type: "UPDATE_CYCLE",
+        updates: {
+          btc_accumulated: newBtcAccumulated,
+          btc_accum_net: currentState.btc_accum_net ?? 0,
+          cost_accum_usdt: currentState.cost_accum_usdt ?? 0,
+          capital_available: newCapitalAvailable,
+          purchases_remaining: currentState.purchases_remaining,
+          reference_price: currentState.reference_price,
+          ath_price: currentState.ath_price, // Preserve ATH price
+          buy_amount: currentState.buy_amount,
+          status: "HOLDING", // Still holding some BTC
+          buy_grid: currentState.buy_grid, // Preserve buy_grid
+          buy_index: currentState.buy_index ?? undefined, // Preserve buy_index
+        },
       };
     }
   }

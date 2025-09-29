@@ -59,7 +59,8 @@ describe("Sell Trigger E2E", () => {
 
     let currentState = await components.cycleStateManager.getCurrentState();
     const referencePrice = currentState?.reference_price || 99700;
-    const sellTriggerPrice = referencePrice * 1.005; // Exactly 0.5% above reference
+    // With commission adjustment: (referencePrice * 1.005) / (1 - 0.001)
+    const sellTriggerPrice = (referencePrice * 1.005) / 0.999; // Commission-adjusted 0.5% above reference
 
     let sellExecuted = false;
     let sellPrice = 0;
@@ -100,23 +101,24 @@ describe("Sell Trigger E2E", () => {
             buy_index: currentState.buy_index || 0,
           };
 
-          const sellTrigger = components.sellTriggerDetector.checkSellTrigger(
-            triggerState,
-            {
-              risePercentage: 0.005,
-              dropPercentage: 0.003,
-              exchangeMinNotional: 10,
-            },
-            {
-              close: currentPrice,
-              high: currentPrice,
-              low: currentPrice,
-              open: currentPrice,
-              volume: 0,
-              timestamp: Date.now(),
-            },
-            balances,
-          );
+          const sellTrigger =
+            await components.sellTriggerDetector.checkSellTrigger(
+              triggerState,
+              {
+                risePercentage: 0.005,
+                dropPercentage: 0.003,
+                exchangeMinNotional: 10,
+              },
+              {
+                close: currentPrice,
+                high: currentPrice,
+                low: currentPrice,
+                open: currentPrice,
+                volume: 0,
+                timestamp: Date.now(),
+              },
+              balances,
+            );
 
           console.log(`Sell trigger at ${currentPrice}:`, sellTrigger);
 
@@ -187,7 +189,7 @@ describe("Sell Trigger E2E", () => {
       usdtSpot: parseFloat(usdtBalance?.free || "0"),
     };
 
-    const sellTrigger = components.sellTriggerDetector.checkSellTrigger(
+    const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
         reference_price: referencePrice,
@@ -252,9 +254,10 @@ describe("Sell Trigger E2E", () => {
     // Reference price should be the weighted average
     expect(state?.reference_price!).toBeCloseTo(99502.48, 1);
 
-    // Sell trigger price should be reference * 1.005
-    const sellTriggerPrice = (state?.reference_price || 99502.48) * 1.005;
-    expect(sellTriggerPrice).toBeCloseTo(99999.99, 1);
+    // Sell trigger price should be commission-adjusted: (reference * 1.005) / (1 - 0.001)
+    const sellTriggerPrice =
+      ((state?.reference_price || 99502.48) * 1.005) / 0.999;
+    expect(sellTriggerPrice).toBeCloseTo(100100.09, 1);
   });
 
   it("should handle partial sells when BTC balance differs from accumulated", async () => {
@@ -287,10 +290,10 @@ describe("Sell Trigger E2E", () => {
       usdtSpot: parseFloat(usdtBalance?.free || "0"),
     };
 
-    // Test at sell trigger price
-    const testPrice = 99700 * 1.005;
+    // Test at commission-adjusted sell trigger price
+    const testPrice = (99700 * 1.005) / 0.999;
 
-    const sellTrigger = components.sellTriggerDetector.checkSellTrigger(
+    const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
         reference_price: 99700,

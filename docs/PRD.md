@@ -3,6 +3,7 @@
 ## Document Usage Guide for PM Subagent
 
 This PRD is structured for autonomous development using Claude Code. To create GitHub issues:
+
 1. Start with Priority 1 stories (must be completed first)
 2. Each story has explicit acceptance criteria for testing
 3. Use story points for sprint planning (velocity ~20 pts/week)
@@ -10,6 +11,7 @@ This PRD is structured for autonomous development using Claude Code. To create G
 5. Appendix A contains exact implementation formulas - reference in tickets
 
 **Key Sections for PM:**
+
 - Section 3: User Stories (create GitHub issues from these)
 - Section 4: BDD Tests (acceptance criteria details)
 - Section 6: Story Prioritization Guide (dependency graph)
@@ -18,9 +20,11 @@ This PRD is structured for autonomous development using Claude Code. To create G
 ## 1. Executive Summary
 
 ### Product Vision
+
 A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar Cost Averaging) strategy with profit-taking, designed for single-user operation.
 
 ### MVP Scope
+
 - Single user (no authentication)
 - One trading pair (BTC/USDT)
 - One timeframe (configurable, e.g., 4H)
@@ -40,7 +44,9 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 ## 3. User Stories (Prioritized with Dependencies)
 
 ### Priority 1: Foundation (Must be completed first)
+
 **US-001: Initialize Trading Bot**
+
 - **As a** trader
 - **I want** the bot to initialize with default configuration on first run
 - **So that** I can start trading without manual database setup
@@ -53,6 +59,7 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 - **Story Points:** 3
 
 **US-002: Connect to Binance WebSocket**
+
 - **As a** trader
 - **I want** the bot to maintain a stable connection to Binance streams
 - **So that** I receive real-time price updates
@@ -65,7 +72,9 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 - **Story Points:** 5
 
 ### Priority 2: Core Trading Logic
+
 **US-003: Calculate Dynamic ATH**
+
 - **As a** trader
 - **I want** the bot to track the 20-candle ATH
 - **So that** I have a reference price when not holding
@@ -78,11 +87,12 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 - **Story Points:** 3
 
 **US-004: Execute Buy Orders**
+
 - **As a** trader
 - **I want** the bot to buy BTC when price drops below threshold
 - **So that** I accumulate during dips
 - **Acceptance Criteria:**
-  - Triggers when Close ≤ reference_price * (1 - %Drop)
+  - Triggers when Close ≤ reference_price \* (1 - %Drop)
   - Validates sufficient USDT balance
   - Places LIMIT IOC order with slippage protection
   - Updates reference_price to weighted average after fill
@@ -92,11 +102,12 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 - **Story Points:** 8
 
 **US-005: Execute Sell Orders**
+
 - **As a** trader
 - **I want** the bot to sell accumulated BTC when price rises
 - **So that** I take profits systematically
 - **Acceptance Criteria:**
-  - Triggers when Close ≥ reference_price * (1 + %Rise)
+  - Triggers when Close ≥ (reference_price \* (1 + %Rise)) / (1 - commission)
   - Only sells BTC from current cycle
   - Places LIMIT IOC order with slippage protection
   - Calculates profit correctly including all fees
@@ -106,7 +117,9 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 - **Story Points:** 8
 
 ### Priority 3: Safety & Monitoring
+
 **US-006: Implement Drift Detection**
+
 - **As a** trader
 - **I want** the bot to detect balance discrepancies
 - **So that** I'm protected from calculation errors
@@ -120,6 +133,7 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 - **Story Points:** 5
 
 **US-007: Send Discord Notifications**
+
 - **As a** trader
 - **I want** to receive Discord notifications for all events
 - **So that** I can monitor bot activity remotely
@@ -133,7 +147,9 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 - **Story Points:** 3
 
 ### Priority 4: Robustness
+
 **US-008: Handle Exchange Errors**
+
 - **As a** trader
 - **I want** the bot to gracefully handle API failures
 - **So that** temporary issues don't crash the bot
@@ -147,6 +163,7 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 - **Story Points:** 5
 
 **US-009: Persist State Changes**
+
 - **As a** trader
 - **I want** all state changes saved immediately
 - **So that** I can recover from crashes
@@ -164,177 +181,177 @@ A automated BTC/USDT spot trading bot for Binance that implements a DCA (Dollar 
 ### 4.1 Strategy Core Tests
 
 ```typescript
-describe('Trading Strategy Core', () => {
-  describe('ATH Calculation', () => {
-    it('should calculate ATH from last 20 closed candles', () => {});
-    it('should update ATH when new candle closes', () => {});
-    it('should handle less than 20 candles gracefully', () => {});
-    it('should only use ATH when btc_accumulated equals zero', () => {});
-    it('should exclude current unclosed candle from ATH', () => {});
+describe("Trading Strategy Core", () => {
+  describe("ATH Calculation", () => {
+    it("should calculate ATH from last 20 closed candles", () => {});
+    it("should update ATH when new candle closes", () => {});
+    it("should handle less than 20 candles gracefully", () => {});
+    it("should only use ATH when btc_accumulated equals zero", () => {});
+    it("should exclude current unclosed candle from ATH", () => {});
   });
 
-  describe('Reference Price Calculation', () => {
-    it('should equal ATH when no purchases made', () => {});
-    it('should calculate weighted average including fees after first buy', () => {});
-    it('should update correctly after multiple purchases', () => {});
-    it('should account for base currency fees in calculation', () => {});
-    it('should account for quote currency fees in calculation', () => {});
+  describe("Reference Price Calculation", () => {
+    it("should equal ATH when no purchases made", () => {});
+    it("should calculate weighted average including fees after first buy", () => {});
+    it("should update correctly after multiple purchases", () => {});
+    it("should account for base currency fees in calculation", () => {});
+    it("should account for quote currency fees in calculation", () => {});
   });
 
-  describe('Buy Amount Determination', () => {
-    it('should divide initial capital equally by max purchases',() => {});
-    it('should maintain fixed amount for all but last purchase', () => {});
-    it('should use all remaining capital for last purchase', () => {});
-    it('should skip last purchase if below MinBuyUSDT', () => {});
-    it('should skip purchase if below exchange minNotional', () => {});
-  });
-});
-
-describe('Buy Order Execution', () => {
-  describe('When price drops below threshold', () => {
-    it('should trigger buy when Close <= reference_price * (1 - %Drop)', () => {});
-    it('should not trigger if purchases_remaining is zero', () => {});
-    it('should not trigger if insufficient USDT balance', () => {});
-    it('should not trigger if drift exceeds 0.5%', () => {});
-  });
-
-  describe('Order Placement', () => {
-    it('should place LIMIT IOC order type', () => {});
-    it('should add slippage protection to limit price', () => {});
-    it('should round price to exchange tick size', () => {});
-    it('should round quantity to exchange step size', () => {});
-    it('should validate against minimum notional value', () => {});
-  });
-
-  describe('After Successful Buy', () => {
-    it('should decrease capital_available by exact USDT spent', () => {});
-    it('should increase btc_accumulated by net BTC received', () => {});
-    it('should update cost_accum_usdt with fees included', () => {});
-    it('should recalculate reference_price as weighted average', () => {});
-    it('should decrease purchases_remaining by one', () => {});
-    it('should change status from READY to HOLDING', () => {});
-    it('should persist all state changes to database', () => {});
-  });
-
-  describe('Partial Fill Handling', () => {
-    it('should process partial fills correctly', () => {});
-    it('should update quantities based on actual filled amount', () => {});
-    it('should still count as one purchase used', () => {});
+  describe("Buy Amount Determination", () => {
+    it("should divide initial capital equally by max purchases", () => {});
+    it("should maintain fixed amount for all but last purchase", () => {});
+    it("should use all remaining capital for last purchase", () => {});
+    it("should skip last purchase if below MinBuyUSDT", () => {});
+    it("should skip purchase if below exchange minNotional", () => {});
   });
 });
 
-describe('Sell Order Execution', () => {
-  describe('When price rises above threshold', () => {
-    it('should trigger sell when Close >= reference_price * (1 + %Rise)', () => {});
-    it('should only trigger if btc_accumulated > 0', () => {});
-    it('should not trigger if BTC balance insufficient', () => {});
-    it('should not trigger if drift exceeds 0.5%', () => {});
+describe("Buy Order Execution", () => {
+  describe("When price drops below threshold", () => {
+    it("should trigger buy when Close <= reference_price * (1 - %Drop)", () => {});
+    it("should not trigger if purchases_remaining is zero", () => {});
+    it("should not trigger if insufficient USDT balance", () => {});
+    it("should not trigger if drift exceeds 0.5%", () => {});
   });
 
-  describe('Order Placement', () => {
-    it('should attempt to sell ALL btc_accumulated', () => {});
-    it('should never sell BTC not from current cycle', () => {});
-    it('should place LIMIT IOC order type', () => {});
-    it('should apply slippage protection to limit price', () => {});
+  describe("Order Placement", () => {
+    it("should place LIMIT IOC order type", () => {});
+    it("should add slippage protection to limit price", () => {});
+    it("should round price to exchange tick size", () => {});
+    it("should round quantity to exchange step size", () => {});
+    it("should validate against minimum notional value", () => {});
   });
 
-  describe('Complete Sale (100% filled)', () => {
-    it('should calculate principal as reference_price * btc_sold', () => {});
-    it('should calculate profit as received_usdt - fees - principal', () => {});
-    it('should set profit to zero if calculation is negative', () => {});
-    it('should add principal + profit to capital_available', () => {});
-    it('should reset btc_accumulated to zero', () => {});
-    it('should reset purchases_remaining to MaxPurchases', () => {});
-    it('should reset cost accumulators to zero', () => {});
-    it('should set reference_price back to ATH', () => {});
-    it('should change status from HOLDING to READY', () => {});
-    it('should calculate new buy_amount from new capital', () => {});
+  describe("After Successful Buy", () => {
+    it("should decrease capital_available by exact USDT spent", () => {});
+    it("should increase btc_accumulated by net BTC received", () => {});
+    it("should update cost_accum_usdt with fees included", () => {});
+    it("should recalculate reference_price as weighted average", () => {});
+    it("should decrease purchases_remaining by one", () => {});
+    it("should change status from READY to HOLDING", () => {});
+    it("should persist all state changes to database", () => {});
   });
 
-  describe('Partial Sale Handling', () => {
-    it('should reduce btc_accumulated by amount sold', () => {});
-    it('should NOT reset cycle on partial sale', () => {});
-    it('should NOT reset purchases_remaining', () => {});
-    it('should keep same reference_price', () => {});
-    it('should attempt to sell remainder on next candle', () => {});
+  describe("Partial Fill Handling", () => {
+    it("should process partial fills correctly", () => {});
+    it("should update quantities based on actual filled amount", () => {});
+    it("should still count as one purchase used", () => {});
   });
 });
 
-describe('Drift Detection', () => {
-  describe('USDT Balance Drift', () => {
-    it('should calculate drift as |actual - expected| / expected', () => {});
-    it('should pause strategy if drift >= 0.5%', () => {});
-    it('should check before every buy order', () => {});
-    it('should send Discord alert when pausing', () => {});
+describe("Sell Order Execution", () => {
+  describe("When price rises above threshold", () => {
+    it("should trigger sell when Close >= (reference_price * (1 + %Rise)) / (1 - commission)", () => {});
+    it("should only trigger if btc_accumulated > 0", () => {});
+    it("should not trigger if BTC balance insufficient", () => {});
+    it("should not trigger if drift exceeds 0.5%", () => {});
   });
 
-  describe('BTC Balance Drift', () => {
-    it('should calculate drift correctly for BTC', () => {});
-    it('should pause strategy if drift >= 0.5%', () => {});
-    it('should check before every sell order', () => {});
-    it('should use satoshi as minimum divisor', () => {});
-  });
-});
-
-describe('Cycle Management', () => {
-  describe('Cycle Initialization', () => {
-    it('should start with status READY', () => {});
-    it('should set capital_available to InitialCapitalUSDT', () => {});
-    it('should set purchases_remaining to MaxPurchases', () => {});
-    it('should set btc_accumulated to zero', () => {});
+  describe("Order Placement", () => {
+    it("should attempt to sell ALL btc_accumulated", () => {});
+    it("should never sell BTC not from current cycle", () => {});
+    it("should place LIMIT IOC order type", () => {});
+    it("should apply slippage protection to limit price", () => {});
   });
 
-  describe('Within Cycle', () => {
-    it('should maintain cycle through multiple buys', () => {});
-    it('should maintain cycle through partial sells', () => {});
-    it('should track all fees cumulatively', () => {});
+  describe("Complete Sale (100% filled)", () => {
+    it("should calculate principal as reference_price * btc_sold", () => {});
+    it("should calculate profit as received_usdt - fees - principal", () => {});
+    it("should set profit to zero if calculation is negative", () => {});
+    it("should add principal + profit to capital_available", () => {});
+    it("should reset btc_accumulated to zero", () => {});
+    it("should reset purchases_remaining to MaxPurchases", () => {});
+    it("should reset cost accumulators to zero", () => {});
+    it("should set reference_price back to ATH", () => {});
+    it("should change status from HOLDING to READY", () => {});
+    it("should calculate new buy_amount from new capital", () => {});
   });
 
-  describe('Cycle Completion', () => {
-    it('should only complete on 100% BTC sale', () => {});
-    it('should compound profits into next cycle', () => {});
-    it('should increase buy amounts if capital grew', () => {});
-    it('should decrease buy amounts if capital shrunk', () => {});
-  });
-});
-
-describe('Edge Cases and Error Scenarios', () => {
-  describe('Insufficient Funds', () => {
-    it('should skip buy if USDT balance too low', () => {});
-    it('should skip last buy if amount below minimum', () => {});
-    it('should handle zero capital_available gracefully', () => {});
-  });
-
-  describe('API Failures', () => {
-    it('should retry failed orders with exponential backoff', () => {});
-    it('should pause after 3 consecutive failures', () => {});
-    it('should not lose state during retries', () => {});
-  });
-
-  describe('Invalid Market Data', () => {
-    it('should reject candles with invalid timestamps', () => {});
-    it('should reject candles with zero or negative prices', () => {});
-    it('should handle missing candles in ATH calculation', () => {});
-  });
-
-  describe('Startup Recovery', () => {
-    it('should recover state from database on restart', () => {});
-    it('should validate recovered state for consistency', () => {});
-    it('should resume from exact point of interruption', () => {});
+  describe("Partial Sale Handling", () => {
+    it("should reduce btc_accumulated by amount sold", () => {});
+    it("should NOT reset cycle on partial sale", () => {});
+    it("should NOT reset purchases_remaining", () => {});
+    it("should keep same reference_price", () => {});
+    it("should attempt to sell remainder on next candle", () => {});
   });
 });
 
-describe('Integration Tests', () => {
-  describe('Complete Trading Cycle', () => {
-    it('should execute full cycle: 3 buys, 1 sell, reset', () => {});
-    it('should handle real Binance testnet orders', () => {});
-    it('should correctly account for actual exchange fees', () => {});
+describe("Drift Detection", () => {
+  describe("USDT Balance Drift", () => {
+    it("should calculate drift as |actual - expected| / expected", () => {});
+    it("should pause strategy if drift >= 0.5%", () => {});
+    it("should check before every buy order", () => {});
+    it("should send Discord alert when pausing", () => {});
   });
 
-  describe('24-Hour Operation', () => {
-    it('should maintain WebSocket connection for 24 hours', () => {});
-    it('should handle Binance maintenance windows', () => {});
-    it('should not leak memory over extended operation', () => {});
+  describe("BTC Balance Drift", () => {
+    it("should calculate drift correctly for BTC", () => {});
+    it("should pause strategy if drift >= 0.5%", () => {});
+    it("should check before every sell order", () => {});
+    it("should use satoshi as minimum divisor", () => {});
+  });
+});
+
+describe("Cycle Management", () => {
+  describe("Cycle Initialization", () => {
+    it("should start with status READY", () => {});
+    it("should set capital_available to InitialCapitalUSDT", () => {});
+    it("should set purchases_remaining to MaxPurchases", () => {});
+    it("should set btc_accumulated to zero", () => {});
+  });
+
+  describe("Within Cycle", () => {
+    it("should maintain cycle through multiple buys", () => {});
+    it("should maintain cycle through partial sells", () => {});
+    it("should track all fees cumulatively", () => {});
+  });
+
+  describe("Cycle Completion", () => {
+    it("should only complete on 100% BTC sale", () => {});
+    it("should compound profits into next cycle", () => {});
+    it("should increase buy amounts if capital grew", () => {});
+    it("should decrease buy amounts if capital shrunk", () => {});
+  });
+});
+
+describe("Edge Cases and Error Scenarios", () => {
+  describe("Insufficient Funds", () => {
+    it("should skip buy if USDT balance too low", () => {});
+    it("should skip last buy if amount below minimum", () => {});
+    it("should handle zero capital_available gracefully", () => {});
+  });
+
+  describe("API Failures", () => {
+    it("should retry failed orders with exponential backoff", () => {});
+    it("should pause after 3 consecutive failures", () => {});
+    it("should not lose state during retries", () => {});
+  });
+
+  describe("Invalid Market Data", () => {
+    it("should reject candles with invalid timestamps", () => {});
+    it("should reject candles with zero or negative prices", () => {});
+    it("should handle missing candles in ATH calculation", () => {});
+  });
+
+  describe("Startup Recovery", () => {
+    it("should recover state from database on restart", () => {});
+    it("should validate recovered state for consistency", () => {});
+    it("should resume from exact point of interruption", () => {});
+  });
+});
+
+describe("Integration Tests", () => {
+  describe("Complete Trading Cycle", () => {
+    it("should execute full cycle: 3 buys, 1 sell, reset", () => {});
+    it("should handle real Binance testnet orders", () => {});
+    it("should correctly account for actual exchange fees", () => {});
+  });
+
+  describe("24-Hour Operation", () => {
+    it("should maintain WebSocket connection for 24 hours", () => {});
+    it("should handle Binance maintenance windows", () => {});
+    it("should not leak memory over extended operation", () => {});
   });
 });
 ```
@@ -345,53 +362,58 @@ describe('Integration Tests', () => {
 // Test fixtures needed
 interface TestFixtures {
   mockCandles: {
-    trending_up: Candle[];      // 20 candles with rising prices
-    trending_down: Candle[];     // 20 candles with falling prices
-    volatile: Candle[];          // High volatility test data
-    edge_cases: Candle[];        // Gaps, zero volume, etc.
+    trending_up: Candle[]; // 20 candles with rising prices
+    trending_down: Candle[]; // 20 candles with falling prices
+    volatile: Candle[]; // High volatility test data
+    edge_cases: Candle[]; // Gaps, zero volume, etc.
   };
-  
+
   mockOrders: {
-    full_fill: OrderResult;      // 100% filled order
-    partial_fill: OrderResult;   // 50% filled order
-    no_fill: OrderResult;        // 0% filled (cancelled)
+    full_fill: OrderResult; // 100% filled order
+    partial_fill: OrderResult; // 50% filled order
+    no_fill: OrderResult; // 0% filled (cancelled)
   };
-  
+
   mockBalances: {
-    sufficient: Balance;         // Enough for all operations
-    insufficient: Balance;       // Too low for operations
-    with_drift: Balance;         // Has drift > 0.5%
+    sufficient: Balance; // Enough for all operations
+    insufficient: Balance; // Too low for operations
+    with_drift: Balance; // Has drift > 0.5%
   };
 }
 ```
 
 ### 4.1 Strategy Engine
+
 - Monitor BTC/USDT price on configured timeframe (e.g., 4H candles)
 - Calculate dynamic ATH from 20-candle moving window
-- Execute buys when price drops below reference_price * (1 - %Drop)
-- Execute sells when price rises above reference_price * (1 + %Rise)
+- Execute buys when price drops below reference_price \* (1 - %Drop)
+- Execute sells when price rises above (reference_price \* (1 + %Rise)) / (1 - commission)
 - Track cycle state (READY, HOLDING, PAUSED)
 - Implement slippage protection on all orders
 
 ### 4.2 Order Management
+
 - Place LIMIT IOC (Immediate-Or-Cancel) orders only
 - Validate against Binance trading rules (minNotional, stepSize, tickSize)
 - Handle partial fills correctly
 - Track fees in both base (BTC) and quote (USDT) currencies
 
 ### 4.3 Capital Management
+
 - Track capital_available (USDT not invested)
 - Track btc_accumulated (BTC from current cycle only)
 - Calculate weighted average reference_price including fees
 - Implement drift detection (pause if balance deviation > 0.5%)
 
 ### 4.4 Error Handling
+
 - Automatic retry with exponential backoff for API failures
 - Pause strategy on critical errors
 - Maintain state consistency across restarts
 - Log all decisions and errors
 
 ### 4.5 Initial Setup
+
 - On first run, create default configuration in database
 - Initialize cycle state with status 'READY'
 - Validate Binance API connectivity
@@ -400,16 +422,19 @@ interface TestFixtures {
 ## 5. Non-Functional Requirements
 
 ### 5.1 Performance
+
 - Process candle closes within 1 second
 - Handle Binance API rate limits (weight: 1200/min, orders: 10/sec)
 - Reconnect WebSocket streams automatically
 
 ### 5.2 Reliability
+
 - Persist all state changes to database immediately
 - Recover from crashes without losing cycle state
 - Validate database state on startup
 
 ### 5.3 Security
+
 - Binance API keys in environment variables (local) / AWS Secrets Manager (production)
 - Supabase connection string in environment variables (includes SSL)
 - No exposed endpoints (internal operation only)
@@ -477,7 +502,9 @@ CREATE TABLE bot_events (
 ## 7. Development Phases (Story-Based Sprints)
 
 ### Sprint 1: Foundation & Infrastructure (Week 1)
+
 **Goal:** Establish project base and core connectivity
+
 - [ ] **US-001**: Initialize Trading Bot (3 pts)
   - Database migrations via Supabase CLI
   - Configuration management
@@ -490,7 +517,9 @@ CREATE TABLE bot_events (
 - [ ] **Setup**: BDD test framework and fixtures
 
 ### Sprint 2: Core Trading Logic (Week 2)
+
 **Goal:** Implement buy/sell decision engine
+
 - [ ] **US-003**: Calculate Dynamic ATH (3 pts)
 - [ ] **US-004**: Execute Buy Orders (8 pts)
   - Order validation
@@ -501,14 +530,18 @@ CREATE TABLE bot_events (
   - Cycle reset logic
 
 ### Sprint 3: Safety & Monitoring (Week 3)
+
 **Goal:** Add protection mechanisms and visibility
+
 - [ ] **US-006**: Implement Drift Detection (5 pts)
 - [ ] **US-007**: Send Discord Notifications (3 pts)
 - [ ] **US-008**: Handle Exchange Errors (5 pts)
 - [ ] **US-009**: Persist State Changes (5 pts)
 
 ### Sprint 4: Testing & Production (Week 4)
+
 **Goal:** Comprehensive testing and deployment
+
 - [ ] Complete BDD test suite (>90% coverage)
 - [ ] Integration tests with Binance Testnet
 - [ ] Docker containerization
@@ -517,6 +550,7 @@ CREATE TABLE bot_events (
 - [ ] Operational runbook & documentation
 
 ### Backlog (Post-MVP)
+
 - [ ] Web dashboard for monitoring
 - [ ] Historical performance analytics
 - [ ] Multiple timeframe support
@@ -526,23 +560,25 @@ CREATE TABLE bot_events (
 ## 8. Testing Strategy
 
 ### BDD Test Structure (Jest)
+
 ```typescript
-describe('Trading Bot Strategy', () => {
-  describe('When price drops below threshold', () => {
-    it('should place a buy order with correct amount', () => {});
-    it('should update reference price after successful buy', () => {});
-    it('should respect maximum purchases limit', () => {});
+describe("Trading Bot Strategy", () => {
+  describe("When price drops below threshold", () => {
+    it("should place a buy order with correct amount", () => {});
+    it("should update reference price after successful buy", () => {});
+    it("should respect maximum purchases limit", () => {});
   });
-  
-  describe('When price rises above threshold', () => {
-    it('should sell all accumulated BTC from cycle', () => {});
-    it('should calculate profit correctly including fees', () => {});
-    it('should reset cycle after complete sale', () => {});
+
+  describe("When price rises above threshold", () => {
+    it("should sell all accumulated BTC from cycle", () => {});
+    it("should calculate profit correctly including fees", () => {});
+    it("should reset cycle after complete sale", () => {});
   });
 });
 ```
 
 ### Test Coverage Requirements
+
 - Unit tests for all calculations (reference price, ATH, profits)
 - Integration tests for Binance API interactions
 - End-to-end tests for complete trading cycles
@@ -608,6 +644,7 @@ DISCORD_WEBHOOK_URL=your-discord-webhook
 ## 14. Cost Considerations
 
 **Estimated Monthly Costs:**
+
 - **Supabase**: Free tier (up to 500MB database, 2GB bandwidth)
 - **AWS App Runner**: ~$5-10/month (0.25 vCPU, 0.5 GB memory)
 - **AWS Secrets Manager**: ~$0.40/month per secret
@@ -617,31 +654,35 @@ DISCORD_WEBHOOK_URL=your-discord-webhook
 
 ## Appendix A: Detailed Strategy Specification
 
-*The following technical specification provides implementation-level details for the trading strategy. All formulas, calculations, and logic flows described here must be implemented exactly as specified.*
+_The following technical specification provides implementation-level details for the trading strategy. All formulas, calculations, and logic flows described here must be implemented exactly as specified._
 
 ### Strategy Parameters
 
-**Configurable**  
-- `timeframe`: e.g., 4H  
-- `%Drop` (0.02–0.08 suggested): drop threshold vs `reference_price` to buy  
-- `%Rise` (0.02–0.08 suggested): rise threshold vs `reference_price` to sell  
-- `MaxPurchases` (1..30): maximum purchases per cycle  
-- `MinBuyUSDT` (≥ 10.00): minimum per purchase  
-- `InitialCapitalUSDT`: initial capital allocated to cycle  
+**Configurable**
+
+- `timeframe`: e.g., 4H
+- `%Drop` (0.02–0.08 suggested): drop threshold vs `reference_price` to buy
+- `%Rise` (0.02–0.08 suggested): rise threshold vs `reference_price` to sell
+- `MaxPurchases` (1..30): maximum purchases per cycle
+- `MinBuyUSDT` (≥ 10.00): minimum per purchase
+- `InitialCapitalUSDT`: initial capital allocated to cycle
 - `SlippageGuardBuyPct` / `SlippageGuardSellPct`: 0.30% default
 
-**Constants**  
-- `ATH_WINDOW = 20` candles (moving window)  
+**Constants**
+
+- `ATH_WINDOW = 20` candles (moving window)
 - `DriftHaltThresholdPct = 0.5%` (strict stop for capital deviation)
 
 ### Core Formulas
 
 #### Dynamic ATH (moving window)
+
 ```
 ATH(N) = max(High[i]) for i in the last N CLOSED candles
 ```
 
 #### Reference Price (weighted average with fees)
+
 ```
 reference_price = cost_accum_usdt / btc_accum_net
 cost_accum_usdt = Σ(usdt_fill + fee_quote + fee_base * fill_price)
@@ -649,6 +690,7 @@ btc_accum_net   = Σ(btc_fill - fee_base)
 ```
 
 #### Buy Amount Calculation
+
 ```
 // At cycle start
 buy_amount = floor_to_precision( InitialCapitalUSDT / MaxPurchases )
@@ -657,21 +699,24 @@ buy_amount = floor_to_precision( InitialCapitalUSDT / MaxPurchases )
 ```
 
 #### Trading Conditions (evaluated at candle close)
+
 ```
 // BUY
 If Close ≤ reference_price * (1 - %Drop) AND purchases_remaining > 0 → Buy
 
 // SELL (only cycle BTC)
-If btc_accumulated > 0 AND Close ≥ reference_price * (1 + %Rise) → Sell ALL
+If btc_accumulated > 0 AND Close ≥ (reference_price * (1 + %Rise)) / (1 - commission) → Sell ALL
 ```
 
 #### Order Price Limits (slippage protection)
+
 ```
 limit_price_buy  = round_to_tick( Close * (1 + SlippageGuardBuyPct) )
 limit_price_sell = round_to_tick( Close * (1 - SlippageGuardSellPct) )
 ```
 
 #### Profit Calculation (on complete sale)
+
 ```
 principal_usdt = reference_price * total_btc_sold
 profit_usdt    = max(0, net_usdt_received - principal_usdt)
@@ -679,6 +724,7 @@ capital_available = capital_available + principal_usdt + profit_usdt
 ```
 
 #### Drift Detection
+
 ```
 drift_usdt = |USDT_SPOT - capital_available| / max(capital_available, 1)
 drift_btc  = |BTC_SPOT - btc_accumulated| / max(btc_accumulated, satoshi)
@@ -712,19 +758,19 @@ onCloseCandle():
     reference_price = ath_price
 
   // 2) SELL first - ONLY CYCLE BTC
-  if (btc_accumulated > 0 && Close >= reference_price * (1 + pct_rise)):
+  if (btc_accumulated > 0 && Close >= (reference_price * (1 + pct_rise)) / (1 - commission)):
     validateBalance(BTC_SPOT >= btc_accumulated)
     validateDrift(drift_btc < 0.005)
-    
+
     result = place_LIMIT_IOC_SELL(
       btc_accumulated,
       limit = round_tick(Close * (1 - slip_sell_pct))
     )
-    
+
     if (result.btc_sold > 0):
       principal = reference_price * result.btc_sold
       profit = max(0, result.usdt_received - result.fees - principal)
-      
+
       btc_accumulated -= result.btc_sold
       if (btc_accumulated == 0):  // Complete sale
         capital_available += principal + profit
@@ -735,12 +781,12 @@ onCloseCandle():
     amount = (purchases_remaining == 1) ? capital_available : buy_amount
     validateBalance(USDT_SPOT >= amount)
     validateDrift(drift_usdt < 0.005)
-    
+
     result = place_LIMIT_IOC_BUY(
       amount,
       limit = round_tick(Close * (1 + slip_buy_pct))
     )
-    
+
     if (result.usdt_filled >= max(MinBuyUSDT, minNotional)):
       updateAccumulators(result)
       reference_price = cost_accum_usdt / btc_accum_net
@@ -755,4 +801,5 @@ onCloseCandle():
 **Status**: Ready for Autonomous Implementation
 
 ## Implementation Note
+
 This bot must be developed using Test-Driven Development (TDD) with the BDD tests in Section 4. Write tests first, then implement to make them pass. This ensures the strategy works correctly with real money.

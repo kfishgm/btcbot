@@ -21,6 +21,7 @@ import {
   CycleState as BuyAmountCycleState,
 } from "./buy-amount-calculator.js";
 import { logger } from "../utils/logger.js";
+import type { TradingRules } from "../exchange/trading-rules.js";
 
 export interface CycleState {
   status: "READY" | "HOLDING" | "PAUSED";
@@ -76,7 +77,36 @@ export interface BuyTriggerResult {
 }
 
 export class BuyTriggerDetector {
-  constructor(private buyAmountCalculator: BuyAmountCalculator) {}
+  private tickSize: number | null = null;
+
+  constructor(
+    private buyAmountCalculator: BuyAmountCalculator,
+    private tradingRules?: TradingRules,
+  ) {}
+
+  /**
+   * Get tick size from trading rules or use default
+   */
+  private async getTickSize(): Promise<number> {
+    if (this.tickSize !== null) {
+      return this.tickSize;
+    }
+
+    if (this.tradingRules) {
+      try {
+        const rules = await this.tradingRules.getRules("BTCUSDT");
+        this.tickSize = rules.tickSize;
+        return rules.tickSize;
+      } catch (error) {
+        logger.warn("Failed to fetch trading rules, using default tickSize", {
+          error,
+        });
+      }
+    }
+
+    // Default tickSize for BTCUSDT
+    return 0.01;
+  }
 
   /**
    * Check if conditions are met to trigger a buy order based on grid levels
@@ -86,12 +116,12 @@ export class BuyTriggerDetector {
    * @param balances Current balance information
    * @returns Buy trigger result with decision, combined amount, and levels triggered
    */
-  public checkBuyTrigger(
+  public async checkBuyTrigger(
     state: CycleState,
     config: TradingConfig,
     candle: Candle,
     _balances: BalanceInfo, // Kept for interface compatibility, no longer used for drift check
-  ): BuyTriggerResult {
+  ): Promise<BuyTriggerResult> {
     // Initialize validations object
     const validations = {
       strategyActive: false,
@@ -149,7 +179,7 @@ export class BuyTriggerDetector {
 
       // Price has reached first grid level - build the grid dynamically
       // Use anchor if available, otherwise use ATH
-      const newGrid = this.buildBuyGrid(
+      const newGrid = await this.buildBuyGrid(
         state.reference_price,
         config,
         state.buy_anchor_price,
@@ -360,9 +390,9 @@ export class BuyTriggerDetector {
   /**
    * Quantize a value to tick size (floor operation as per Binance rules)
    * @param value The value to quantize
-   * @param tickSize The tick size (default 0.01 for BTCUSDT)
+   * @param tickSize The tick size
    */
-  private quantizeToTick(value: number, tickSize: number = 0.01): number {
+  private quantizeToTick(value: number, tickSize: number): number {
     return Math.floor(value / tickSize) * tickSize;
   }
 
@@ -372,14 +402,14 @@ export class BuyTriggerDetector {
    * If no anchor price, uses ATH as the reference
    * All levels are quantized to tickSize
    */
-  private buildBuyGrid(
+  private async buildBuyGrid(
     athPrice: number,
     config: TradingConfig,
     anchorPrice?: number | null,
-  ): number[] {
+  ): Promise<number[]> {
     const grid: number[] = [];
     const basePrice = anchorPrice || athPrice;
-    const tickSize = 0.01; // BTCUSDT tick size
+    const tickSize = await this.getTickSize();
 
     for (let n = 1; n <= config.maxPurchases; n++) {
       const rawLevel = basePrice * (1 - n * config.dropPercentage);
@@ -409,12 +439,12 @@ export class BuyTriggerDetector {
    * Called when anchor price is set and grid needs to be rebuilt
    * All levels are quantized to tickSize
    */
-  public buildGridFromAnchor(
+  public async buildGridFromAnchor(
     anchorPrice: number,
     config: TradingConfig,
-  ): number[] {
+  ): Promise<number[]> {
     const grid: number[] = [];
-    const tickSize = 0.01; // BTCUSDT tick size
+    const tickSize = await this.getTickSize();
 
     // Start from n = 1 since we've already executed the first buy
     // Each level is n * dropPercentage below the anchor

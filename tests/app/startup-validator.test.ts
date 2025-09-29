@@ -8,6 +8,8 @@ import { BinanceClient } from "../../src/exchange/binance-client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/supabase";
 import { Decimal } from "decimal.js";
+import { MockTradingRules } from "../mocks/mock-trading-rules";
+import type { TradingRules } from "../../src/exchange/trading-rules";
 
 // Only mock external dependencies
 jest.mock("../../src/exchange/binance-client");
@@ -90,11 +92,16 @@ describe("StartupValidator", () => {
     jest.spyOn(discordNotifier, "sendAlert").mockResolvedValue(undefined);
 
     balanceManager = new BalanceManager(mockBinanceClient as never);
-    cycleStateManager = new CycleStateManager(mockSupabaseClient as never, {
-      initialCapitalUSDT: 1000,
-      maxPurchases: 10,
-      minBuyUSDT: 10,
-    });
+    const mockTradingRules = new MockTradingRules() as unknown as TradingRules;
+    cycleStateManager = new CycleStateManager(
+      mockSupabaseClient as never,
+      {
+        initialCapitalUSDT: 1000,
+        maxPurchases: 10,
+        minBuyUSDT: 10,
+      },
+      mockTradingRules,
+    );
     strategyConfigLoader = new StrategyConfigLoader();
 
     // Mock the loadConfig method by default to return a valid config

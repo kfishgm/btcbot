@@ -63,6 +63,27 @@ async function verifyCycle() {
   console.log("  Rise Percentage:", strategy.rise_percentage * 100 + "%");
   console.log("  Max Purchases:", strategy.max_purchases);
   console.log("  Initial Capital: $" + strategy.initial_capital_usdt);
+
+  // Calculate and show sell target if we have a reference price
+  if (cycle.reference_price) {
+    const commissionRate = 0.001; // Default 0.1% Binance commission
+    const sellTarget =
+      (cycle.reference_price * (1 + strategy.rise_percentage)) /
+      (1 - commissionRate);
+    console.log("");
+    console.log("📈 Sell Target Calculation:");
+    console.log(`  Reference Price: $${cycle.reference_price.toFixed(2)}`);
+    console.log(
+      `  Target Rise: ${(strategy.rise_percentage * 100).toFixed(1)}%`,
+    );
+    console.log(`  Commission Rate: ${(commissionRate * 100).toFixed(1)}%`);
+    console.log(
+      `  Actual Sell Target: $${sellTarget.toFixed(2)} (commission-adjusted)`,
+    );
+    console.log(
+      `  → Will trigger sell when price >= $${sellTarget.toFixed(2)}`,
+    );
+  }
   console.log("");
 
   // Validate setup

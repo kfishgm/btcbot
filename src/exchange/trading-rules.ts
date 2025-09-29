@@ -522,4 +522,51 @@ export class TradingRules {
   getAllCachedRules(): Map<string, SymbolTradingRules> {
     return new Map(this.rulesCache);
   }
+
+  /**
+   * Check if an amount is considered dust (below minimum tradable)
+   * @param amount BTC amount to check
+   * @param symbol Trading symbol (e.g., 'BTCUSDT')
+   * @returns true if amount is below minimum tradable quantity
+   */
+  isDust(amount: number, symbol: string): boolean {
+    const rules = this.rulesCache.get(symbol);
+    if (!rules) {
+      throw new Error(
+        `No trading rules cached for ${symbol}. Call getRules() first.`,
+      );
+    }
+    return amount < rules.minQty;
+  }
+
+  /**
+   * Check if an amount is tradable (meets minimum requirements)
+   * @param amount BTC amount to check
+   * @param symbol Trading symbol (e.g., 'BTCUSDT')
+   * @returns true if amount meets minimum trading requirements
+   */
+  isTradable(amount: number, symbol: string): boolean {
+    const rules = this.rulesCache.get(symbol);
+    if (!rules) {
+      throw new Error(
+        `No trading rules cached for ${symbol}. Call getRules() first.`,
+      );
+    }
+    return amount >= rules.minQty;
+  }
+
+  /**
+   * Get the minimum tradable amount for a symbol
+   * @param symbol Trading symbol (e.g., 'BTCUSDT')
+   * @returns Minimum quantity that can be traded
+   */
+  getMinTradableAmount(symbol: string): number {
+    const rules = this.rulesCache.get(symbol);
+    if (!rules) {
+      throw new Error(
+        `No trading rules cached for ${symbol}. Call getRules() first.`,
+      );
+    }
+    return rules.minQty;
+  }
 }

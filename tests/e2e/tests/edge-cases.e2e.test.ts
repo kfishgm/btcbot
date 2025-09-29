@@ -94,7 +94,7 @@ describe("Edge Cases E2E", () => {
     // Test at a price that triggers the last buy
     const testPrice = 97000;
 
-    const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+    const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
         reference_price: 98500,
@@ -170,7 +170,7 @@ describe("Edge Cases E2E", () => {
 
     const testPrice = 99400; // Should trigger grid level
 
-    const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+    const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
         reference_price: 99500,
@@ -247,7 +247,7 @@ describe("Edge Cases E2E", () => {
 
     const sellPrice = 99500 * 1.005; // Trigger price
 
-    const sellTrigger = components.sellTriggerDetector.checkSellTrigger(
+    const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
         reference_price: 99500,
@@ -292,7 +292,7 @@ describe("Edge Cases E2E", () => {
     expect(orderValue).toBeLessThan(10);
 
     // Buy trigger should recognize this constraint
-    const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+    const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
         reference_price: 100000,
@@ -353,7 +353,7 @@ describe("Edge Cases E2E", () => {
     // Simulate rapid drop from 100000 to 97000 (crosses 10 grid levels)
     const rapidDropPrice = 97000;
 
-    const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
+    const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
         status: "READY",
         reference_price: 100000,

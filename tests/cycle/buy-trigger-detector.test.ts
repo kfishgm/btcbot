@@ -81,7 +81,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Basic Buy Trigger Detection", () => {
-    it("should trigger buy when price drops below threshold", () => {
+    it("should trigger buy when price drops below threshold", async () => {
       const state = createCycleState({
         buy_grid: [49000, 48000, 47000, 46000, 45000], // Pre-calculated grid
         buy_index: 0,
@@ -106,7 +106,12 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.buyAmount).toBe(100);
@@ -116,7 +121,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.validations?.amountValid).toBe(true);
     });
 
-    it("should trigger buy exactly at threshold", () => {
+    it("should trigger buy exactly at threshold", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -147,13 +152,18 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.buyAmount).toBe(100);
     });
 
-    it("should not trigger buy when price is above threshold", () => {
+    it("should not trigger buy when price is above threshold", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -181,7 +191,12 @@ describe("BuyTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("above first grid level");
@@ -190,7 +205,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Pre-Buy Validation Checks", () => {
-    it("should skip buy when no purchases remaining", () => {
+    it("should skip buy when no purchases remaining", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -218,13 +233,18 @@ describe("BuyTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("No purchases remaining");
     });
 
-    it("should skip buy when insufficient capital", () => {
+    it("should skip buy when insufficient capital", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -256,7 +276,12 @@ describe("BuyTriggerDetector", () => {
 
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(5);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       // With only 5 capital and buy_amount of 100, the calculated amount is too small
@@ -267,7 +292,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.validations?.gridValid).toBe(true);
     });
 
-    it("should skip buy when strategy is PAUSED", () => {
+    it("should skip buy when strategy is PAUSED", async () => {
       const state = createCycleState({
         status: "PAUSED", // Strategy paused
         reference_price: 50000,
@@ -295,14 +320,19 @@ describe("BuyTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("Strategy is PAUSED");
       expect(result.validations?.strategyActive).toBe(false);
     });
 
-    it("should skip buy when amount below minimum", () => {
+    it("should skip buy when amount below minimum", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -336,7 +366,12 @@ describe("BuyTriggerDetector", () => {
         "Amount 5 is below minimum 10 USDT",
       );
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("Amount 5 is below minimum 10 USDT");
@@ -345,7 +380,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Drift Detection", () => {
-    it("should trigger buy regardless of balance mismatch (retry handles)", () => {
+    it("should trigger buy regardless of balance mismatch (retry handles)", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -376,13 +411,18 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Drift no longer blocks trades - retry logic handles balance mismatch
       expect(result.shouldBuy).toBe(true);
     });
 
-    it("should pass drift check when within threshold", () => {
+    it("should pass drift check when within threshold", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -413,12 +453,17 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
     });
 
-    it("should calculate drift correctly with zero capital", () => {
+    it("should calculate drift correctly with zero capital", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -450,14 +495,19 @@ describe("BuyTriggerDetector", () => {
 
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(0);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // When capital is 0, it should fail on "below minimum" check
       expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("below minimum");
     });
 
-    it("should handle edge case of balance mismatch", () => {
+    it("should handle edge case of balance mismatch", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -488,7 +538,12 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Balance mismatch no longer blocks trades
       expect(result.shouldBuy).toBe(true);
@@ -496,7 +551,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Decimal Precision and Edge Cases", () => {
-    it("should handle high precision decimal calculations", () => {
+    it("should handle high precision decimal calculations", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000.12345678,
@@ -529,13 +584,18 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100.1728395);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.buyAmount).toBe(100.1728395);
     });
 
-    it("should handle null reference price", () => {
+    it("should handle null reference price", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: null, // No reference price set
@@ -563,13 +623,18 @@ describe("BuyTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("No reference price");
     });
 
-    it("should handle null buy amount", () => {
+    it("should handle null buy amount", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -603,13 +668,18 @@ describe("BuyTriggerDetector", () => {
       // Mock the buy amount calculator to return an amount
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(200);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("below minimum");
     });
 
-    it("should handle very large numbers", () => {
+    it("should handle very large numbers", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 1000000,
@@ -640,13 +710,18 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100000);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.buyAmount).toBe(100000);
     });
 
-    it("should handle very small percentages", () => {
+    it("should handle very small percentages", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -677,14 +752,19 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
     });
   });
 
   describe("Arithmetic Anchoring Strategy", () => {
-    it("should limit first buy to single level when no anchor is set", () => {
+    it("should limit first buy to single level when no anchor is set", async () => {
       const state = createCycleState({
         buy_grid: [49000, 48000, 47000, 46000, 45000],
         buy_index: 0,
@@ -705,7 +785,12 @@ describe("BuyTriggerDetector", () => {
 
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Should only trigger 1 level for first buy
       expect(result.shouldBuy).toBe(true);
@@ -715,7 +800,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.triggeredLevels).toEqual([49000]);
     });
 
-    it("should allow multiple levels after anchor is set", () => {
+    it("should allow multiple levels after anchor is set", async () => {
       const state = createCycleState({
         buy_grid: [49000, 48000, 47000, 46000, 45000],
         buy_index: 1, // Already bought first level
@@ -736,7 +821,12 @@ describe("BuyTriggerDetector", () => {
 
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Should trigger multiple levels after first buy
       expect(result.shouldBuy).toBe(true);
@@ -748,14 +838,14 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Grid Building with Anchor", () => {
-    it("should build grid from anchor price when available", () => {
+    it("should build grid from anchor price when available", async () => {
       const anchorPrice = 48500;
       const config = createTradingConfig({
         dropPercentage: 0.02,
         maxPurchases: 5,
       });
 
-      const grid = detector.buildGridFromAnchor(anchorPrice, config);
+      const grid = await detector.buildGridFromAnchor(anchorPrice, config);
 
       // Grid should be based on anchor price
       expect(grid).toHaveLength(5);
@@ -768,7 +858,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Complete Buy Decision Flow", () => {
-    it("should return detailed validation results for successful buy", () => {
+    it("should return detailed validation results for successful buy", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -803,7 +893,12 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.buyAmount).toBe(100);
@@ -821,7 +916,7 @@ describe("BuyTriggerDetector", () => {
       });
     });
 
-    it("should provide clear skip reason for each validation failure", () => {
+    it("should provide clear skip reason for each validation failure", async () => {
       // Test each validation failure separately
       const baseState = createCycleState({
         status: "READY",
@@ -851,7 +946,7 @@ describe("BuyTriggerDetector", () => {
       };
 
       // Test 1: Price threshold not met
-      let result = detector.checkBuyTrigger(
+      let result = await detector.checkBuyTrigger(
         baseState,
         baseConfig,
         { ...baseCandle, close: 49500 },
@@ -861,7 +956,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.reason).toContain("above first grid level");
 
       // Test 2: No purchases remaining
-      result = detector.checkBuyTrigger(
+      result = await detector.checkBuyTrigger(
         { ...baseState, purchases_remaining: 0 },
         baseConfig,
         baseCandle,
@@ -870,7 +965,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.reason).toContain("No purchases remaining");
 
       // Test 3: Strategy paused
-      result = detector.checkBuyTrigger(
+      result = await detector.checkBuyTrigger(
         { ...baseState, status: "PAUSED" },
         baseConfig,
         baseCandle,
@@ -880,7 +975,7 @@ describe("BuyTriggerDetector", () => {
 
       // Test 4: Insufficient capital (amount below minimum)
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(50);
-      result = detector.checkBuyTrigger(
+      result = await detector.checkBuyTrigger(
         { ...baseState, capital_available: 50 },
         baseConfig,
         baseCandle,
@@ -898,7 +993,7 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getSkipReason.mockReturnValue(
         "Amount 5 is below minimum 10 USDT",
       );
-      result = detector.checkBuyTrigger(
+      result = await detector.checkBuyTrigger(
         { ...baseState, capital_available: 5, buy_amount: 5 },
         baseConfig,
         baseCandle,
@@ -907,7 +1002,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.reason).toContain("Amount 5 is below minimum 10 USDT");
     });
 
-    it("should use all capital for last purchase", () => {
+    it("should use all capital for last purchase", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -942,7 +1037,12 @@ describe("BuyTriggerDetector", () => {
       // For last purchase, the implementation uses all capital directly
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       // When purchases_remaining is 1, should use all available capital
@@ -951,7 +1051,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("STRATEGY.md Compliance", () => {
-    it("should follow exact buy condition formula from STRATEGY.md", () => {
+    it("should follow exact buy condition formula from STRATEGY.md", async () => {
       // STRATEGY.md: if (Close ≤ reference_price * (1 - %Drop) AND purchases_remaining > 0 AND capital_available >= buy_amount)
       const state = createCycleState({
         status: "READY",
@@ -985,7 +1085,7 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      testCases.forEach(({ close, shouldBuy }) => {
+      for (const { close, shouldBuy } of testCases) {
         const candle: Candle = {
           close,
           high: close + 100,
@@ -995,17 +1095,17 @@ describe("BuyTriggerDetector", () => {
           timestamp: Date.now(),
         };
 
-        const result = detector.checkBuyTrigger(
+        const result = await detector.checkBuyTrigger(
           state,
           config,
           candle,
           balances,
         );
         expect(result.shouldBuy).toBe(shouldBuy);
-      });
+      }
     });
 
-    it("should no longer validate drift (handled by retry logic)", () => {
+    it("should no longer validate drift (handled by retry logic)", async () => {
       // STRATEGY.md: drift_usdt = |USDT_SPOT - capital_available| / max(capital_available, 1)
       const state = createCycleState({
         status: "READY",
@@ -1042,13 +1142,13 @@ describe("BuyTriggerDetector", () => {
         { usdtSpot: 1010, expectedDrift: 0, shouldBuy: true }, // Excess funds (no drift)
       ];
 
-      driftTests.forEach(({ usdtSpot }) => {
+      for (const { usdtSpot } of driftTests) {
         const balances: BalanceInfo = {
           usdtSpot,
           btcSpot: 0,
         };
 
-        const result = detector.checkBuyTrigger(
+        const result = await detector.checkBuyTrigger(
           state,
           config,
           candle,
@@ -1056,10 +1156,10 @@ describe("BuyTriggerDetector", () => {
         );
         // All should trigger - balance mismatch handled by retry logic
         expect(result.shouldBuy).toBe(true);
-      });
+      }
     });
 
-    it("should validate all pre-buy conditions in correct order", () => {
+    it("should validate all pre-buy conditions in correct order", async () => {
       // Per STRATEGY.md execution order
       const state = createCycleState({
         status: "READY",
@@ -1091,7 +1191,12 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // Verify all checks pass in correct order
       expect(result.validations).toEqual({
@@ -1105,7 +1210,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Logging and Monitoring", () => {
-    it("should log decision when buy is triggered", () => {
+    it("should log decision when buy is triggered", async () => {
       const loggerSpy = jest.spyOn(logger, "info").mockImplementation(() => {});
 
       const state = createCycleState({
@@ -1151,7 +1256,7 @@ describe("BuyTriggerDetector", () => {
       loggerSpy.mockRestore();
     });
 
-    it("should log skip reason when buy is not triggered", () => {
+    it("should log skip reason when buy is not triggered", async () => {
       const loggerSpy = jest.spyOn(logger, "info").mockImplementation(() => {});
 
       const state = createCycleState({
@@ -1181,7 +1286,12 @@ describe("BuyTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // No log should be called when buy is skipped
       expect(loggerSpy).not.toHaveBeenCalled();
@@ -1193,7 +1303,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Helper Methods", () => {
-    it("should detect buy trigger at correct threshold", () => {
+    it("should detect buy trigger at correct threshold", async () => {
       // Test that buy triggers at reference_price * (1 - dropPercentage)
       const state = createCycleState({
         reference_price: 50000,
@@ -1216,13 +1326,18 @@ describe("BuyTriggerDetector", () => {
       };
 
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.levelsTriggered).toBe(1);
     });
 
-    it("should no longer validate drift through checkBuyTrigger", () => {
+    it("should no longer validate drift through checkBuyTrigger", async () => {
       const state = createCycleState({
         reference_price: 50000,
         capital_available: 1000,
@@ -1244,7 +1359,7 @@ describe("BuyTriggerDetector", () => {
       };
 
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
-      const result = detector.checkBuyTrigger(
+      const result = await detector.checkBuyTrigger(
         state,
         config,
         candle,
@@ -1255,7 +1370,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.shouldBuy).toBe(true);
     });
 
-    it("should handle paused strategy state", () => {
+    it("should handle paused strategy state", async () => {
       const state = createCycleState({
         status: "PAUSED",
         reference_price: 50000,
@@ -1272,7 +1387,12 @@ describe("BuyTriggerDetector", () => {
         btcSpot: 0,
       };
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("Strategy is PAUSED");
@@ -1280,7 +1400,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Delayed Grid Construction", () => {
-    it("should build grid dynamically when price drops to first trigger level", () => {
+    it("should build grid dynamically when price drops to first trigger level", async () => {
       const state = createCycleState({
         reference_price: 50000,
         capital_available: 1000,
@@ -1304,7 +1424,12 @@ describe("BuyTriggerDetector", () => {
 
       // Price below first trigger level (50000 * 0.98 = 49000)
       const candle = createCandle({ close: 48500 });
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.newGrid).toBeDefined();
@@ -1316,7 +1441,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.newGrid![4]).toBe(45000); // Fifth level at 10% drop
     });
 
-    it("should not build grid when price is above first trigger level", () => {
+    it("should not build grid when price is above first trigger level", async () => {
       const state = createCycleState({
         reference_price: 50000,
         capital_available: 1000,
@@ -1336,14 +1461,19 @@ describe("BuyTriggerDetector", () => {
 
       // Price above first trigger level
       const candle = createCandle({ close: 49500 }); // Above 49000 threshold
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(false);
       expect(result.newGrid).toBeUndefined();
       expect(result.reason).toContain("above first grid level");
     });
 
-    it("should not rebuild grid if it already exists", () => {
+    it("should not rebuild grid if it already exists", async () => {
       const existingGrid = [49000, 48000, 47000, 46000, 45000];
       const state = createCycleState({
         reference_price: 50000,
@@ -1365,14 +1495,19 @@ describe("BuyTriggerDetector", () => {
 
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
       const candle = createCandle({ close: 49000 });
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.newGrid).toBeUndefined(); // Should not create new grid
       expect(result.levelsTriggered).toBe(1);
     });
 
-    it("should handle multiple levels triggered on grid construction", () => {
+    it("should handle multiple levels triggered on grid construction", async () => {
       const state = createCycleState({
         reference_price: 50000,
         capital_available: 1000,
@@ -1395,7 +1530,12 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
       // Price has dropped below multiple levels (8% drop)
       const candle = createCandle({ close: 46000 });
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       expect(result.shouldBuy).toBe(true);
       expect(result.newGrid).toBeDefined();
@@ -1406,7 +1546,7 @@ describe("BuyTriggerDetector", () => {
   });
 
   describe("Integration with Dependencies", () => {
-    it("should work with BuyAmountCalculator for regular purchases", () => {
+    it("should work with BuyAmountCalculator for regular purchases", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -1440,7 +1580,12 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // With grid-based logic, getPurchaseAmount is not called
       // Instead, it calculates directly based on buy_amount or initial_capital/maxPurchases
@@ -1454,7 +1599,7 @@ describe("BuyTriggerDetector", () => {
       expect(result.levelsTriggered).toBe(2);
     });
 
-    it("should work with BuyAmountCalculator for last purchase", () => {
+    it("should work with BuyAmountCalculator for last purchase", async () => {
       const state = createCycleState({
         status: "READY",
         reference_price: 50000,
@@ -1486,7 +1631,12 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(175.5);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      const result = detector.checkBuyTrigger(state, config, candle, balances);
+      const result = await detector.checkBuyTrigger(
+        state,
+        config,
+        candle,
+        balances,
+      );
 
       // For last purchase, all capital is used directly
       // getPurchaseAmount is not called in grid-based logic

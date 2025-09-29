@@ -67,8 +67,12 @@ export class MockSupabaseClient {
       buy_anchor_price: null,
       buy_grid: null,
       buy_index: 0,
-      version: 1,
+      completed_at: null,
+      final_profit: null,
+      previous_cycle_id: null,
+      strategy_config_id: null,
       updated_at: new Date().toISOString(),
+      version: 1,
     };
     this.mockData.cycle_state.set("test-cycle", defaultCycle);
   }
@@ -99,16 +103,18 @@ export class MockSupabaseClient {
           return { data: null, error: null };
         },
         order: (_column: string, _options?: { ascending?: boolean }) => ({
-          limit: async (_count: number) => {
-            if (table === "cycle_state" || table === "strategy_config") {
-              const values = Array.from(
-                (tableData as Map<string, unknown>).values(),
-              );
-              // Return array of values, not single value
-              return { data: values, error: null };
-            }
-            return { data: [], error: null };
-          },
+          limit: (_count: number) => ({
+            single: async () => {
+              if (table === "cycle_state" || table === "strategy_config") {
+                const values = Array.from(
+                  (tableData as Map<string, unknown>).values(),
+                );
+                // Return first value as single result
+                return { data: values[0] || null, error: null };
+              }
+              return { data: null, error: null };
+            },
+          }),
         }),
       }),
 
@@ -236,6 +242,10 @@ export class MockSupabaseClient {
       buy_anchor_price: null,
       buy_grid: null,
       buy_index: 0,
+      completed_at: null,
+      final_profit: null,
+      previous_cycle_id: null,
+      strategy_config_id: null,
       version: 1,
       updated_at: new Date().toISOString(),
     };

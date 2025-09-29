@@ -113,25 +113,26 @@ describe("Complete Trading Cycle E2E", () => {
             buy_index: currentState.buy_index || 0,
           };
 
-          const buyTrigger = components.buyTriggerDetector.checkBuyTrigger(
-            triggerState,
-            {
-              dropPercentage: 0.003,
-              risePercentage: 0.005,
-              maxPurchases: 10,
-              minBuyUSDT: 10,
-              exchangeMinNotional: 10,
-            },
-            {
-              close: currentPrice,
-              high: currentPrice,
-              low: currentPrice,
-              open: currentPrice,
-              volume: 0,
-              timestamp: Date.now(),
-            },
-            balances,
-          );
+          const buyTrigger =
+            await components.buyTriggerDetector.checkBuyTrigger(
+              triggerState,
+              {
+                dropPercentage: 0.003,
+                risePercentage: 0.005,
+                maxPurchases: 10,
+                minBuyUSDT: 10,
+                exchangeMinNotional: 10,
+              },
+              {
+                close: currentPrice,
+                high: currentPrice,
+                low: currentPrice,
+                open: currentPrice,
+                volume: 0,
+                timestamp: Date.now(),
+              },
+              balances,
+            );
 
           console.log(`Buy trigger result:`, buyTrigger);
           if (buyTrigger.shouldBuy && buyTrigger.buyAmount) {
@@ -217,23 +218,24 @@ describe("Complete Trading Cycle E2E", () => {
             buy_index: currentState.buy_index || 0,
           };
 
-          const sellTrigger = components.sellTriggerDetector.checkSellTrigger(
-            triggerState,
-            {
-              risePercentage: 0.005,
-              dropPercentage: 0.003,
-              exchangeMinNotional: 10,
-            },
-            {
-              close: currentPrice,
-              high: currentPrice,
-              low: currentPrice,
-              open: currentPrice,
-              volume: 0,
-              timestamp: Date.now(),
-            },
-            balances,
-          );
+          const sellTrigger =
+            await components.sellTriggerDetector.checkSellTrigger(
+              triggerState,
+              {
+                risePercentage: 0.005,
+                dropPercentage: 0.003,
+                exchangeMinNotional: 10,
+              },
+              {
+                close: currentPrice,
+                high: currentPrice,
+                low: currentPrice,
+                open: currentPrice,
+                volume: 0,
+                timestamp: Date.now(),
+              },
+              balances,
+            );
 
           console.log(`Sell trigger result:`, sellTrigger);
           if (sellTrigger.shouldSell) {
