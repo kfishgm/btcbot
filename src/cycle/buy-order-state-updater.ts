@@ -407,12 +407,9 @@ export class BuyOrderStateUpdater extends EventEmitter {
     }
 
     // Update buy_index if grid exists
-    const newBuyIndex =
-      currentState.buy_grid &&
-      currentState.buy_index !== null &&
-      currentState.buy_index !== undefined
-        ? currentState.buy_index + levelsTriggered
-        : (currentState.buy_index ?? 0);
+    // The buy_index passed in has already been updated by the buy trigger detector
+    // So we should just use it as-is, not add levelsTriggered
+    const newBuyIndex = currentState.buy_index ?? 0;
 
     // Set anchor price on first buy (when it's not set yet)
     const isFirstBuy = !currentState.buy_anchor_price;
