@@ -497,7 +497,7 @@ export class MainOrchestrator extends EventEmitter {
           : 0;
 
         logger.info(
-          `Sell check - Amount: ${workingState.btc_accumulated.toFixed(8)} BTC (${usdtAmount.toFixed(2)} USDT), Price: ${closePrice.toFixed(2)}, Target: ${sellTarget?.toFixed(2) || "N/A"}, % Away: ${percentAwayFromSell.toFixed(2)}%`,
+          `Sell check - Amount: ${workingState.btc_accumulated.toFixed(8)} BTC (${usdtAmount.toFixed(2)} USDT), Target: ${sellTarget?.toFixed(2) || "N/A"}, % Away: ${percentAwayFromSell.toFixed(2)}%`,
         );
 
         const sellDecision =
@@ -687,6 +687,10 @@ export class MainOrchestrator extends EventEmitter {
 
         // Calculate the buy details for logging
         const buyIndex = workingState.buy_index || 0;
+        const maxPurchases = this.strategyConfig?.maxPurchases || 10;
+        const purchasesCompleted =
+          maxPurchases - workingState.purchases_remaining;
+        const currentGridLevelNumber = purchasesCompleted + 1;
         const currentGridLevel =
           workingState.buy_grid && buyIndex < workingState.buy_grid.length
             ? workingState.buy_grid[buyIndex]
@@ -704,7 +708,7 @@ export class MainOrchestrator extends EventEmitter {
           workingState.capital_available / workingState.purchases_remaining;
 
         logger.info(
-          `Buy check - Price: ${closePrice.toFixed(2)}, Grid Level: ${currentGridLevel ? currentGridLevel.toFixed(2) : "N/A"}, Purchase Amount: ${purchaseAmount.toFixed(2)} USDT, Buy Target: ${buyTarget ? buyTarget.toFixed(2) : "N/A"}, % Away: ${percentAway ? percentAway.toFixed(2) : "N/A"}%`,
+          `Buy check - Grid Level: ${currentGridLevelNumber}, Purchase Amount: ${purchaseAmount.toFixed(2)} USDT, Buy Target: ${buyTarget ? buyTarget.toFixed(2) : "N/A"}, % Away: ${percentAway ? percentAway.toFixed(2) : "N/A"}%`,
         );
 
         if (buyDecision.shouldBuy) {
