@@ -243,42 +243,61 @@ describe("TradingRules", () => {
     });
 
     it("should refresh rules periodically", async () => {
+      // Use real timers for this test since fake timers don't work well with setInterval + async
+      jest.useRealTimers();
+
+      const now = Date.now();
       await tradingRules.getRules("BTCUSDT");
 
-      // Start auto-refresh with 1 hour interval
+      // Mock Date.now to make cache expired (25 hours later)
+      const originalDateNow = Date.now;
+      Date.now = jest.fn(() => now + 25 * 60 * 60 * 1000);
+
+      // Start auto-refresh with very short interval for testing
       const errorCallback = jest.fn();
-      tradingRules.startAutoRefresh(60 * 60 * 1000, errorCallback);
+      tradingRules.startAutoRefresh(100, errorCallback); // 100ms interval
 
-      // Fast-forward 1 hour
-      jest.advanceTimersByTime(60 * 60 * 1000);
+      // Wait for at least one refresh cycle
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // Should have fetched exchange info again
+      // Should have fetched exchange info again (initial + refresh)
       expect(mockBinanceClient.getExchangeInfo).toHaveBeenCalledTimes(2);
+
+      // Restore Date.now
+      Date.now = originalDateNow;
 
       // Stop auto-refresh
       tradingRules.stopAutoRefresh();
     });
 
     it("should handle errors during auto-refresh", async () => {
+      // Use real timers for this test since fake timers don't work well with setInterval + async
+      jest.useRealTimers();
+
+      const now = Date.now();
       await tradingRules.getRules("BTCUSDT");
 
-      // Mock error on refresh
+      // Mock Date.now to make cache expired (25 hours later)
+      const originalDateNow = Date.now;
+      Date.now = jest.fn(() => now + 25 * 60 * 60 * 1000);
+
+      // Mock error on refresh (after the initial successful call)
       (mockBinanceClient.getExchangeInfo as jest.Mock).mockImplementationOnce(
         () => Promise.reject(new Error("Network error")),
       );
 
       const errorCallback = jest.fn();
-      tradingRules.startAutoRefresh(60 * 60 * 1000, errorCallback);
+      tradingRules.startAutoRefresh(100, errorCallback); // 100ms interval
 
-      // Fast-forward 1 hour
-      jest.advanceTimersByTime(60 * 60 * 1000);
-
-      // Wait for async error to be handled
-      await Promise.resolve();
+      // Wait for at least one refresh cycle
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       expect(errorCallback).toHaveBeenCalledWith(
         expect.objectContaining({ message: "Network error" }),
       );
+
+      // Restore Date.now
+      Date.now = originalDateNow;
 
       tradingRules.stopAutoRefresh();
     });

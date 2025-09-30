@@ -247,7 +247,9 @@ describe("Edge Cases E2E", () => {
       usdtSpot: parseFloat(usdtBalance?.free || "0"),
     };
 
-    const sellPrice = 99500 * 1.005; // Trigger price
+    // Commission-adjusted trigger price: (referencePrice * (1 + rise)) / (1 - commission)
+    // 99500 * 1.005 / 0.999 = 100097.6
+    const sellPrice = 100100; // Above commission-adjusted threshold
 
     const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {

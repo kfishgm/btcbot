@@ -115,6 +115,7 @@ describe("Buy Anchor Price End-to-End", () => {
         mockCycleState,
         orderResult,
         1, // 1 level triggered
+        10, // maxPurchases
       );
 
       // Verify anchor price was set (quantized to tick size 0.01)
@@ -300,6 +301,7 @@ describe("Buy Anchor Price End-to-End", () => {
         stateAfterFirstBuy, // Use state with anchor and buy_index already set
         orderResult,
         2, // 2 levels triggered
+        10, // maxPurchases
       );
 
       // Anchor should remain at original value
@@ -391,6 +393,7 @@ describe("Buy Anchor Price End-to-End", () => {
         stateWithUpdatedIndex, // Use state with buy_index already set
         orderResult,
         3, // 3 levels triggered
+        10, // maxPurchases
       );
 
       expect(updateSpy).toHaveBeenCalledTimes(1);
@@ -427,7 +430,12 @@ describe("Buy Anchor Price End-to-End", () => {
         feeOther: {},
       };
 
-      await buyOrderUpdater.updateAfterBuyOrder(mockCycleState, orderResult, 1);
+      await buyOrderUpdater.updateAfterBuyOrder(
+        mockCycleState,
+        orderResult,
+        1,
+        10,
+      );
 
       updateSpy.mockRestore();
     });

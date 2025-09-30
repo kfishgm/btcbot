@@ -266,7 +266,7 @@ describe("CycleStateManager", () => {
         const state = await cycleStateManager.getCurrentState();
         expect(state).not.toBeNull();
         if (state) {
-          expect(cycleStateManager.validateState(state)).toBe(true);
+          expect(await cycleStateManager.validateState(state)).toBe(true);
         }
       });
     });
@@ -535,33 +535,33 @@ describe("CycleStateManager", () => {
       );
     });
 
-    it("should validate capital_available is non-negative", () => {
+    it("should validate capital_available is non-negative", async () => {
       const validState = createValidCycleState({
         capital_available: 0,
       });
 
-      expect(cycleStateManager.validateState(validState)).toBe(true);
+      expect(await cycleStateManager.validateState(validState)).toBe(true);
 
       const invalidState = { ...validState, capital_available: -1 };
-      expect(cycleStateManager.validateState(invalidState)).toBe(false);
+      expect(await cycleStateManager.validateState(invalidState)).toBe(false);
     });
 
-    it("should validate btc_accumulated is non-negative", () => {
+    it("should validate btc_accumulated is non-negative", async () => {
       const validState = createValidCycleState();
 
-      expect(cycleStateManager.validateState(validState)).toBe(true);
+      expect(await cycleStateManager.validateState(validState)).toBe(true);
 
       const invalidState = { ...validState, btc_accumulated: -0.001 };
-      expect(cycleStateManager.validateState(invalidState)).toBe(false);
+      expect(await cycleStateManager.validateState(invalidState)).toBe(false);
     });
 
     it("should validate purchases_remaining does not exceed max_purchases", async () => {
       const validState = createValidCycleState();
 
-      expect(cycleStateManager.validateState(validState)).toBe(true);
+      expect(await cycleStateManager.validateState(validState)).toBe(true);
 
       const invalidState = { ...validState, purchases_remaining: 11 };
-      expect(cycleStateManager.validateState(invalidState)).toBe(false);
+      expect(await cycleStateManager.validateState(invalidState)).toBe(false);
     });
 
     it("should validate status is a valid enum value", async () => {
@@ -570,7 +570,7 @@ describe("CycleStateManager", () => {
       for (const status of validStatuses) {
         const state = createValidCycleState({ status });
 
-        expect(cycleStateManager.validateState(state)).toBe(true);
+        expect(await cycleStateManager.validateState(state)).toBe(true);
       }
 
       const invalidState = {
@@ -578,10 +578,10 @@ describe("CycleStateManager", () => {
         status: "INVALID",
       } as CycleState;
 
-      expect(cycleStateManager.validateState(invalidState)).toBe(false);
+      expect(await cycleStateManager.validateState(invalidState)).toBe(false);
     });
 
-    it("should validate sell_reference_price exists when holding", () => {
+    it("should validate sell_reference_price exists when holding", async () => {
       const holdingWithPrice = createValidCycleState({
         status: "HOLDING",
         capital_available: 150,
@@ -595,23 +595,27 @@ describe("CycleStateManager", () => {
         buy_amount: 30,
       });
 
-      expect(cycleStateManager.validateState(holdingWithPrice)).toBe(true);
+      expect(await cycleStateManager.validateState(holdingWithPrice)).toBe(
+        true,
+      );
 
       const holdingWithoutPrice = {
         ...holdingWithPrice,
         ath_reference_price: null,
         sell_reference_price: null,
       };
-      expect(cycleStateManager.validateState(holdingWithoutPrice)).toBe(false);
+      expect(await cycleStateManager.validateState(holdingWithoutPrice)).toBe(
+        false,
+      );
     });
 
-    it("should validate buy_amount meets min_buy_usdt requirement", () => {
+    it("should validate buy_amount meets min_buy_usdt requirement", async () => {
       const validState = createValidCycleState();
 
-      expect(cycleStateManager.validateState(validState)).toBe(true);
+      expect(await cycleStateManager.validateState(validState)).toBe(true);
 
       const invalidState = { ...validState, buy_amount: 5 };
-      expect(cycleStateManager.validateState(invalidState)).toBe(false);
+      expect(await cycleStateManager.validateState(invalidState)).toBe(false);
     });
   });
 

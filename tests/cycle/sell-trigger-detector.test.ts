@@ -1351,7 +1351,7 @@ describe("SellTriggerDetector", () => {
         sell_reference_price: -50000,
       });
       expect(result.isValid).toBe(false);
-      expect(result.error).toContain("Negative reference price");
+      expect(result.error).toContain("Negative sell reference price");
 
       result = detector.validateState({
         ...validState,

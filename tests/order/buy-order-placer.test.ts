@@ -150,6 +150,14 @@ describe("BuyOrderPlacer", () => {
       mockSupabaseClient as SupabaseClient,
       "BTCUSDT",
     );
+
+    // Mock the private sleep method to eliminate delays in tests
+    const buyOrderPlacerWithSleep = buyOrderPlacer as unknown as {
+      sleep: (ms: number) => Promise<void>;
+    };
+    jest
+      .spyOn(buyOrderPlacerWithSleep, "sleep")
+      .mockImplementation(() => Promise.resolve());
   });
 
   describe("Order Preparation", () => {
@@ -473,13 +481,14 @@ describe("BuyOrderPlacer", () => {
       const buyAmount = new Decimal("1000");
       const currentPrice = new Decimal("50000");
 
+      // Use a validation error that's not retryable (invalid symbol/parameters)
       mockBinanceClient.createOrder.mockRejectedValue(
-        new Error("Insufficient balance"),
+        new Error("Filter failure: LOT_SIZE"),
       );
 
       await expect(
         buyOrderPlacer.placeOrder(buyAmount, currentPrice, 0.003),
-      ).rejects.toThrow("Insufficient balance");
+      ).rejects.toThrow("Filter failure: LOT_SIZE");
 
       expect(mockBinanceClient.createOrder).toHaveBeenCalledTimes(1);
     });

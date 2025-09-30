@@ -210,7 +210,8 @@ describe("SellOrderStateUpdater", () => {
       expect(signal.previousCycleId).toBe("test-cycle-id");
       // Profit should be 0 for loss (never negative)
       expect(signal.completionData.finalProfit).toBe(0);
-      expect(signal.completionData.carryOverCapital).toBeCloseTo(979.52, 2);
+      // Capital = currentCapital + principal + profit = 500 + 500 + 0 = 1000
+      expect(signal.completionData.carryOverCapital).toBeCloseTo(1000, 2);
 
       // Should NOT call updateStateAtomic for complete sale
       expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
@@ -273,9 +274,13 @@ describe("SellOrderStateUpdater", () => {
     });
 
     it("should emit events during state update", async () => {
-      // Arrange
-      const currentState = createCycleState();
-      const orderResult = createOrderResult();
+      // Arrange - Partial sale scenario (sell 50% of holdings)
+      const currentState = createCycleState({
+        btc_accumulated: 0.01,
+      });
+      const orderResult = createOrderResult({
+        executedQty: new Decimal(0.005), // Partial sale
+      });
       const startListener = jest.fn();
       const completeListener = jest.fn();
 
@@ -371,19 +376,25 @@ describe("SellOrderStateUpdater", () => {
       });
 
       // Act
-      await updater.updateAfterSellOrder(currentState, orderResult);
-
-      // Assert
-      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
-        "test-cycle-id",
-        expect.objectContaining({
-          btc_accumulated: 0, // 0.01 - 0.01 = 0 (cycle complete)
-          capital_available: 1024.475, // 500 + 525 - 0.525 = 1024.475
-        }),
+      const result = await updater.updateAfterSellOrder(
+        currentState,
+        orderResult,
       );
+
+      // Assert - Should return NewCycleSignal for complete sale
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+      // netUsdtReceived = 525 - 0.525 = 524.475
+      // principal = 50000 * 0.01 = 500
+      // profit = max(0, 524.475 - 500) = 24.475
+      // carryOverCapital = 500 + 500 + 24.475 = 1024.475
+      expect(signal.completionData.carryOverCapital).toBeCloseTo(1024.475, 2);
+      // Should NOT call updateStateAtomic for complete sale
+      expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
     });
 
-    it("should recalculate buy_amount after cycle reset", async () => {
+    it("should return NewCycleSignal on complete sale for recalculation", async () => {
       // Arrange
       const customUpdater = new SellOrderStateUpdater(
         mockSupabase,
@@ -402,20 +413,22 @@ describe("SellOrderStateUpdater", () => {
       });
 
       // Act
-      await customUpdater.updateAfterSellOrder(currentState, orderResult);
-
-      // Assert
-      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
-        "test-cycle-id",
-        expect.objectContaining({
-          // capital = 500 + 500 + 99.475 = 1099.475
-          // buy_amount = floor(1099.475 / 3 * 10^8) / 10^8 = 366.49166666
-          buy_amount: 366.49166666,
-        }),
+      const result = await customUpdater.updateAfterSellOrder(
+        currentState,
+        orderResult,
       );
+
+      // Assert - Should return NewCycleSignal (buy_amount recalculated during new cycle creation)
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+      // capital = 500 + 500 + 99.475 = 1099.475
+      expect(signal.completionData.carryOverCapital).toBeCloseTo(1099.475, 2);
+      // Should NOT call updateStateAtomic for complete sale
+      expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
     });
 
-    it("should set sell_reference_price to null on cycle reset for fresh start", async () => {
+    it("should return NewCycleSignal on complete sale (sell_reference_price reset happens during new cycle creation)", async () => {
       // Arrange
       const currentState = createCycleState({
         btc_accumulated: 0.01,
@@ -427,16 +440,17 @@ describe("SellOrderStateUpdater", () => {
       });
 
       // Act
-      await updater.updateAfterSellOrder(currentState, orderResult);
-
-      // Assert
-      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
-        "test-cycle-id",
-        expect.objectContaining({
-          sell_reference_price: null,
-          ath_price: null,
-        }),
+      const result = await updater.updateAfterSellOrder(
+        currentState,
+        orderResult,
       );
+
+      // Assert - Should return NewCycleSignal (sell_reference_price reset happens during new cycle creation)
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+      // Should NOT call updateStateAtomic for complete sale
+      expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
     });
 
     it("should reset purchases_remaining to max_purchases on cycle complete", async () => {
@@ -472,7 +486,7 @@ describe("SellOrderStateUpdater", () => {
     });
 
     it("should handle very small BTC amounts correctly", async () => {
-      // Arrange
+      // Arrange - remaining after sell will be dust (< 0.00001)
       const currentState = createCycleState({
         btc_accumulated: 0.000001,
         btc_accum_net: 0.000001,
@@ -487,29 +501,28 @@ describe("SellOrderStateUpdater", () => {
         feeUSDT: new Decimal(0.000025),
       });
 
-      mockUpdateStateAtomic.mockResolvedValue(
-        createCycleState({
-          btc_accumulated: 0.0000005,
-          status: "HOLDING",
-        }),
-      );
-
       // Act
       const result = await updater.updateAfterSellOrder(
         currentState,
         orderResult,
       );
 
-      // Assert - Should return regular update (not cycle completion)
-      expect("type" in result).toBe(false);
-      const stateResult = result as CycleState;
-      expect(stateResult.btc_accumulated).toBe(0.0000005);
+      // Assert - Should return NewCycleSignal because remaining (0.0000005) is dust
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+      // Dust should be preserved
+      expect(signal.completionData.carryOverDust).toBeCloseTo(0.0000005, 8);
     });
 
     it("should log state update to bot_events", async () => {
-      // Arrange
-      const currentState = createCycleState();
-      const orderResult = createOrderResult();
+      // Arrange - Partial sale so logStateUpdate is called
+      const currentState = createCycleState({
+        btc_accumulated: 0.01,
+      });
+      const orderResult = createOrderResult({
+        executedQty: new Decimal(0.005), // Partial sale
+      });
 
       const logSpy = jest.spyOn(updater, "logStateUpdate").mockResolvedValue();
 
@@ -539,16 +552,22 @@ describe("SellOrderStateUpdater", () => {
       });
 
       // Act
-      await updater.updateAfterSellOrder(currentState, orderResult);
-
-      // Assert
-      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
-        "test-cycle-id",
-        expect.objectContaining({
-          btc_accumulated: 0, // 0.01 - 0.01 = 0
-          capital_available: 1024.475, // 500 + 525 - 0.525
-        }),
+      const result = await updater.updateAfterSellOrder(
+        currentState,
+        orderResult,
       );
+
+      // Assert - Should return NewCycleSignal for complete sale
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+      // netUsdtReceived = 525 - 0.525 = 524.475
+      // principal = 50000 * 0.01 = 500
+      // profit = max(0, 524.475 - 500) = 24.475
+      // carryOverCapital = 500 + 500 + 24.475 = 1024.475
+      expect(signal.completionData.carryOverCapital).toBeCloseTo(1024.475, 2);
+      // Should NOT call updateStateAtomic for complete sale
+      expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
     });
 
     it("should detect when cycle is complete (btc_accumulated < 0.00001)", async () => {
@@ -567,24 +586,19 @@ describe("SellOrderStateUpdater", () => {
       });
 
       // Act
-      await updater.updateAfterSellOrder(currentState, orderResult);
-
-      // Assert - Should reset cycle because remaining is < 0.00001 (dust threshold)
-      expect(mockUpdateStateAtomic).toHaveBeenCalledWith(
-        "test-cycle-id",
-        expect.objectContaining({
-          btc_accumulated: 0.000005, // Preserves dust amount (will be btc_dust + btc_accum_net)
-          btc_accum_net: 0, // Reset to 0 for new cycle
-          btc_dust: 0.000005, // Dust moved here for next cycle
-          cost_accum_usdt: 0, // Reset cost accumulator
-          purchases_remaining: 5, // Reset to max purchases (from config)
-          sell_reference_price: null, // Reset to null for fresh cycle
-          ath_price: null, // Reset to null for fresh cycle
-          status: "READY",
-          buy_grid: null, // Reset grid
-          buy_index: 0, // Reset index
-        }),
+      const result = await updater.updateAfterSellOrder(
+        currentState,
+        orderResult,
       );
+
+      // Assert - Should return NewCycleSignal because remaining is < dust threshold
+      expect("type" in result).toBe(true);
+      const signal = result as NewCycleSignal;
+      expect(signal.type).toBe("CREATE_NEW_CYCLE");
+      // Dust (0.000005) is preserved in carryOverDust
+      expect(signal.completionData.carryOverDust).toBeCloseTo(0.000005, 8);
+      // Should NOT call updateStateAtomic for complete sale
+      expect(mockUpdateStateAtomic).not.toHaveBeenCalled();
     });
 
     it("should not reset cycle if btc_accumulated >= 0.00001", async () => {

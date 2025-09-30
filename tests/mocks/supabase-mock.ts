@@ -61,25 +61,41 @@ export function createMockSupabaseClient(
         select: jest.fn(() => {
           const selectResult = {
             single: jest.fn(async () => {
-              // If we have state for this table, return it
+              // If we have state for this table, return a copy (immutable pattern)
               if (tableState[tableName]) {
-                return { data: tableState[tableName], error: null };
+                return {
+                  data: { ...tableState[tableName] },
+                  error: null,
+                };
               }
-              // Otherwise use the configured select response
-              if (tableConfig && "select" in tableConfig) {
-                return tableConfig.select;
+              // Otherwise use the configured select response (return copy for immutability)
+              if (
+                tableConfig &&
+                "select" in tableConfig &&
+                tableConfig.select
+              ) {
+                const configuredData = tableConfig.select.data;
+                return {
+                  data: configuredData ? { ...configuredData } : null,
+                  error: tableConfig.select.error || null,
+                };
               }
               return { data: null, error: null };
             }),
             eq: jest.fn(() => selectResult),
             in: jest.fn(() => selectResult), // Add .in() support for filtering - returns selectResult for chaining
-            order: jest.fn(() => ({
-              ...selectResult,
-              limit: jest.fn(() => ({
+            order: jest.fn(() => {
+              const orderedResult = {
                 ...selectResult,
-                single: selectResult.single, // Support .order().limit().single() chain
-              })),
-            })),
+                ...mockQueryResult(), // Add array data support
+                limit: jest.fn(() => ({
+                  ...selectResult,
+                  ...mockQueryResult(), // Add array data support
+                  single: selectResult.single, // Support .order().limit().single() chain
+                })),
+              };
+              return orderedResult;
+            }),
             limit: jest.fn(() => ({
               ...selectResult,
               single: selectResult.single, // Support .limit().single() chain
@@ -103,20 +119,38 @@ export function createMockSupabaseClient(
           })),
         })),
         update: jest.fn((_data: unknown) => ({
-          eq: jest.fn(() => ({
-            select: jest.fn(() => ({
-              single: jest.fn(async () => {
-                if (tableConfig && "update" in tableConfig) {
-                  // Store the updated data in tableState for subsequent selects
-                  if (tableConfig.update?.data) {
-                    tableState[tableName] = tableConfig.update.data;
+          eq: jest.fn(() => {
+            // Store updated data immediately when .eq() is called
+            // This handles cases where .select().single() is not chained
+            if (
+              tableConfig &&
+              "update" in tableConfig &&
+              tableConfig.update?.data
+            ) {
+              tableState[tableName] = tableConfig.update.data;
+            }
+
+            return {
+              select: jest.fn(() => ({
+                single: jest.fn(async () => {
+                  if (tableConfig && "update" in tableConfig) {
+                    return tableConfig.update;
                   }
-                  return tableConfig.update;
-                }
-                return { data: null, error: null };
-              }),
-            })),
-          })),
+                  return { data: null, error: null };
+                }),
+              })),
+              // Also return data/error for direct await on .eq()
+              then: jest.fn(
+                (resolve: (value: MockResponse<unknown>) => void) => {
+                  if (tableConfig && "update" in tableConfig) {
+                    resolve(tableConfig.update as MockResponse<unknown>);
+                  } else {
+                    resolve({ data: null, error: null });
+                  }
+                },
+              ),
+            };
+          }),
         })),
         delete: jest.fn(() => ({
           eq: jest.fn(() => queryBuilder),

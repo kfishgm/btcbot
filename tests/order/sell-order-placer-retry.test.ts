@@ -99,6 +99,14 @@ describe("SellOrderPlacer - Retry Logic", () => {
       mockSupabaseClient,
       "BTCUSDT",
     );
+
+    // Mock the private sleep method to eliminate delays in tests
+    const sellOrderPlacerWithSleep = sellOrderPlacer as unknown as {
+      sleep: (ms: number) => Promise<void>;
+    };
+    jest
+      .spyOn(sellOrderPlacerWithSleep, "sleep")
+      .mockImplementation(() => Promise.resolve());
   });
 
   describe("INSUFFICIENT_BALANCE retry mechanism", () => {
