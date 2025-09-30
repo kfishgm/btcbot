@@ -30,13 +30,23 @@ interface MockConfig {
 export function createMockSupabaseClient(
   config: MockConfig,
 ): SupabaseClient<Database> {
+  // Track inserted/updated state for each table
+  const tableState: Record<string, unknown> = {};
+
   const mockClient = {
     from: jest.fn((tableName: string) => {
       const tableConfig = config[tableName as keyof MockConfig];
 
       // Build mock query result object
       const mockQueryResult = () => {
-        // Determine result based on table config
+        // If we have state for this table (from previous insert/update), return it
+        if (tableState[tableName]) {
+          return {
+            data: [tableState[tableName]],
+            error: null,
+          };
+        }
+        // Otherwise determine result based on table config
         if (tableConfig && "select" in tableConfig && tableConfig.select) {
           // For queries expecting arrays (e.g., .order().limit())
           return {
@@ -51,30 +61,29 @@ export function createMockSupabaseClient(
         select: jest.fn(() => {
           const selectResult = {
             single: jest.fn(async () => {
+              // If we have state for this table, return it
+              if (tableState[tableName]) {
+                return { data: tableState[tableName], error: null };
+              }
+              // Otherwise use the configured select response
               if (tableConfig && "select" in tableConfig) {
                 return tableConfig.select;
               }
               return { data: null, error: null };
             }),
             eq: jest.fn(() => selectResult),
+            in: jest.fn(() => selectResult), // Add .in() support for filtering - returns selectResult for chaining
             order: jest.fn(() => ({
               ...selectResult,
-              limit: jest.fn(() => {
-                // Handle error case for order().limit() chain
-                if (
-                  tableConfig &&
-                  "select" in tableConfig &&
-                  tableConfig.select?.error
-                ) {
-                  return {
-                    data: null,
-                    error: tableConfig.select.error,
-                  };
-                }
-                return mockQueryResult();
-              }),
+              limit: jest.fn(() => ({
+                ...selectResult,
+                single: selectResult.single, // Support .order().limit().single() chain
+              })),
             })),
-            limit: jest.fn(() => mockQueryResult()),
+            limit: jest.fn(() => ({
+              ...selectResult,
+              single: selectResult.single, // Support .limit().single() chain
+            })),
             ...mockQueryResult(), // Direct access for simple select
           };
           return selectResult;
@@ -83,6 +92,10 @@ export function createMockSupabaseClient(
           select: jest.fn(() => ({
             single: jest.fn(async () => {
               if (tableConfig && "insert" in tableConfig) {
+                // Store the inserted data in tableState for subsequent selects
+                if (tableConfig.insert?.data) {
+                  tableState[tableName] = tableConfig.insert.data;
+                }
                 return tableConfig.insert;
               }
               return { data: null, error: null };
@@ -94,6 +107,10 @@ export function createMockSupabaseClient(
             select: jest.fn(() => ({
               single: jest.fn(async () => {
                 if (tableConfig && "update" in tableConfig) {
+                  // Store the updated data in tableState for subsequent selects
+                  if (tableConfig.update?.data) {
+                    tableState[tableName] = tableConfig.update.data;
+                  }
                   return tableConfig.update;
                 }
                 return { data: null, error: null };

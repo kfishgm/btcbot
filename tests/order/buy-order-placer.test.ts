@@ -32,6 +32,9 @@ describe("BuyOrderPlacer", () => {
       (symbol: string, orderId: number) => Promise<BinanceTrade[]>
     >;
     getExchangeInfo: jest.Mock<() => Promise<{ symbols: unknown[] }>>;
+    getBalance: jest.Mock<
+      (asset: string) => Promise<{ free: number; locked: number }>
+    >;
   };
   let tradingRules: TradingRules;
 
@@ -109,6 +112,10 @@ describe("BuyOrderPlacer", () => {
       symbols: [mockBinanceSymbolInfo],
     });
 
+    const getBalanceFn =
+      jest.fn<() => Promise<{ free: number; locked: number }>>();
+    getBalanceFn.mockResolvedValue({ free: 10000, locked: 0 }); // Default balance
+
     mockBinanceClient = {
       createOrder: createOrderFn as jest.Mock<
         (params: CreateOrderParams) => Promise<BinanceOrder>
@@ -125,6 +132,9 @@ describe("BuyOrderPlacer", () => {
       >,
       getExchangeInfo: getExchangeInfoFn as jest.Mock<
         () => Promise<{ symbols: unknown[] }>
+      >,
+      getBalance: getBalanceFn as jest.Mock<
+        (asset: string) => Promise<{ free: number; locked: number }>
       >,
     };
 

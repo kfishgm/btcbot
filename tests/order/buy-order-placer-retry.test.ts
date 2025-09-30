@@ -37,6 +37,15 @@ type MockTradingRules = {
   getMinimumBuyableQuantity: jest.Mock<
     (price: number, symbol: string) => number
   >;
+  roundQuantityForBuyOrder: jest.Mock<
+    (
+      quantity: number,
+      targetSpendUSDT: number,
+      currentPriceBTC: number,
+      symbol: string,
+      availableCapital?: number,
+    ) => number
+  >;
 };
 describe("BuyOrderPlacer - Retry Logic", () => {
   let buyOrderPlacer: BuyOrderPlacer;
@@ -85,6 +94,12 @@ describe("BuyOrderPlacer - Retry Logic", () => {
       roundQuantityToStep: jest.fn((qty) => Math.floor(qty * 100000) / 100000),
       roundPriceToTick: jest.fn((price) => Math.round(price * 100) / 100),
       getMinimumBuyableQuantity: jest.fn(() => 0.00001),
+      roundQuantityForBuyOrder: jest.fn(
+        (qty, _targetSpend, _price, _symbol, _cap) => {
+          // Smart rounding for buy orders - rounds to step size
+          return Math.floor(qty * 100000) / 100000;
+        },
+      ),
     };
     buyOrderPlacer = new BuyOrderPlacer(
       mockBinanceClient as unknown as BinanceClient,

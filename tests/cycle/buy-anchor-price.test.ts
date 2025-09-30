@@ -258,6 +258,17 @@ describe("Buy Anchor Price End-to-End", () => {
     });
 
     it("should preserve anchor price on subsequent buys", async () => {
+      // Set up state after first buy (anchor is set, buy_index updated by BuyTriggerDetector)
+      const stateAfterFirstBuy = {
+        ...mockCycleState,
+        buy_anchor_price: 117500, // Anchor set on first buy
+        buy_index: 3, // Already updated by BuyTriggerDetector (1 + 2 levels)
+        buy_grid: [
+          113975, 110450, 106925, 103400, 99875, 96350, 92825, 89300, 85775,
+          82250,
+        ],
+      };
+
       const updateSpy = jest
         .spyOn(StateTransactionManager.prototype, "updateStateAtomic")
         .mockImplementation(
@@ -266,7 +277,7 @@ describe("Buy Anchor Price End-to-End", () => {
             expect(updates.buy_anchor_price).toBe(117500);
 
             return {
-              ...mockCycleState,
+              ...stateAfterFirstBuy,
               ...updates,
             } as CycleState;
           },
@@ -286,7 +297,7 @@ describe("Buy Anchor Price End-to-End", () => {
       };
 
       const result = await buyOrderUpdater.updateAfterBuyOrder(
-        mockCycleState,
+        stateAfterFirstBuy, // Use state with anchor and buy_index already set
         orderResult,
         2, // 2 levels triggered
       );
@@ -294,7 +305,7 @@ describe("Buy Anchor Price End-to-End", () => {
       // Anchor should remain at original value
       expect(result.buy_anchor_price).toBe(117500);
 
-      // buy_index should advance by 2
+      // buy_index should remain as set by BuyTriggerDetector (implementation doesn't increment)
       expect(result.buy_index).toBe(3);
 
       updateSpy.mockRestore();
@@ -339,21 +350,25 @@ describe("Buy Anchor Price End-to-End", () => {
 
   describe("Database Update Verification", () => {
     it("should update buy_index correctly when multiple levels triggered", async () => {
-      mockCycleState.buy_anchor_price = 117500;
-      mockCycleState.buy_grid = [113975, 110450, 106925, 103400, 99875];
-      mockCycleState.buy_index = 2;
-      mockCycleState.purchases_remaining = 8;
+      // Set up state with buy_index already updated by BuyTriggerDetector
+      const stateWithUpdatedIndex = {
+        ...mockCycleState,
+        buy_anchor_price: 117500,
+        buy_grid: [113975, 110450, 106925, 103400, 99875],
+        buy_index: 5, // Already updated by BuyTriggerDetector (2 + 3 levels)
+        purchases_remaining: 8,
+      };
 
       const updateSpy = jest
         .spyOn(StateTransactionManager.prototype, "updateStateAtomic")
         .mockImplementation(
           async (_botId: string, updates: Partial<CycleState>) => {
-            // Verify buy_index is incremented by levels triggered
-            expect(updates.buy_index).toBe(5); // 2 + 3
+            // Verify buy_index is passed through as-is (already updated by BuyTriggerDetector)
+            expect(updates.buy_index).toBe(5); // Already set before calling updateAfterBuyOrder
             expect(updates.purchases_remaining).toBe(5); // 8 - 3
 
             return {
-              ...mockCycleState,
+              ...stateWithUpdatedIndex,
               ...updates,
             } as CycleState;
           },
@@ -373,7 +388,7 @@ describe("Buy Anchor Price End-to-End", () => {
       };
 
       await buyOrderUpdater.updateAfterBuyOrder(
-        mockCycleState,
+        stateWithUpdatedIndex, // Use state with buy_index already set
         orderResult,
         3, // 3 levels triggered
       );

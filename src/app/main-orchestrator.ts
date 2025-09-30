@@ -392,7 +392,7 @@ export class MainOrchestrator extends EventEmitter {
 
     // Log candle close with ATH info
     logger.info(
-      `Candle closed. Price: ${closePrice.toFixed(2)}, ATH: ${currentATH.toFixed(2)}`,
+      `Candle closed. Price: ${closePrice.toFixed(2)}, Window ATH: ${currentATH.toFixed(2)}, True ATH: ${previousStoredATH.toFixed(2)}`,
     );
 
     // Convert state to mutable copy we can work with
@@ -427,12 +427,12 @@ export class MainOrchestrator extends EventEmitter {
         if (shouldUpdateReferencePrice) {
           workingState.ath_reference_price = currentATH;
           logger.info(
-            `ATH tracked: ${currentATH.toFixed(2)}, ATH Reference updated (${isDust ? "dust amount" : "not holding"})`,
+            `True ATH updated: ${currentATH.toFixed(2)}, ATH Reference updated to ${currentATH.toFixed(2)} (${isDust ? "dust amount" : "not holding"})`,
           );
         } else {
           // When holding, ATH reference stays as-is, sell reference is used for sell trigger
           logger.info(
-            `ATH tracked: ${currentATH.toFixed(2)}, ATH Reference: ${workingState.ath_reference_price?.toFixed(2) || "N/A"}, Sell Reference: ${workingState.sell_reference_price?.toFixed(2) || "N/A"} (holding BTC)`,
+            `True ATH: ${currentATH.toFixed(2)}, ATH Reference (frozen): ${workingState.ath_reference_price?.toFixed(2) || "N/A"}, Sell Reference: ${workingState.sell_reference_price?.toFixed(2) || "N/A"} (holding BTC)`,
           );
         }
 

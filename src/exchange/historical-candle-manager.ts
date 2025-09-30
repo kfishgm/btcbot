@@ -256,14 +256,17 @@ export class HistoricalCandleManager extends EventEmitter {
 
     // Log ATH calculation details
     if (athCandle) {
-      logger.info(`ATH calculated: ${maxHigh.toFixed(2)}`, {
-        symbol: this.symbol,
-        athPrice: maxHigh,
-        athTime: new Date(athCandle.openTime).toISOString(),
-        candlesUsed: recentClosedCandles.length,
-        windowSize: this.config.maxCandles,
-        excludedUnclosed: excludeUnclosed,
-      });
+      logger.info(
+        `Rolling window ATH calculated: ${maxHigh.toFixed(2)} (from ${recentClosedCandles.length} candles)`,
+        {
+          symbol: this.symbol,
+          windowAthPrice: maxHigh,
+          athTime: new Date(athCandle.openTime).toISOString(),
+          candlesUsed: recentClosedCandles.length,
+          windowSize: this.config.maxCandles,
+          excludedUnclosed: excludeUnclosed,
+        },
+      );
     }
 
     // Cache the result

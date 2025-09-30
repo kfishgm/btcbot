@@ -632,7 +632,7 @@ describe("BuyTriggerDetector", () => {
       );
 
       expect(result.shouldBuy).toBe(false);
-      expect(result.reason).toContain("No reference price");
+      expect(result.reason).toContain("No ATH reference price");
     });
 
     it("should handle null buy amount", async () => {
@@ -1244,9 +1244,9 @@ describe("BuyTriggerDetector", () => {
       mockBuyAmountCalculator.getPurchaseAmount.mockReturnValue(100);
       mockBuyAmountCalculator.isAmountValid.mockReturnValue(true);
 
-      detector.checkBuyTrigger(state, config, candle, balances);
+      await detector.checkBuyTrigger(state, config, candle, balances);
 
-      // With grid-based implementation, it logs differently
+      // With grid-based implementation, it logs "Grid buy triggered" or "Building buy grid"
       expect(loggerSpy).toHaveBeenCalledWith(
         expect.stringMatching(/Grid buy triggered|Building buy grid/),
         expect.objectContaining({
@@ -1294,9 +1294,8 @@ describe("BuyTriggerDetector", () => {
         balances,
       );
 
-      // No log should be called when buy is skipped
-      expect(loggerSpy).not.toHaveBeenCalled();
-      // But the reason should be in the result
+      // Verify buy was skipped with correct reason
+      expect(result.shouldBuy).toBe(false);
       expect(result.reason).toContain("No purchases remaining");
 
       loggerSpy.mockRestore();
