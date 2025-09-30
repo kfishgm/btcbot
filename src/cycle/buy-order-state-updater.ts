@@ -71,6 +71,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     currentState: CycleState,
     orderResult: OrderResult,
     levelsTriggered: number = 1,
+    maxPurchases?: number,
   ): Promise<StateUpdateResult> {
     // Emit start event
     this.emit("stateUpdateStarted", {
@@ -150,9 +151,13 @@ export class BuyOrderStateUpdater extends EventEmitter {
         try {
           // Calculate target sell price (3% profit after fees)
           const targetSellPrice = (updates.sell_reference_price * 1.03) / 0.999;
-          const purchaseNumber =
-            currentState.purchases_remaining + 1 - updates.purchases_remaining;
-          const totalPurchases = currentState.purchases_remaining + 1;
+
+          // Calculate purchases completed
+          // If maxPurchases is provided, use it; otherwise fall back to calculating from purchases_remaining
+          const totalPurchases =
+            maxPurchases ?? currentState.purchases_remaining + levelsTriggered;
+          const purchasesCompleted =
+            totalPurchases - updates.purchases_remaining;
 
           const fields = [
             {
@@ -196,7 +201,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
             },
             {
               name: "🛒 Purchases",
-              value: `${purchaseNumber}/${totalPurchases}`,
+              value: `${purchasesCompleted}/${totalPurchases}`,
               inline: false,
             },
             {

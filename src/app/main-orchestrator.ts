@@ -392,7 +392,7 @@ export class MainOrchestrator extends EventEmitter {
 
     // Log candle close with ATH info
     logger.info(
-      `Candle closed. Price: ${closePrice.toFixed(2)}, Window ATH: ${currentATH.toFixed(2)}, True ATH: ${previousStoredATH.toFixed(2)}`,
+      `Candle closed. Price: ${closePrice.toFixed(2)}, Window ATH: ${currentATH.toFixed(2)}, Stored ATH: ${previousStoredATH.toFixed(2)}`,
     );
 
     // Convert state to mutable copy we can work with
@@ -427,16 +427,27 @@ export class MainOrchestrator extends EventEmitter {
         if (shouldUpdateReferencePrice) {
           workingState.ath_reference_price = currentATH;
           logger.info(
-            `True ATH updated: ${currentATH.toFixed(2)}, ATH Reference updated to ${currentATH.toFixed(2)} (${isDust ? "dust amount" : "not holding"})`,
+            `Window ATH: ${currentATH.toFixed(2)}, Candle: ${closePrice.toFixed(2)} | ATH Ref updated to ${currentATH.toFixed(2)} (${isDust ? "dust" : "not holding"})`,
           );
         } else {
           // When holding, ATH reference stays as-is, sell reference is used for sell trigger
           logger.info(
-            `True ATH: ${currentATH.toFixed(2)}, ATH Reference (frozen): ${workingState.ath_reference_price?.toFixed(2) || "N/A"}, Sell Reference: ${workingState.sell_reference_price?.toFixed(2) || "N/A"} (holding BTC)`,
+            `Window ATH: ${currentATH.toFixed(2)}, Candle: ${closePrice.toFixed(2)} | ATH Ref (frozen): ${workingState.ath_reference_price?.toFixed(2) || "N/A"}, Sell Ref: ${workingState.sell_reference_price?.toFixed(2) || "N/A"} (holding)`,
           );
         }
 
-        // Log ATH update event if it changed
+        // Always persist ATH to database (can go up or down with rolling window)
+        await this.config.stateTransactionManager.updateStateAtomic(
+          workingState.id,
+          {
+            ath_price: currentATH,
+            ath_reference_price: shouldUpdateReferencePrice
+              ? currentATH
+              : workingState.ath_reference_price,
+          },
+        );
+
+        // Log event only when ATH increases (for notifications/events)
         if (athChanged) {
           const candleCount =
             this.config.historicalCandleManager.getStatistics().candleCount;
@@ -453,28 +464,6 @@ export class MainOrchestrator extends EventEmitter {
               btc_amount: workingState.btc_accumulated || 0,
             },
           });
-
-          // Persist the ATH update to the database
-          await this.config.stateTransactionManager.updateStateAtomic(
-            workingState.id,
-            {
-              ath_price: currentATH,
-              ath_reference_price: shouldUpdateReferencePrice
-                ? currentATH
-                : workingState.ath_reference_price,
-            },
-          );
-        } else if (
-          shouldUpdateReferencePrice &&
-          workingState.ath_reference_price !== currentATH
-        ) {
-          // Even if ATH didn't change, we might need to update ATH reference price for dust
-          await this.config.stateTransactionManager.updateStateAtomic(
-            workingState.id,
-            {
-              ath_reference_price: currentATH,
-            },
-          );
         }
       }
 
@@ -759,6 +748,8 @@ export class MainOrchestrator extends EventEmitter {
               await this.config.buyOrderStateUpdater.updateAfterBuyOrder(
                 normalizedState,
                 buyOrderResult,
+                buyDecision.levelsTriggered || 1,
+                this.strategyConfig?.maxPurchases,
               );
 
             logger.info(`Buy order executed - State updated`, {

@@ -167,7 +167,7 @@ export class StrategyPauseMechanism {
         return result;
       }
 
-      if (!this.cycleStateManager.validateState(cycleState)) {
+      if (!(await this.cycleStateManager.validateState(cycleState))) {
         result.canResume = false;
         result.validationErrors.push("Cycle state validation failed");
       }
