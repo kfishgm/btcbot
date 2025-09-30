@@ -218,7 +218,7 @@ export class SellTriggerDetector {
     const adjustedSellPrice = targetGrossPrice / (1 - commissionRate);
 
     logger.debug("Sell threshold calculated with commission adjustment", {
-      referencePrice,
+      sellReferencePrice: referencePrice,
       risePercentage,
       commissionRate,
       targetNetPrice: targetGrossPrice,
