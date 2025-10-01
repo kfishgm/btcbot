@@ -7,7 +7,9 @@ import { StateTransactionManager } from "./state-transaction-manager";
 import { Decimal } from "decimal.js";
 import { logger } from "../utils/logger";
 import type { DiscordNotifier } from "../notifications/discord-notifier";
+import type { CommissionManager } from "../exchange/commission-manager";
 import { calculateTradeableBTC } from "../utils/btc-utils";
+import { calculateSellThreshold } from "../utils/pricing-calculations";
 
 export interface StateUpdateResult extends CycleState {
   updateSummary?: {
@@ -37,6 +39,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
   private supabase: SupabaseClient<Database>;
   private transactionManager: StateTransactionManager;
   private discordNotifier?: DiscordNotifier;
+  private commissionManager?: CommissionManager;
   private stepSize: number;
   private baseAssetPrecision: number;
   private tickSize: number;
@@ -44,6 +47,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
   constructor(
     supabase: SupabaseClient<Database>,
     discordNotifier?: DiscordNotifier,
+    commissionManager?: CommissionManager,
     stepSize: number = 0.00001, // Default BTCUSDT stepSize
     baseAssetPrecision: number = 8, // Default BTC precision
     tickSize: number = 0.01, // Default BTCUSDT tickSize
@@ -52,6 +56,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     this.supabase = supabase;
     this.transactionManager = new StateTransactionManager(supabase);
     this.discordNotifier = discordNotifier;
+    this.commissionManager = commissionManager;
     this.stepSize = stepSize;
     this.baseAssetPrecision = baseAssetPrecision;
     this.tickSize = tickSize;
@@ -72,6 +77,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     orderResult: OrderResult,
     levelsTriggered: number = 1,
     maxPurchases?: number,
+    risePercentage?: number,
   ): Promise<StateUpdateResult> {
     // Emit start event
     this.emit("stateUpdateStarted", {
@@ -149,8 +155,29 @@ export class BuyOrderStateUpdater extends EventEmitter {
       // Send Discord notification
       if (this.discordNotifier) {
         try {
-          // Calculate target sell price (3% profit after fees)
-          const targetSellPrice = (updates.sell_reference_price * 1.03) / 0.999;
+          // Get dynamic commission rate
+          let commissionRate = 0.001; // Default 0.1%
+          if (this.commissionManager) {
+            try {
+              commissionRate =
+                await this.commissionManager.getTakerCommission();
+            } catch (error) {
+              logger.warn(
+                "Failed to get commission rate for notification, using default 0.1%",
+                {
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              );
+            }
+          }
+
+          // Calculate target sell price using shared utility
+          const actualRisePercentage = risePercentage ?? 0.03; // Default to 3% if not provided
+          const targetSellPrice = calculateSellThreshold(
+            updates.sell_reference_price,
+            actualRisePercentage,
+            commissionRate,
+          );
 
           // Calculate purchases completed
           // If maxPurchases is provided, use it; otherwise fall back to calculating from purchases_remaining
@@ -196,7 +223,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
             },
             {
               name: "🎯 Target Sell Price",
-              value: `$${targetSellPrice.toFixed(2)} (+3% after fees)`,
+              value: `$${targetSellPrice.toFixed(2)} (+${(actualRisePercentage * 100).toFixed(1)}% after fees)`,
               inline: false,
             },
             {

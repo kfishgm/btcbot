@@ -564,6 +564,8 @@ export class MainOrchestrator extends EventEmitter {
               await this.config.sellOrderStateUpdater.updateAfterSellOrder(
                 normalizedState,
                 sellOrderResult,
+                this.strategyConfig?.risePercentage,
+                this.strategyConfig?.initialCapitalUsdt,
               );
 
             // Check if this is a cycle completion signal
@@ -754,6 +756,7 @@ export class MainOrchestrator extends EventEmitter {
                 buyOrderResult,
                 buyDecision.levelsTriggered || 1,
                 this.strategyConfig?.maxPurchases,
+                this.strategyConfig?.risePercentage,
               );
 
             logger.info(`Buy order executed - State updated`, {

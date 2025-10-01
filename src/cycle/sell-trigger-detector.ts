@@ -20,6 +20,7 @@
 import { logger } from "../utils/logger.js";
 import type { TradingRules } from "../exchange/trading-rules.js";
 import type { CommissionManager } from "../exchange/commission-manager.js";
+import { calculateSellThreshold } from "../utils/pricing-calculations.js";
 
 export interface CycleState {
   status: "READY" | "HOLDING" | "PAUSED";
@@ -212,10 +213,13 @@ export class SellTriggerDetector {
       }
     }
 
-    // New formula: (Reference Price × (1 + %Rise)) / (1 - fee_sell)
-    // This ensures that after selling and paying commission, we achieve the target %Rise
+    // Use shared utility for calculation
+    const adjustedSellPrice = calculateSellThreshold(
+      referencePrice,
+      risePercentage,
+      commissionRate,
+    );
     const targetGrossPrice = referencePrice * (1 + risePercentage);
-    const adjustedSellPrice = targetGrossPrice / (1 - commissionRate);
 
     logger.debug("Sell threshold calculated with commission adjustment", {
       sellReferencePrice: referencePrice,

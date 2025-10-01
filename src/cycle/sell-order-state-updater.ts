@@ -8,6 +8,8 @@ import { Decimal } from "decimal.js";
 import { logger } from "../utils/logger";
 import type { DiscordNotifier } from "../notifications/discord-notifier";
 import type { TradingRules } from "../exchange/trading-rules";
+import type { CommissionManager } from "../exchange/commission-manager";
+import { calculateSellThreshold } from "../utils/pricing-calculations";
 
 export interface StateUpdateResult extends CycleState {
   updateSummary?: {
@@ -58,6 +60,7 @@ export class SellOrderStateUpdater extends EventEmitter {
   private supabase: SupabaseClient<Database>;
   private transactionManager: StateTransactionManager;
   private discordNotifier?: DiscordNotifier;
+  private commissionManager?: CommissionManager;
   private tradingRules: TradingRules;
 
   constructor(
@@ -65,6 +68,7 @@ export class SellOrderStateUpdater extends EventEmitter {
     _config: SellOrderStateUpdaterConfig, // Prefix with _ to indicate unused
     discordNotifier: DiscordNotifier | undefined,
     tradingRules: TradingRules,
+    commissionManager?: CommissionManager,
   ) {
     super();
     this.supabase = supabase;
@@ -72,6 +76,7 @@ export class SellOrderStateUpdater extends EventEmitter {
     // Note: config parameter is kept for API compatibility but not currently used
     this.discordNotifier = discordNotifier;
     this.tradingRules = tradingRules;
+    this.commissionManager = commissionManager;
   }
 
   /**
@@ -85,6 +90,8 @@ export class SellOrderStateUpdater extends EventEmitter {
   async updateAfterSellOrder(
     currentState: CycleState,
     orderResult: OrderResult,
+    risePercentage?: number,
+    initialCapital?: number,
   ): Promise<StateUpdateResult | NewCycleSignal> {
     // Emit start event
     this.emit("stateUpdateStarted", {
@@ -117,11 +124,40 @@ export class SellOrderStateUpdater extends EventEmitter {
         // Send Discord notification for cycle completion (full sell)
         if (this.discordNotifier) {
           try {
-            // Calculate profit percentage (using total cost as proxy for initial capital)
+            // Get dynamic commission rate
+            let commissionRate = 0.001; // Default 0.1%
+            if (this.commissionManager) {
+              try {
+                commissionRate =
+                  await this.commissionManager.getTakerCommission();
+              } catch (error) {
+                logger.warn(
+                  "Failed to get commission rate for notification, using default 0.1%",
+                  {
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  },
+                );
+              }
+            }
+
+            // Use provided initialCapital or fall back to total cost
             const totalCost = currentState.cost_accum_usdt || 0;
-            const initialCapital = totalCost > 0 ? totalCost : 1000; // Use total invested or default
+            const actualInitialCapital =
+              initialCapital ?? (totalCost > 0 ? totalCost : 1000);
             const profitPercentage =
-              (updateResult.completionData.finalProfit / initialCapital) * 100;
+              (updateResult.completionData.finalProfit / actualInitialCapital) *
+              100;
+
+            // Calculate target price using shared utility
+            const actualRisePercentage = risePercentage ?? 0.03;
+            const targetPrice = currentState.sell_reference_price
+              ? calculateSellThreshold(
+                  currentState.sell_reference_price,
+                  actualRisePercentage,
+                  commissionRate,
+                )
+              : null;
 
             const fields = [
               {
@@ -148,9 +184,7 @@ export class SellOrderStateUpdater extends EventEmitter {
               },
               {
                 name: "🎯 Target Price (was)",
-                value: currentState.sell_reference_price
-                  ? `$${((currentState.sell_reference_price * 1.03) / 0.999).toFixed(2)}`
-                  : "Not set",
+                value: targetPrice ? `$${targetPrice.toFixed(2)}` : "Not set",
                 inline: false,
               },
               {
@@ -160,7 +194,7 @@ export class SellOrderStateUpdater extends EventEmitter {
               },
               {
                 name: "💰 Initial Capital",
-                value: `$${initialCapital.toFixed(2)}`,
+                value: `$${actualInitialCapital.toFixed(2)}`,
                 inline: false,
               },
               {
@@ -231,6 +265,22 @@ export class SellOrderStateUpdater extends EventEmitter {
       // Send Discord notifications for partial sale
       if (this.discordNotifier) {
         try {
+          // Get dynamic commission rate
+          let commissionRate = 0.001; // Default 0.1%
+          if (this.commissionManager) {
+            try {
+              commissionRate =
+                await this.commissionManager.getTakerCommission();
+            } catch (error) {
+              logger.warn(
+                "Failed to get commission rate for notification, using default 0.1%",
+                {
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              );
+            }
+          }
+
           // Regular sell notification
           // For partial sell (should not happen in current strategy, but handle gracefully)
           const grossProceeds = orderResult.cummulativeQuoteQty.toNumber();
@@ -240,9 +290,20 @@ export class SellOrderStateUpdater extends EventEmitter {
           const totalCost = currentState.cost_accum_usdt || 0;
           const totalRevenue = netProceeds;
           const currentProfit = totalRevenue - totalCost;
-          const initialCapital = totalCost > 0 ? totalCost : 1000; // Use total invested as proxy
+          const actualInitialCapital =
+            initialCapital ?? (totalCost > 0 ? totalCost : 1000);
           const profitPercentage =
             totalCost > 0 ? (currentProfit / totalCost) * 100 : 0;
+
+          // Calculate target price using shared utility
+          const actualRisePercentage = risePercentage ?? 0.03;
+          const targetPrice = currentState.sell_reference_price
+            ? calculateSellThreshold(
+                currentState.sell_reference_price,
+                actualRisePercentage,
+                commissionRate,
+              )
+            : null;
 
           const fields = [
             {
@@ -269,9 +330,7 @@ export class SellOrderStateUpdater extends EventEmitter {
             },
             {
               name: "🎯 Target Price (was)",
-              value: currentState.sell_reference_price
-                ? `$${((currentState.sell_reference_price * 1.03) / 0.999).toFixed(2)}`
-                : "Not set",
+              value: targetPrice ? `$${targetPrice.toFixed(2)}` : "Not set",
               inline: false,
             },
             {
@@ -281,7 +340,7 @@ export class SellOrderStateUpdater extends EventEmitter {
             },
             {
               name: "💰 Initial Capital",
-              value: `$${initialCapital.toFixed(2)}`,
+              value: `$${actualInitialCapital.toFixed(2)}`,
               inline: false,
             },
             {

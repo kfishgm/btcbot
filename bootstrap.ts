@@ -210,6 +210,7 @@ async function createDependencies() {
   const buyOrderStateUpdater = new BuyOrderStateUpdater(
     supabase,
     discordNotifier,
+    commissionManager,
     stepSize,
     baseAssetPrecision,
     tickSize,
@@ -221,6 +222,7 @@ async function createDependencies() {
     },
     discordNotifier,
     tradingRules,
+    commissionManager,
   );
 
   // Add error handler to WebSocketManager to prevent unhandled errors
