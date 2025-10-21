@@ -8,15 +8,22 @@
  * - reference_price = ATH when no BTC held (for grid anchoring)
  * - reference_price = avg_cost when BTC held (for sell trigger)
  *
- * Formula from STRATEGY.md:
+ * Formula from STRATEGY.md (lines 209-218):
  * - avg_cost = cost_accum_usdt / btc_accum_net
- * - cost_accum_usdt = Σ(usdt_spent)  // No fee addition - fees already reflected
+ * - cost_accum_usdt = Σ(usdt_spent)  // ONLY usdt_spent - NO fee additions
  * - btc_accum_net = Σ(btc_filled - fee_btc)  // BTC fees reduce net amount
  *
- * Fee handling:
- * - Buy fees in BTC: Reduce btc_accum_net (denominator)
+ * Fee handling (CRITICAL - prevents double-counting):
+ * - Buy fees in BTC: Reduce btc_accum_net (denominator) ONLY
+ * - Buy fees in USDT: NOT added to cost (already in usdt_spent if applicable)
  * - Sell fees in USDT: Reduce proceeds (not added to cost)
- * - NO double-counting: fee_btc * fill_price should NOT be added to cost
+ * - NO double-counting: Fees affect EITHER numerator OR denominator, NEVER both
+ *
+ * Example:
+ * - usdt_spent = 1000, btc_filled = 0.01, fee_btc = 0.0001
+ * - cost_accum_usdt = 1000 (just usdt_spent)
+ * - btc_accum_net = 0.01 - 0.0001 = 0.0099 (fee reduces BTC)
+ * - avg_cost = 1000 / 0.0099 = 101,010.10 (higher due to reduced BTC)
  *
  * When no BTC is held (btc_accum_net = 0), returns the ATH price for grid anchoring.
  */
@@ -59,16 +66,16 @@ export class ReferencePriceCalculator {
   }
 
   /**
-   * Calculate cost for a single purchase including fees
+   * Calculate cost for a single purchase
    * @param purchase Purchase data
-   * @returns Total cost in USDT including all fees
+   * @returns Total cost in USDT (fees NOT added - already reflected in reduced BTC)
    */
   private static calculatePurchaseCost(purchase: Purchase): number {
-    return (
-      purchase.usdt_spent +
-      purchase.fee_usdt +
-      purchase.fee_btc * purchase.fill_price
-    );
+    // Per STRATEGY.md: cost_accum_usdt = Σ(usdt_spent)
+    // Fees are NOT added to cost - they're already reflected in reduced BTC quantity
+    // Buy fees in BTC reduce the denominator (btc_accum_net)
+    // This prevents double-counting of fees
+    return purchase.usdt_spent;
   }
 
   /**
