@@ -18,8 +18,15 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "resolveJsonModule": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "types": ["node", "jest"]
   },
   "include": ["src/**/*", "tests/**/*", "supabase/**/*", "__tests__/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "bootstrap.ts",
+    "scripts/**/*",
+    "types/supabase-old.ts"
+  ]
 }
