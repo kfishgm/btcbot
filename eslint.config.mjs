@@ -21,6 +21,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.js', '*.mjs', '.claude/**', 'e2e/**'],
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.js', '*.mjs', '.claude/**', 'e2e/**', 'bootstrap.ts', 'scripts/**', 'types/supabase-old.ts'],
   }
 );

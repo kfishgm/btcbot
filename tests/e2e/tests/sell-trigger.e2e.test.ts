@@ -249,7 +249,8 @@ describe("Sell Trigger E2E", () => {
     const state = await components.cycleStateManager.getCurrentState();
 
     // Reference price should be the weighted average
-    expect(state?.reference_price!).toBeCloseTo(99502.48, 1);
+    expect(state).toBeDefined();
+    expect(state!.reference_price).toBeCloseTo(99502.48, 1);
 
     // Sell trigger price should be reference * 1.005
     const sellTriggerPrice = (state?.reference_price || 99502.48) * 1.005;
