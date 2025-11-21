@@ -394,13 +394,15 @@ describe("Complete Trading Cycle E2E", () => {
 
     const result = referencePriceCalculator.calculateReferencePrice(purchases);
 
-    // The reference price calculator adds fee_btc * fill_price to the cost
-    // Total USDT cost: 100 + 0 + (0.000001 * 100000) + 99.7 + 0 + (0.000001 * 99700)
-    //                = 100 + 0.1 + 99.7 + 0.0997 = 199.8997
-    // Total BTC net (after fees): (0.001 - 0.000001) * 2 = 0.001998
-    // Reference price = 199.8997 / 0.001998 = 100049.9
-    const expectedRef = (100 + 0.1 + 99.7 + 0.0997) / 0.001998;
-    expect(result).toBeCloseTo(expectedRef, 2);
+    // Per spec Section 3: When commissionAsset = BASE (BTC), cost = usdt_spent + fee_usdt
+    // BTC fees are NOT converted and added to cost
+    // Purchase 1: cost = 100 + 0 = 100, btc_net = 0.001 - 0.000001 = 0.000999
+    // Purchase 2: cost = 99.7 + 0 = 99.7, btc_net = 0.001 - 0.000001 = 0.000999
+    // Total USDT cost: 100 + 99.7 = 199.7
+    // Total BTC net (after fees): 0.000999 + 0.000999 = 0.001998
+    // Reference price = 199.7 / 0.001998 = 99949.949...
+    const expectedRef = (100 + 99.7) / 0.001998;
+    expect(result).toBeCloseTo(expectedRef, 1);
   });
 
   it("should not send Discord notifications in test environment", async () => {

@@ -64,11 +64,9 @@ export class ReferencePriceCalculator {
    * @returns Total cost in USDT including all fees
    */
   private static calculatePurchaseCost(purchase: Purchase): number {
-    return (
-      purchase.usdt_spent +
-      purchase.fee_usdt +
-      purchase.fee_btc * purchase.fill_price
-    );
+    // Per spec Section 3: When commissionAsset = BASE, cost = cummQuote only
+    // BTC fees are already reflected in reduced net BTC - do NOT add to cost
+    return purchase.usdt_spent + purchase.fee_usdt;
   }
 
   /**

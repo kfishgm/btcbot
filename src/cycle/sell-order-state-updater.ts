@@ -62,6 +62,7 @@ export class SellOrderStateUpdater extends EventEmitter {
   private discordNotifier?: DiscordNotifier;
   private commissionManager?: CommissionManager;
   private tradingRules: TradingRules;
+  private baseAssetPrecision: number;
 
   constructor(
     supabase: SupabaseClient<Database>,
@@ -69,6 +70,7 @@ export class SellOrderStateUpdater extends EventEmitter {
     discordNotifier: DiscordNotifier | undefined,
     tradingRules: TradingRules,
     commissionManager?: CommissionManager,
+    baseAssetPrecision: number = 8, // Default BTC precision
   ) {
     super();
     this.supabase = supabase;
@@ -77,6 +79,7 @@ export class SellOrderStateUpdater extends EventEmitter {
     this.discordNotifier = discordNotifier;
     this.tradingRules = tradingRules;
     this.commissionManager = commissionManager;
+    this.baseAssetPrecision = baseAssetPrecision;
   }
 
   /**
@@ -167,7 +170,7 @@ export class SellOrderStateUpdater extends EventEmitter {
               },
               {
                 name: "📦 BTC Sold",
-                value: `${orderResult.executedQty.toFixed(8)} BTC`,
+                value: `${orderResult.executedQty.toFixed(this.baseAssetPrecision)} BTC`,
                 inline: false,
               },
               {

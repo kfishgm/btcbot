@@ -536,7 +536,8 @@ export class TradingRules {
         `No trading rules cached for ${symbol}. Call getRules() first.`,
       );
     }
-    return amount < rules.minQty;
+    // Zero is not dust - dust is a small positive amount below minimum tradeable
+    return amount > 0 && amount < rules.minQty;
   }
 
   /**

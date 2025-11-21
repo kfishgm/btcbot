@@ -57,10 +57,11 @@ describe("ReferencePriceCalculator", () => {
 
       const result = calculator.calculateReferencePrice([purchase]);
 
-      // cost_accum_usdt = 500 + 0 + 0.00001 * 50000 = 500 + 0.5 = 500.5
+      // Per spec Section 3: When commissionAsset = BASE, cost = cummQuote (no BTC fee added)
+      // cost_accum_usdt = 500 + 0 = 500
       // btc_accum_net = 0.01 - 0.00001 = 0.00999
-      // reference_price = 500.5 / 0.00999 = 50100.1001...
-      expect(result).toBeCloseTo(50100.1001, 4);
+      // reference_price = 500 / 0.00999 = 50050.0500...
+      expect(result).toBeCloseTo(50050.05, 2);
     });
 
     it("should calculate reference price for single purchase with both BTC and USDT fees", () => {
@@ -74,10 +75,11 @@ describe("ReferencePriceCalculator", () => {
 
       const result = calculator.calculateReferencePrice([purchase]);
 
-      // cost_accum_usdt = 500 + 0.25 + 0.00001 * 50000 = 500 + 0.25 + 0.5 = 500.75
+      // Per spec Section 3: cost = usdt_spent + fee_usdt (no BTC fee added)
+      // cost_accum_usdt = 500 + 0.25 = 500.25
       // btc_accum_net = 0.01 - 0.00001 = 0.00999
-      // reference_price = 500.75 / 0.00999 = 50125.1251...
-      expect(result).toBeCloseTo(50125.1251, 4);
+      // reference_price = 500.25 / 0.00999 = 50075.075...
+      expect(result).toBeCloseTo(50075.075, 3);
     });
 
     it("should handle zero fees", () => {
@@ -154,13 +156,14 @@ describe("ReferencePriceCalculator", () => {
 
       const result = calculator.calculateReferencePrice(purchases);
 
-      // Purchase 1: cost = 500 + 0.5 + 0 = 500.5, btc_net = 0.01
-      // Purchase 2: cost = 510 + 0 + 0.00001 * 51000 = 510 + 0.51 = 510.51, btc_net = 0.01 - 0.00001 = 0.00999
-      // Purchase 3: cost = 520 + 0.26 + 0.000005 * 52000 = 520 + 0.26 + 0.26 = 520.52, btc_net = 0.01 - 0.000005 = 0.009995
-      // Total: cost_accum_usdt = 500.5 + 510.51 + 520.52 = 1531.53
+      // Per spec Section 3: cost = usdt_spent + fee_usdt (no BTC fee conversion)
+      // Purchase 1: cost = 500 + 0.5 = 500.5, btc_net = 0.01
+      // Purchase 2: cost = 510 + 0 = 510, btc_net = 0.01 - 0.00001 = 0.00999
+      // Purchase 3: cost = 520 + 0.26 = 520.26, btc_net = 0.01 - 0.000005 = 0.009995
+      // Total: cost_accum_usdt = 500.5 + 510 + 520.26 = 1530.76
       // Total: btc_accum_net = 0.01 + 0.00999 + 0.009995 = 0.029985
-      // reference_price = 1531.53 / 0.029985 = 51076.538...
-      expect(result).toBeCloseTo(51076.538, 2);
+      // reference_price = 1530.76 / 0.029985 = 51050.8588...
+      expect(result).toBeCloseTo(51050.859, 1);
     });
 
     it("should calculate correctly for many small purchases", () => {
@@ -176,11 +179,11 @@ describe("ReferencePriceCalculator", () => {
 
       const result = calculator.calculateReferencePrice(purchases);
 
-      // Calculate expected
+      // Calculate expected per spec Section 3: cost = usdt_spent + fee_usdt
       let totalCost = 0;
       let totalBtc = 0;
       purchases.forEach((p) => {
-        totalCost += p.usdt_spent + p.fee_usdt + p.fee_btc * p.fill_price;
+        totalCost += p.usdt_spent + p.fee_usdt; // No BTC fee conversion
         totalBtc += p.btc_filled - p.fee_btc;
       });
       const expected = totalCost / totalBtc;
@@ -241,10 +244,11 @@ describe("ReferencePriceCalculator", () => {
 
       const result = calculator.calculateReferencePrice([purchase]);
 
-      // cost_accum_usdt = 5000000 + 5000 + 0.1 * 50000 = 5000000 + 5000 + 5000 = 5010000
+      // Per spec: cost = usdt_spent + fee_usdt (no BTC fee conversion)
+      // cost_accum_usdt = 5000000 + 5000 = 5005000
       // btc_accum_net = 100 - 0.1 = 99.9
-      // reference_price = 5010000 / 99.9 = 50150.15015...
-      expect(result).toBeCloseTo(50150.15015, 4);
+      // reference_price = 5005000 / 99.9 = 50100.10010...
+      expect(result).toBeCloseTo(50100.1001, 4);
     });
 
     it("should handle negative values (should validate)", () => {
@@ -275,14 +279,14 @@ describe("ReferencePriceCalculator", () => {
 
       const result = calculator.calculateReferencePrice(purchases);
 
-      // Each purchase:
-      // cost = 6.172505 + 0.00617251 + 0.00000012 * 50000.01 = 6.172505 + 0.00617251 + 0.006000012 = 6.184677522
+      // Each purchase per spec: cost = usdt_spent + fee_usdt
+      // cost = 6.172505 + 0.00617251 = 6.17867751
       // btc_net = 0.00012345 - 0.00000012 = 0.00012333
       // Total for 100 purchases:
-      // total_cost = 6.184677522 * 100 = 618.4677522
+      // total_cost = 6.17867751 * 100 = 617.867751
       // total_btc = 0.00012333 * 100 = 0.012333
-      // reference_price = 618.4677522 / 0.012333 = 50147.389...
-      expect(result).toBeCloseTo(50147.389, 2);
+      // reference_price = 617.867751 / 0.012333 = 50098.739...
+      expect(result).toBeCloseTo(50098.74, 1);
     });
   });
 
@@ -382,12 +386,115 @@ describe("ReferencePriceCalculator", () => {
         fill_price: 51000,
       });
 
-      // cost_accum_usdt = (500 + 0.5 + 0.00001 * 50000) + (1020 + 1.02 + 0.00002 * 51000)
-      //                 = (500.5 + 0.5) + (1021.02 + 1.02) = 501 + 1022.04 = 1523.04
-      expect(calculator.getTotalCostUSDT()).toBeCloseTo(1523.04, 4);
+      // Per spec: cost = usdt_spent + fee_usdt
+      // cost_accum_usdt = (500 + 0.5) + (1020 + 1.02) = 500.5 + 1021.02 = 1521.52
+      expect(calculator.getTotalCostUSDT()).toBeCloseTo(1521.52, 2);
 
       // btc_accum_net = (0.01 - 0.00001) + (0.02 - 0.00002) = 0.00999 + 0.01998 = 0.02997
       expect(calculator.getNetBTCAccumulated()).toBeCloseTo(0.02997, 8);
+    });
+  });
+
+  describe("Spec Section 3: Buy Fill Normalization (Commission Handling)", () => {
+    it("should handle commissionAsset = BASE (BTC fee only)", () => {
+      // Spec Section 3: When commissionAsset = BASE
+      // base_net = executedQty - commission
+      // cost_quote = cummQuote (NO fee added to cost)
+      const purchase = {
+        btc_filled: 0.01,
+        usdt_spent: 500, // cummQuote
+        fee_usdt: 0, // No USDT fee
+        fee_btc: 0.00001, // BTC fee charged
+        fill_price: 50000,
+      };
+
+      const result = calculator.calculateReferencePrice([purchase]);
+
+      // cost = 500 + 0 = 500 (BTC fee NOT added)
+      // btc_net = 0.01 - 0.00001 = 0.00999
+      // SRP = 500 / 0.00999 = 50050.05...
+      expect(result).toBeCloseTo(50050.05, 2);
+    });
+
+    it("should handle commissionAsset = QUOTE (USDT fee only)", () => {
+      // Spec Section 3: When commissionAsset = QUOTE
+      // base_net = executedQty (no BTC deduction)
+      // cost_quote = cummQuote + commission (USDT fee ADDED to cost)
+      const purchase = {
+        btc_filled: 0.01,
+        usdt_spent: 500, // cummQuote
+        fee_usdt: 0.5, // USDT fee charged
+        fee_btc: 0, // No BTC fee
+        fill_price: 50000,
+      };
+
+      const result = calculator.calculateReferencePrice([purchase]);
+
+      // cost = 500 + 0.5 = 500.5 (USDT fee added)
+      // btc_net = 0.01 - 0 = 0.01
+      // SRP = 500.5 / 0.01 = 50050
+      expect(result).toBe(50050);
+    });
+
+    it("should handle commissionAsset = other (BNB, no fee impact)", () => {
+      // Spec Section 3: When commissionAsset = other (e.g., BNB)
+      // base_net = executedQty (no BTC deduction)
+      // cost_quote = cummQuote (no USDT fee added)
+      // Note: BNB fees are tracked separately but don't affect SRP calculation
+      const purchase = {
+        btc_filled: 0.01,
+        usdt_spent: 500, // cummQuote
+        fee_usdt: 0, // No USDT fee
+        fee_btc: 0, // No BTC fee
+        fill_price: 50000,
+      };
+
+      const result = calculator.calculateReferencePrice([purchase]);
+
+      // cost = 500 + 0 = 500
+      // btc_net = 0.01 - 0 = 0.01
+      // SRP = 500 / 0.01 = 50000
+      expect(result).toBe(50000);
+    });
+
+    it("should correctly handle mixed commission assets across multiple purchases", () => {
+      // Real-world scenario: Different purchases may have different commission assets
+      const purchases = [
+        {
+          // Purchase 1: BTC fee
+          btc_filled: 0.01,
+          usdt_spent: 500,
+          fee_usdt: 0,
+          fee_btc: 0.00001,
+          fill_price: 50000,
+        },
+        {
+          // Purchase 2: USDT fee
+          btc_filled: 0.02,
+          usdt_spent: 1020,
+          fee_usdt: 1.02,
+          fee_btc: 0,
+          fill_price: 51000,
+        },
+        {
+          // Purchase 3: BNB fee (no impact)
+          btc_filled: 0.015,
+          usdt_spent: 780,
+          fee_usdt: 0,
+          fee_btc: 0,
+          fill_price: 52000,
+        },
+      ];
+
+      const result = calculator.calculateReferencePrice(purchases);
+
+      // Purchase 1: cost = 500, btc_net = 0.00999
+      // Purchase 2: cost = 1020 + 1.02 = 1021.02, btc_net = 0.02
+      // Purchase 3: cost = 780, btc_net = 0.015
+      // Total: cost = 500 + 1021.02 + 780 = 2301.02
+      // Total: btc_net = 0.00999 + 0.02 + 0.015 = 0.04499
+      // SRP = 2301.02 / 0.04499 = 51145.143...
+      expect(result).toBeCloseTo(51145.14, 1);
     });
   });
 
@@ -411,41 +518,41 @@ describe("ReferencePriceCalculator", () => {
         },
       ];
 
-      // Manual calculation following STRATEGY.md formula exactly
+      // Manual calculation per spec Section 3: cost = usdt_spent + fee_usdt
       // Purchase 1:
-      // cost_accum_usdt = 750 + 0.75 + 0.000015 * 50000 = 750 + 0.75 + 0.75 = 751.5
+      // cost_accum_usdt = 750 + 0.75 = 750.75
       // btc_accum_net = 0.015 - 0.000015 = 0.014985
 
       // Purchase 2:
-      // cost_accum_usdt = 520 + 0.52 + 0.000010 * 52000 = 520 + 0.52 + 0.52 = 521.04
+      // cost_accum_usdt = 520 + 0.52 = 520.52
       // btc_accum_net = 0.010 - 0.000010 = 0.009990
 
       // Totals:
-      // total_cost_accum_usdt = 751.5 + 521.04 = 1272.54
+      // total_cost_accum_usdt = 750.75 + 520.52 = 1271.27
       // total_btc_accum_net = 0.014985 + 0.009990 = 0.024975
-      // reference_price = 1272.54 / 0.024975 = 50952.552...
+      // reference_price = 1271.27 / 0.024975 = 50901.70...
 
       const result = calculator.calculateReferencePrice(purchases);
-      expect(result).toBeCloseTo(50952.552, 2);
+      expect(result).toBeCloseTo(50901.7, 1);
     });
 
-    it("should correctly include fee_base converted to USDT in cost accumulator", () => {
-      // Verify that BTC fees are converted at fill_price and added to cost
+    it("should NOT convert BTC fees to USDT in cost (spec Section 3)", () => {
+      // Per spec Section 3: When commissionAsset = BASE, cost = cummQuote only
+      // BTC fees reduce net BTC but are NOT added to cost
       const purchase = {
         btc_filled: 0.01,
         usdt_spent: 500,
         fee_usdt: 0,
-        fee_btc: 0.0001, // 0.01% in BTC
+        fee_btc: 0.0001, // 1% in BTC
         fill_price: 50000,
       };
 
       const result = calculator.calculateReferencePrice([purchase]);
 
-      // BTC fee in USDT = 0.0001 * 50000 = 5 USDT
-      // cost_accum_usdt = 500 + 0 + 5 = 505
+      // Per spec: cost = usdt_spent + fee_usdt = 500 + 0 = 500
       // btc_accum_net = 0.01 - 0.0001 = 0.0099
-      // reference_price = 505 / 0.0099 = 51010.101...
-      expect(result).toBeCloseTo(51010.101, 3);
+      // reference_price = 500 / 0.0099 = 50505.05...
+      expect(result).toBeCloseTo(50505.05, 2);
     });
 
     it("should correctly reduce BTC accumulated by fee_base", () => {
@@ -465,9 +572,9 @@ describe("ReferencePriceCalculator", () => {
       // btc_accum_net should be 0.01 - 0.001 = 0.009
       expect(calculator.getNetBTCAccumulated()).toBeCloseTo(0.009, 10);
 
-      // cost_accum_usdt = 500 + 0 + 0.001 * 50000 = 500 + 50 = 550
-      // reference_price = 550 / 0.009 = 61111.111...
-      expect(result).toBeCloseTo(61111.111, 3);
+      // Per spec: cost = usdt_spent + fee_usdt = 500 + 0 = 500
+      // reference_price = 500 / 0.009 = 55555.5556...
+      expect(result).toBeCloseTo(55555.556, 2);
     });
   });
 });

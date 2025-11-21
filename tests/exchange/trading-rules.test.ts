@@ -214,7 +214,9 @@ describe("TradingRules", () => {
     it("should handle very small dust amounts", async () => {
       await tradingRules.getRules("BTCUSDT");
 
-      expect(tradingRules.isDust(0, "BTCUSDT")).toBe(true);
+      // Zero is not dust - you're not holding anything
+      expect(tradingRules.isDust(0, "BTCUSDT")).toBe(false);
+      // Positive amounts below minQty are dust
       expect(tradingRules.isDust(0.00000001, "BTCUSDT")).toBe(true);
       expect(tradingRules.isDust(0.00000278, "BTCUSDT")).toBe(true); // The actual dust from the issue
     });

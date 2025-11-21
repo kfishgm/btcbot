@@ -714,13 +714,17 @@ export class MainOrchestrator extends EventEmitter {
         );
 
         if (buyDecision.shouldBuy) {
-          const buyUsdtAmount = workingState.buy_amount || 100;
+          // Use the calculated buy amount from the trigger detector
+          // This handles multi-level grid crossings correctly (combined amount)
+          const buyUsdtAmount =
+            buyDecision.buyAmount || workingState.buy_amount || 100;
 
           logger.info(
             `✅ BUY CONDITION MET at ${closePrice} - Placing buy order for ${buyUsdtAmount} USDT`,
             {
               reason: buyDecision.reason,
               grid_level: buyDecision.newBuyIndex,
+              levels_triggered: buyDecision.levelsTriggered || 1,
             },
           );
 
@@ -757,6 +761,7 @@ export class MainOrchestrator extends EventEmitter {
                 buyDecision.levelsTriggered || 1,
                 this.strategyConfig?.maxPurchases,
                 this.strategyConfig?.risePercentage,
+                this.strategyConfig?.dropPercentage,
               );
 
             logger.info(`Buy order executed - State updated`, {

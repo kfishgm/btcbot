@@ -78,6 +78,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     levelsTriggered: number = 1,
     maxPurchases?: number,
     risePercentage?: number,
+    dropPercentage?: number,
   ): Promise<StateUpdateResult> {
     // Emit start event
     this.emit("stateUpdateStarted", {
@@ -96,6 +97,9 @@ export class BuyOrderStateUpdater extends EventEmitter {
         currentState,
         orderResult,
         levelsTriggered,
+        maxPurchases,
+        risePercentage,
+        dropPercentage,
       );
 
       logger.info("Calculated updates", {
@@ -186,6 +190,38 @@ export class BuyOrderStateUpdater extends EventEmitter {
           const purchasesCompleted =
             totalPurchases - updates.purchases_remaining;
 
+          // Calculate values for notification display (per spec Section 9)
+          // Note: updates.btc_dust is carried-over dust from previous cycles
+          // Current cycle's dust must be calculated from btc_accum_net
+          const tradeableBTC = calculateTradeableBTC(
+            updates.btc_accum_net,
+            this.stepSize,
+            this.baseAssetPrecision,
+          );
+          const currentCycleDust = updates.btc_accum_net - tradeableBTC;
+
+          // Calculate net BTC received and total cost (per spec Section 3)
+          const btcFilled = orderResult.executedQty;
+          const btcFee = orderResult.feeBTC;
+          const netBtcReceived = btcFilled.sub(btcFee);
+          const usdtSpent = orderResult.cummulativeQuoteQty;
+          const usdtFee = orderResult.feeUSDT;
+          const totalCostUsdt = usdtSpent.add(usdtFee);
+
+          // Determine which fee was charged (per spec Section 3)
+          const feeBTC = orderResult.feeBTC;
+          const feeUSDT = orderResult.feeUSDT;
+          let feeDisplay = "";
+          if (feeBTC.gt(0) && feeUSDT.gt(0)) {
+            feeDisplay = `${feeBTC.toFixed(this.baseAssetPrecision)} BTC + ${feeUSDT.toFixed(2)} USDT`;
+          } else if (feeBTC.gt(0)) {
+            feeDisplay = `${feeBTC.toFixed(this.baseAssetPrecision)} BTC`;
+          } else if (feeUSDT.gt(0)) {
+            feeDisplay = `${feeUSDT.toFixed(2)} USDT`;
+          } else {
+            feeDisplay = "0 (BNB or other)";
+          }
+
           const fields = [
             {
               name: "💰 Buy Price",
@@ -193,52 +229,72 @@ export class BuyOrderStateUpdater extends EventEmitter {
               inline: false,
             },
             {
-              name: "📦 BTC Bought",
-              value: `${orderResult.executedQty.toFixed(8)} BTC`,
+              name: "🔢 BASE Bought",
+              value: `${orderResult.executedQty.toFixed(this.baseAssetPrecision)} BTC`,
               inline: false,
             },
             {
-              name: "💵 USDT Spent",
-              value: `$${orderResult.cummulativeQuoteQty.toFixed(2)}`,
+              name: "💸 Fee Paid",
+              value: feeDisplay,
               inline: false,
             },
             {
-              name: "📈 ATH Reference Price",
+              name: "📉 BASE Net",
+              value: `${netBtcReceived.toFixed(this.baseAssetPrecision)} BTC`,
+              inline: false,
+            },
+            {
+              name: "💵 Total Cost (executed)",
+              value: `$${totalCostUsdt.toFixed(2)} USDT`,
+              inline: false,
+            },
+            {
+              name: "⚖️ Sell Reference Price (SRP)",
+              value: `$${updates.sell_reference_price.toFixed(2)} USDT/BTC`,
+              inline: false,
+            },
+            {
+              name: "📊 SRP Calculation",
+              value: `(total USDT + fees) / tradeable BTC`,
+              inline: false,
+            },
+            {
+              name: "📈 ATH (20-candle lookback)",
               value: currentState.ath_reference_price
                 ? `$${currentState.ath_reference_price.toFixed(2)}`
                 : "Not set",
               inline: false,
             },
             {
-              name: "⚓ Buy Anchor Price",
+              name: "📊 Buy Anchor (cycle base)",
               value: updates.buy_anchor_price
                 ? `$${updates.buy_anchor_price.toFixed(2)}`
                 : "Not set",
               inline: false,
             },
             {
-              name: "💹 Sell Reference Price",
-              value: `$${updates.sell_reference_price.toFixed(2)}`,
-              inline: false,
-            },
-            {
               name: "🎯 Target Sell Price",
-              value: `$${targetSellPrice.toFixed(2)} (+${(actualRisePercentage * 100).toFixed(1)}% after fees)`,
+              value: `$${targetSellPrice.toFixed(2)} (+${(actualRisePercentage * 100).toFixed(1)}% after est. fees)`,
               inline: false,
             },
             {
-              name: "🛒 Purchases",
-              value: `${purchasesCompleted}/${totalPurchases}`,
+              name: "📘 Target Formula",
+              value: `SRP × (1 + rise%) / (1 - fee%)`,
               inline: false,
             },
             {
-              name: "📊 Total BTC Held",
-              value: `${updates.btc_accumulated.toFixed(8)} BTC`,
+              name: "🧮 Tradeable | Dust",
+              value: `${tradeableBTC.toFixed(this.baseAssetPrecision)} BTC | ${currentCycleDust.toFixed(this.baseAssetPrecision)} BTC`,
               inline: false,
             },
             {
               name: "💼 Capital Remaining",
-              value: `$${updates.capital_available.toFixed(2)}`,
+              value: `$${updates.capital_available.toFixed(2)} USDT`,
+              inline: false,
+            },
+            {
+              name: "🧾 Purchases in Cycle",
+              value: `${purchasesCompleted} / ${totalPurchases}`,
               inline: false,
             },
             {
@@ -330,6 +386,9 @@ export class BuyOrderStateUpdater extends EventEmitter {
     currentState: CycleState,
     orderResult: OrderResult,
     levelsTriggered: number = 1,
+    maxPurchases?: number,
+    _risePercentage?: number, // Not used in this method, but passed through from updateAfterBuyOrder
+    dropPercentage?: number,
   ): StateUpdateData {
     // Calculate BTC amounts according to client's formula:
     // btc_accum_net = executedQty - feeBTC
@@ -337,15 +396,16 @@ export class BuyOrderStateUpdater extends EventEmitter {
     const btcFee = orderResult.feeBTC;
     const netBtcReceived = btcFilled.sub(btcFee);
 
-    // Calculate USDT amounts according to client's formula:
-    // cost_accum_usdt = fillPrice * executedQty
-    // Note: cummulativeQuoteQty from Binance = avgPrice * executedQty
+    // Calculate USDT amounts per spec Section 3 (Buy Fill Normalization):
+    // - If commissionAsset = BASE (BTC): cost = cummQuote
+    // - If commissionAsset = QUOTE (USDT): cost = cummQuote + commission
+    // - If commissionAsset = other (BNB): cost = cummQuote
     const usdtSpent = orderResult.cummulativeQuoteQty;
-    // const usdtFee = orderResult.feeUSDT; // Not used since fees are in BTC for buy orders
-    // For Binance: BUY orders only have BTC fees (deducted from received amount)
-    // The USDT cost is already the full amount paid (cummulativeQuoteQty)
-    // DO NOT add fees - they're already reflected in reduced BTC quantity
-    const totalCostUsdt = usdtSpent; // This equals avgPrice * executedQty
+    const usdtFee = orderResult.feeUSDT;
+
+    // Add USDT fees to cost per spec Section 3
+    // If fees are in BTC or BNB, feeUSDT will be 0 and this correctly equals usdtSpent
+    const totalCostUsdt = usdtSpent.add(usdtFee);
 
     // Debug logging for reference price calculation with client's formula verification
     const verifyAvgPriceTimesQty = orderResult.avgPrice.mul(
@@ -403,7 +463,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     const newPurchasesRemaining =
       currentState.purchases_remaining - levelsTriggered;
 
-    // Calculate new reference price using ONLY current cycle BTC (excludes dust)
+    // Calculate new reference price using ONLY tradeable BTC (excludes dust)
     // This ensures reference price reflects actual cost basis without dilution from dust
     const referencePrice = this.calculateReferencePrice(
       newCostAccumUsdt,
@@ -427,8 +487,9 @@ export class BuyOrderStateUpdater extends EventEmitter {
 
       // Total BTC including dust
       "btc_accumulated (with dust)": newBtcAccumulated,
-      "Dust amount": currentState.btc_dust || 0,
-      Note: "sell_reference_price uses btc_accum_net (excludes dust) for accurate cost basis",
+      "btc_accum_net (current cycle)": newBtcAccumNet,
+      "Carried over dust": currentState.btc_dust || 0,
+      Note: "sell_reference_price uses tradeable BTC (excludes dust) for accurate cost basis per spec Section 5",
     });
 
     // Verify reference price accounts for fees
@@ -485,6 +546,10 @@ export class BuyOrderStateUpdater extends EventEmitter {
       ? quantizedAnchorPrice
       : currentState.buy_anchor_price;
 
+    // Rebuild grid from anchor after first buy (per STRATEGY.md lines 159-195)
+    let rebuildGrid: number[] | null = null;
+    let rebuildBuyIndex = newBuyIndex;
+
     if (isFirstBuy) {
       logger.info("Setting buy anchor price on first buy (quantized)", {
         rawExecutionPrice: rawAnchorPrice,
@@ -493,21 +558,44 @@ export class BuyOrderStateUpdater extends EventEmitter {
         athPrice: currentState.ath_price,
         sellReferencePrice: currentState.sell_reference_price,
       });
+
+      // CRITICAL FIX: Rebuild grid from anchor price after first buy
+      // Per STRATEGY.md: "Rebuild grid using anchor price as new reference"
+      // "Reset buy_index to 0 - grid is completely new from anchor"
+      if (buyAnchorPrice && maxPurchases) {
+        // Use actual dropPercentage from strategy config, not a calculated value
+        const actualDropPercentage = dropPercentage || 0.003; // Default to 0.3% if not provided
+        rebuildGrid = this.buildGridFromAnchor(
+          buyAnchorPrice,
+          maxPurchases,
+          actualDropPercentage,
+        );
+        rebuildBuyIndex = 0; // CRITICAL: Reset to 0 per spec
+
+        logger.info("🔄 Grid rebuilt from anchor price after first buy", {
+          anchorPrice: buyAnchorPrice,
+          dropPercentage: actualDropPercentage,
+          maxPurchases,
+          gridLevels: rebuildGrid.map((level) => level.toFixed(2)),
+          resetBuyIndexTo: rebuildBuyIndex,
+          reason: "First buy completed - grid now anchored to execution price",
+        });
+      }
     }
 
     return {
       btc_accumulated: newBtcAccumulated,
       cost_accum_usdt: newCostAccumUsdt,
       btc_accum_net: newBtcAccumNet,
-      btc_dust: currentState.btc_dust, // Preserve dust from previous cycles
+      btc_dust: currentState.btc_dust || 0, // Preserve carried-over dust from previous cycles
       capital_available: newCapitalAvailable,
       purchases_remaining: newPurchasesRemaining,
       sell_reference_price: referencePrice, // This is the average cost basis
       buy_anchor_price: buyAnchorPrice,
       ath_price: currentState.ath_price, // Preserve ATH price
       status: newStatus,
-      buy_index: newBuyIndex,
-      buy_grid: currentState.buy_grid || null, // Use the grid from state (which may be newly built)
+      buy_index: rebuildBuyIndex, // Use rebuilt index if grid was rebuilt
+      buy_grid: rebuildGrid || currentState.buy_grid || null, // Use rebuilt grid if available
     };
   }
 
@@ -574,6 +662,30 @@ export class BuyOrderStateUpdater extends EventEmitter {
     }
 
     return data;
+  }
+
+  /**
+   * Build grid from anchor price after first buy
+   * Per STRATEGY.md lines 159-195: After first buy, rebuild grid using execution price as anchor
+   * All levels are quantized to tickSize
+   */
+  private buildGridFromAnchor(
+    anchorPrice: number,
+    maxPurchases: number,
+    dropPercentage: number,
+  ): number[] {
+    const grid: number[] = [];
+
+    // Start from n = 1 since we've already executed the first buy
+    // Each level is n * dropPercentage below the anchor
+    for (let n = 1; n <= maxPurchases; n++) {
+      const rawLevel = anchorPrice * (1 - n * dropPercentage);
+      const quantizedLevel =
+        Math.floor(rawLevel / this.tickSize) * this.tickSize;
+      grid.push(quantizedLevel);
+    }
+
+    return grid;
   }
 
   async logStateUpdate(
