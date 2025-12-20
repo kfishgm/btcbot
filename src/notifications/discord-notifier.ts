@@ -110,18 +110,11 @@ export class DiscordNotifier {
     metadata?: Record<string, unknown>,
   ): Promise<void> {
     if (this.config.silentMode && severity !== "critical") {
-      logger.debug("Discord notification suppressed (silent mode)", {
-        message,
-        severity,
-      });
       return;
     }
 
     if (!this.checkRateLimit(severity === "critical")) {
-      logger.warn("Discord rate limit exceeded, skipping notification", {
-        message,
-        severity,
-      });
+      logger.warn("Discord rate limit exceeded");
       return;
     }
 
@@ -442,7 +435,7 @@ export class DiscordNotifier {
 
   async testWebhook(): Promise<boolean> {
     try {
-      await this.sendAlert("🔧 Discord webhook test message", "info");
+      await this.sendAlert("Discord webhook test", "info");
       return true;
     } catch (error) {
       logger.error("Discord webhook test failed", { error });
@@ -502,8 +495,7 @@ export class DiscordNotifier {
 
       if (!response.ok) {
         if (response.status === 429) {
-          const retryAfter = response.headers.get("X-RateLimit-Reset-After");
-          logger.warn("Discord rate limited by API", { retryAfter });
+          logger.warn("Discord API rate limited");
         }
         throw new Error(
           `Discord webhook failed: ${response.status} ${response.statusText}`,
@@ -517,10 +509,7 @@ export class DiscordNotifier {
 
       // Retry logic
       if (this.config.enableRetry && retryCount < this.config.maxRetries) {
-        const delay = this.config.retryDelay * Math.pow(2, retryCount); // Exponential backoff
-        logger.info(
-          `Retrying Discord webhook in ${delay}ms (attempt ${retryCount + 1}/${this.config.maxRetries})`,
-        );
+        const delay = this.config.retryDelay * Math.pow(2, retryCount);
         await new Promise((resolve) => setTimeout(resolve, delay));
         return this.sendToWebhook(message, retryCount + 1);
       }
@@ -621,9 +610,8 @@ export class DiscordNotifier {
   ): Promise<void> {
     // Enforce max queue size
     if (this.messageQueue.length >= this.config.maxQueueSize) {
-      // Remove oldest message
       this.messageQueue.shift();
-      logger.warn("Discord message queue full, removing oldest message");
+      logger.warn("Discord message queue full");
     }
 
     const queuedMessage: QueuedMessage = {
@@ -635,9 +623,6 @@ export class DiscordNotifier {
     };
 
     this.messageQueue.push(queuedMessage);
-    logger.info(
-      `Queued Discord message (type: ${type}, queue size: ${this.messageQueue.length})`,
-    );
   }
 
   getQueuedMessages(): Array<{
@@ -651,7 +636,6 @@ export class DiscordNotifier {
 
   async retryQueuedMessages(): Promise<{ successful: number; failed: number }> {
     if (this.queueProcessing) {
-      logger.warn("Queue processing already in progress");
       return { successful: 0, failed: 0 };
     }
 
@@ -666,9 +650,6 @@ export class DiscordNotifier {
       try {
         await this.sendToWebhook(queuedMessage.message);
         successful++;
-        logger.info(
-          `Successfully sent queued message (id: ${queuedMessage.id})`,
-        );
       } catch (error) {
         failed++;
         queuedMessage.retryCount++;
@@ -677,20 +658,12 @@ export class DiscordNotifier {
         if (queuedMessage.retryCount < this.config.maxRetries) {
           this.messageQueue.push(queuedMessage);
         } else {
-          logger.error(
-            `Dropping queued message after max retries (id: ${queuedMessage.id})`,
-            {
-              error,
-            },
-          );
+          logger.error("Dropped queued message after max retries", { error });
         }
       }
     }
 
     this.queueProcessing = false;
-    logger.info(
-      `Queue retry complete (successful: ${successful}, failed: ${failed})`,
-    );
     return { successful, failed };
   }
 
@@ -704,14 +677,12 @@ export class DiscordNotifier {
 
     const removed = before - this.messageQueue.length;
     if (removed > 0) {
-      logger.info(`Cleared ${removed} old messages from queue`);
+      logger.info(`Cleared ${removed} old messages from Discord queue`);
     }
   }
 
   clearQueue(): void {
-    const count = this.messageQueue.length;
     this.messageQueue = [];
-    logger.info(`Cleared ${count} messages from queue`);
   }
 
   getQueueSize(): number {

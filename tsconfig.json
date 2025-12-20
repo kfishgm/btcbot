@@ -20,6 +20,14 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src/**/*", "tests/**/*", "supabase/**/*", "__tests__/**/*"],
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "supabase/**/*",
+    "__tests__/**/*",
+    "bootstrap.ts",
+    "scripts/**/*",
+    "types/**/*"
+  ],
   "exclude": ["node_modules", "dist"]
 }

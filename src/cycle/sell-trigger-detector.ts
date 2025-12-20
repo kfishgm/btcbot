@@ -21,6 +21,7 @@ import { logger } from "../utils/logger.js";
 import type { TradingRules } from "../exchange/trading-rules.js";
 import type { CommissionManager } from "../exchange/commission-manager.js";
 import { calculateSellThreshold } from "../utils/pricing-calculations.js";
+import type { StrategyConfig } from "../config/strategy-config-loader.js";
 
 export interface CycleState {
   status: "READY" | "HOLDING" | "PAUSED";
@@ -67,6 +68,7 @@ export class SellTriggerDetector {
   private quoteAssetPrecision: number = 8; // Default USDT precision
 
   constructor(
+    private strategyConfig: StrategyConfig,
     private tradingRules?: TradingRules,
     private commissionManager?: CommissionManager,
   ) {}
@@ -207,30 +209,19 @@ export class SellTriggerDetector {
       try {
         commissionRate = await this.commissionManager.getTakerCommission();
       } catch (error) {
-        logger.warn("Failed to get commission rate, using default 0.1%", {
+        logger.warn("Failed to get commission rate, using default", {
+          timeframe: this.strategyConfig.timeframe,
           error: error instanceof Error ? error.message : String(error),
         });
       }
     }
 
     // Use shared utility for calculation
-    const adjustedSellPrice = calculateSellThreshold(
+    return calculateSellThreshold(
       referencePrice,
       risePercentage,
       commissionRate,
     );
-    const targetGrossPrice = referencePrice * (1 + risePercentage);
-
-    logger.debug("Sell threshold calculated with commission adjustment", {
-      sellReferencePrice: referencePrice,
-      risePercentage,
-      commissionRate,
-      targetNetPrice: targetGrossPrice,
-      adjustedSellPrice,
-      adjustment: adjustedSellPrice - targetGrossPrice,
-    });
-
-    return adjustedSellPrice;
   }
 
   /**
@@ -284,6 +275,7 @@ export class SellTriggerDetector {
   ): void {
     if (shouldSell) {
       logger.info("SELL TRIGGERED", {
+        timeframe: this.strategyConfig.timeframe,
         module: "SellTriggerDetector",
         price: currentPrice,
         sellThreshold: threshold,

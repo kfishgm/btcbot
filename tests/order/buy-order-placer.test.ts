@@ -4,6 +4,7 @@ import { BinanceClient } from "../../src/exchange/binance-client";
 import { TradingRules } from "../../src/exchange/trading-rules";
 import { Decimal } from "decimal.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { StrategyConfig } from "../../src/config/strategy-config-loader";
 import type {
   BinanceOrder,
   BinanceTrade,
@@ -37,10 +38,27 @@ describe("BuyOrderPlacer", () => {
     >;
   };
   let tradingRules: TradingRules;
+  let mockStrategyConfig: StrategyConfig;
 
   beforeEach(() => {
     // Reset all mocks
     jest.clearAllMocks();
+
+    // Create mock strategy config
+    mockStrategyConfig = {
+      id: "test-config",
+      timeframe: "15m",
+      dropPercentage: 0.02,
+      risePercentage: 0.03,
+      maxPurchases: 5,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 500,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 25,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
 
     // Mock SupabaseClient with chaining support
     const mockQueryBuilder = {
@@ -149,6 +167,7 @@ describe("BuyOrderPlacer", () => {
       tradingRules,
       mockSupabaseClient as SupabaseClient,
       "BTCUSDT",
+      mockStrategyConfig,
     );
 
     // Mock the private sleep method to eliminate delays in tests

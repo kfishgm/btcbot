@@ -44,6 +44,7 @@ export class HistoricalCandleManager extends EventEmitter {
   private client: BinanceClient;
   private symbol: string;
   private interval: string;
+  private timeframe: string;
   private config: Required<HistoricalCandleConfig>;
   private candles: ExtendedKline[] = [];
   private initialized = false;
@@ -67,6 +68,7 @@ export class HistoricalCandleManager extends EventEmitter {
     this.client = client;
     this.symbol = symbol;
     this.interval = interval;
+    this.timeframe = interval;
     this.config = {
       maxCandles: config?.maxCandles ?? 100,
       restPollingInterval: config?.restPollingInterval ?? 60000,
@@ -94,12 +96,12 @@ export class HistoricalCandleManager extends EventEmitter {
 
       if (klines.length < this.config.maxCandles) {
         logger.warn(
-          `HistoricalCandleManager: insufficient history for ${this.symbol}`,
+          `[${this.timeframe}] Insufficient historical candles for ${this.symbol}`,
           {
             symbol: this.symbol,
             received: klines.length,
             expected: this.config.maxCandles,
-            module: "HistoricalCandleManager",
+            timeframe: this.timeframe,
           },
         );
       }
@@ -125,10 +127,10 @@ export class HistoricalCandleManager extends EventEmitter {
 
     // Check for zero volume
     if (parseFloat(candle.volume) === 0) {
-      logger.warn("Zero volume candle detected", {
+      logger.warn(`[${this.timeframe}] Zero volume candle detected`, {
         symbol: this.symbol,
         timestamp: new Date(candle.openTime).toISOString(),
-        module: "HistoricalCandleManager",
+        timeframe: this.timeframe,
       });
     }
 
@@ -256,15 +258,12 @@ export class HistoricalCandleManager extends EventEmitter {
 
     // Log ATH calculation details
     if (athCandle) {
-      logger.info(
-        `Rolling window ATH calculated: ${maxHigh.toFixed(2)} (from ${recentClosedCandles.length} candles)`,
+      logger.debug(
+        `[${this.timeframe}] ATH calculated: ${maxHigh.toFixed(2)} from ${recentClosedCandles.length} candles`,
         {
-          symbol: this.symbol,
-          windowAthPrice: maxHigh,
-          athTime: new Date(athCandle.openTime).toISOString(),
-          candlesUsed: recentClosedCandles.length,
-          windowSize: this.config.maxCandles,
-          excludedUnclosed: excludeUnclosed,
+          timeframe: this.timeframe,
+          ath: maxHigh.toFixed(2),
+          candleCount: recentClosedCandles.length,
         },
       );
     }
@@ -352,11 +351,10 @@ export class HistoricalCandleManager extends EventEmitter {
       try {
         await this.fetchLatestCandles();
       } catch (error) {
-        logger.error("REST polling error", {
+        logger.error(`[${this.timeframe}] REST polling error`, {
           error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
           symbol: this.symbol,
-          module: "HistoricalCandleManager",
+          timeframe: this.timeframe,
         });
         // Continue polling even on error
       }
@@ -366,12 +364,11 @@ export class HistoricalCandleManager extends EventEmitter {
     this.pollingInterval = setInterval(poll, pollInterval);
 
     // Do immediate fetch
-    poll().catch((error) => {
-      logger.error("Initial REST polling fetch error", {
+    void poll().catch((error) => {
+      logger.error(`[${this.timeframe}] Initial REST polling error`, {
         error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
         symbol: this.symbol,
-        module: "HistoricalCandleManager",
+        timeframe: this.timeframe,
       });
     });
   }

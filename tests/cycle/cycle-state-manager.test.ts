@@ -88,6 +88,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -140,6 +142,8 @@ describe("CycleStateManager", () => {
             localMockSupabase,
             localConfig,
             mockTradingRules,
+            "test-config-id",
+            "1h",
           );
           await manager.initialize();
 
@@ -153,6 +157,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -171,6 +177,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -186,6 +194,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -225,6 +235,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -244,6 +256,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -259,6 +273,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -295,6 +311,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -326,6 +344,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -367,6 +387,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -407,6 +429,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -438,6 +462,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await cycleStateManager.initialize();
@@ -461,6 +487,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await expect(cycleStateManager.initialize()).rejects.toThrow(
@@ -480,6 +508,8 @@ describe("CycleStateManager", () => {
           mockSupabase,
           config,
           mockTradingRules,
+          "test-config-id",
+          "1h",
         );
 
         await expect(cycleStateManager.initialize()).rejects.toThrow(
@@ -496,6 +526,8 @@ describe("CycleStateManager", () => {
         mockSupabase,
         config,
         mockTradingRules,
+        "test-config-id",
+        "1h",
       );
 
       expect(await cycleStateManager.getCurrentState()).toBeNull();
@@ -514,6 +546,8 @@ describe("CycleStateManager", () => {
         mockSupabase,
         config,
         mockTradingRules,
+        "test-config-id",
+        "1h",
       );
       await cycleStateManager.initialize();
 
@@ -532,6 +566,8 @@ describe("CycleStateManager", () => {
         mockSupabase,
         config,
         mockTradingRules,
+        "test-config-id",
+        "1h",
       );
     });
 
@@ -626,6 +662,8 @@ describe("CycleStateManager", () => {
         mockSupabase,
         config,
         mockTradingRules,
+        "test-config-id",
+        "1h",
       );
     });
 

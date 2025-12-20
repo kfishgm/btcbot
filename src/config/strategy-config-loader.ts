@@ -16,6 +16,7 @@ export interface StrategyConfig {
   athWindow: number;
   isActive: boolean;
   updatedAt: string;
+  capitalAllocationPct?: number; // Optional percentage 0-100
 }
 
 // Database record interface (snake_case from database)
@@ -32,6 +33,7 @@ interface DatabaseStrategyConfig {
   ath_window: number;
   is_active: boolean;
   updated_at: string;
+  capital_allocation_pct: number | null;
 }
 
 // Configuration error class
@@ -42,10 +44,13 @@ export class StrategyConfigError extends Error {
   }
 }
 
+// Multi-config validation constraints
+const MAX_ACTIVE_CONFIGS = 10;
+const CAPITAL_SAFETY_BUFFER = 0.05; // 5% safety buffer for account balance
+
 // Strategy configuration loader class
 export class StrategyConfigLoader {
   private client: SupabaseClient;
-  private cachedConfig: StrategyConfig | null = null;
 
   constructor() {
     const config = getConfig();
@@ -56,65 +61,159 @@ export class StrategyConfigLoader {
   }
 
   /**
-   * Load strategy configuration from database
-   * Creates default if none exists
-   * Validates configuration before returning
+   * Load all active strategy configurations from database
+   * Validates multi-config constraints (max count, unique timeframes, capital allocation)
+   * @param accountBalance - Optional account balance for capital validation
    */
-  async loadConfig(): Promise<StrategyConfig> {
-    // Return cached config if available (singleton pattern)
-    if (this.cachedConfig) {
-      return this.cachedConfig;
-    }
-
+  async loadAllActiveConfigs(
+    accountBalance?: number,
+  ): Promise<StrategyConfig[]> {
     try {
-      // Try to load active configuration(s)
+      // Load all active configurations
       const { data: configs, error } = await this.client
         .from("strategy_config")
         .select("*")
         .eq("is_active", true)
-        .order("updated_at", { ascending: false })
-        .limit(10);
+        .order("timeframe", { ascending: true });
 
       if (error) {
         throw new StrategyConfigError(`Database error: ${error.message}`);
       }
 
-      // Handle multiple active configs
-      if (configs && configs.length > 1) {
-        logger.warn(
-          `Found ${configs.length} active strategy configs! Using most recent.`,
-          {
-            ids: configs.map((c) => c.id),
-            updated_at: configs.map((c) => c.updated_at),
-          },
-        );
-      }
-
-      const data = configs?.[0] || null;
-
-      if (!data) {
-        // No configuration found, create default
+      // No active configs - create default
+      if (!configs || configs.length === 0) {
         const defaultConfig = await this.createDefaultConfig();
-        this.cachedConfig = defaultConfig;
-        return defaultConfig;
+        return [defaultConfig];
       }
 
-      // Convert from database format to application format
-      const config = this.convertFromDatabase(data as DatabaseStrategyConfig);
+      // Convert from database format
+      const convertedConfigs = configs.map((c) =>
+        this.convertFromDatabase(c as DatabaseStrategyConfig),
+      );
 
-      // Validate configuration
-      this.validateConfig(config);
+      // If percentages are set, calculate initial capital from account balance
+      const hasPercentages = convertedConfigs.some(
+        (c) => c.capitalAllocationPct !== undefined,
+      );
+      if (hasPercentages && accountBalance !== undefined) {
+        // Validate all configs have percentages
+        const missingPct = convertedConfigs.filter(
+          (c) => c.capitalAllocationPct === undefined,
+        );
+        if (missingPct.length > 0) {
+          throw new StrategyConfigError(
+            `All active configs must have capital_allocation_pct set if any config uses it. ` +
+              `Missing for timeframes: ${missingPct.map((c) => c.timeframe).join(", ")}`,
+          );
+        }
 
-      // Configuration loaded successfully
-      this.cachedConfig = config;
-      return config;
+        // Calculate capital from percentages
+        for (const config of convertedConfigs) {
+          if (config.capitalAllocationPct !== undefined) {
+            config.initialCapitalUsdt =
+              accountBalance * (config.capitalAllocationPct / 100);
+          }
+        }
+
+        logger.info("Calculated capital allocation from percentages", {
+          accountBalance,
+          allocations: convertedConfigs.map((c) => ({
+            timeframe: c.timeframe,
+            pct: c.capitalAllocationPct,
+            capital: c.initialCapitalUsdt.toFixed(2),
+          })),
+        });
+      }
+
+      // Validate each configuration
+      for (const config of convertedConfigs) {
+        this.validateConfig(config);
+      }
+
+      // Validate multi-config constraints
+      this.validateMultiConfigConstraints(convertedConfigs, accountBalance);
+
+      return convertedConfigs;
     } catch (error) {
       if (error instanceof StrategyConfigError) {
         throw error;
       }
       throw new StrategyConfigError(
-        `Failed to load configuration: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to load configurations: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
+    }
+  }
+
+  /**
+   * Load strategy configuration from database (backwards compatible - loads first active config)
+   * Creates default if none exists
+   * Validates configuration before returning
+   * @deprecated Use loadAllActiveConfigs() for multi-config support
+   */
+  async loadConfig(): Promise<StrategyConfig> {
+    const configs = await this.loadAllActiveConfigs();
+    if (configs.length > 1) {
+      logger.warn(
+        `Multiple active configs found (${configs.length}). Using first one for backwards compatibility.`,
+      );
+    }
+    return configs[0];
+  }
+
+  /**
+   * Validate multi-config constraints
+   * - Max 10 active configs
+   * - Unique timeframes across configs
+   * - Total allocated capital doesn't exceed account balance
+   */
+  private validateMultiConfigConstraints(
+    configs: StrategyConfig[],
+    accountBalance?: number,
+  ): void {
+    // Check max config count
+    if (configs.length > MAX_ACTIVE_CONFIGS) {
+      throw new StrategyConfigError(
+        `Maximum ${MAX_ACTIVE_CONFIGS} active configs allowed. Found ${configs.length}`,
+      );
+    }
+
+    // Check unique timeframes
+    const timeframes = configs.map((c) => c.timeframe);
+    const uniqueTimeframes = new Set(timeframes);
+    if (uniqueTimeframes.size !== timeframes.length) {
+      const duplicates = timeframes.filter(
+        (tf, index) => timeframes.indexOf(tf) !== index,
+      );
+      throw new StrategyConfigError(
+        `Duplicate timeframes found: ${duplicates.join(", ")}. Each active config must have a unique timeframe.`,
+      );
+    }
+
+    // Check total capital allocation if account balance provided
+    if (accountBalance !== undefined) {
+      const totalAllocated = configs.reduce(
+        (sum, c) => sum + c.initialCapitalUsdt,
+        0,
+      );
+
+      // When using percentage-based allocation, allow up to 100% (percentages are explicitly controlled)
+      // When using fixed database values, enforce 95% safety buffer
+      const usingPercentages = configs.some(
+        (c) => c.capitalAllocationPct !== undefined,
+      );
+      const maxAllowed = usingPercentages
+        ? accountBalance
+        : accountBalance * (1 - CAPITAL_SAFETY_BUFFER);
+
+      if (totalAllocated > maxAllowed) {
+        const bufferPct = usingPercentages
+          ? 100
+          : (1 - CAPITAL_SAFETY_BUFFER) * 100;
+        throw new StrategyConfigError(
+          `Total allocated capital ($${totalAllocated.toFixed(2)}) exceeds ${bufferPct}% of account balance ($${maxAllowed.toFixed(2)}). ` +
+            `Account balance: $${accountBalance.toFixed(2)}`,
+        );
+      }
     }
   }
 
@@ -170,7 +269,13 @@ export class StrategyConfigLoader {
     }
 
     // Check for unknown fields
-    const allowedFields = [...requiredFields, "id", "isActive", "updatedAt"];
+    const allowedFields = [
+      ...requiredFields,
+      "id",
+      "isActive",
+      "updatedAt",
+      "capitalAllocationPct",
+    ];
     for (const field in cfg) {
       if (!allowedFields.includes(field)) {
         throw new StrategyConfigError(`Unknown configuration field: ${field}`);
@@ -278,6 +383,7 @@ export class StrategyConfigLoader {
       slippage_sell_pct: 0.003,
       ath_window: 20, // Default value (configurable 10-500)
       is_active: true, // Auto-activate for convenience
+      capital_allocation_pct: null, // Default to null (use initial_capital_usdt instead)
     };
 
     // Insert default configuration
@@ -334,6 +440,7 @@ export class StrategyConfigLoader {
       athWindow: dbConfig.ath_window,
       isActive: dbConfig.is_active,
       updatedAt: dbConfig.updated_at,
+      capitalAllocationPct: dbConfig.capital_allocation_pct ?? undefined,
     };
   }
 }

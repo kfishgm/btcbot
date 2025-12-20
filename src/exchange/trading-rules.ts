@@ -148,16 +148,6 @@ export class TradingRules {
       lastUpdated: Date.now(),
     };
 
-    // Log the actual stepSize being used for BTCUSDT
-    if (symbolInfo.symbol === "BTCUSDT") {
-      logger.info("BTCUSDT trading rules loaded:", {
-        stepSize: rules.stepSize,
-        minQty: rules.minQty,
-        minNotional: rules.minNotional,
-        rawStepSize: lotSizeFilter?.stepSize,
-      });
-    }
-
     return rules;
   }
 
@@ -212,33 +202,15 @@ export class TradingRules {
     const fixedString = rawProduct.toFixed(8);
     const rounded = parseFloat(fixedString);
 
-    // Log the quantization for debugging
+    // Warn if we're losing significant amount due to quantization
     if (quantity !== rounded) {
       const quantizationDiff = quantity - rounded;
-      logger.info(`Quantity quantization for ${symbol}:`, {
-        original: quantity,
-        stepSize,
-        stepCount,
-        rawProduct,
-        fixedString,
-        rounded,
-        difference: quantizationDiff,
-        differencePercent:
-          ((quantizationDiff / quantity) * 100).toFixed(4) + "%",
-        minQty: rules.minQty,
-        maxQty: rules.maxQty,
-      });
-
-      // Warn if we're losing significant amount due to quantization
       if (quantizationDiff > stepSize) {
-        logger.warn(
-          `Quantization removed ${quantizationDiff.toFixed(8)} BTC (more than one step size)`,
-          {
-            symbol,
-            stepSize,
-            quantizationDiff,
-          },
-        );
+        logger.warn(`Quantization loss exceeds step size`, {
+          symbol,
+          quantizationDiff,
+          stepSize,
+        });
       }
     }
 
@@ -275,7 +247,6 @@ export class TradingRules {
     const roundedUp = parseFloat((stepCountUp * stepSize).toFixed(8));
 
     // Calculate actual spend for each option
-    const spendDown = roundedDown * currentPriceBTC;
     const spendUp = roundedUp * currentPriceBTC;
 
     // Calculate efficiency (how close to target)
@@ -296,15 +267,9 @@ export class TradingRules {
     if (!exceedsAvailableCapital && efficiencyUp <= maxOverspendRatio) {
       // Round UP for better capital utilization
       finalQuantity = roundedUp;
-      logger.debug(
-        `Smart rounding UP: ${quantity.toFixed(8)} -> ${roundedUp.toFixed(8)} BTC (spend: $${spendUp.toFixed(2)})`,
-      );
     } else {
       // Round DOWN to avoid excessive overspend or exceeding capital
       finalQuantity = roundedDown;
-      logger.debug(
-        `Smart rounding DOWN: ${quantity.toFixed(8)} -> ${roundedDown.toFixed(8)} BTC (spend: $${spendDown.toFixed(2)})${exceedsAvailableCapital ? " (capital limit)" : ""}`,
-      );
     }
 
     // Clamp to min/max bounds
@@ -353,15 +318,6 @@ export class TradingRules {
       );
     }
 
-    // Log the trading rules for transparency
-    logger.info("Calculating minimum sellable quantity", {
-      symbol,
-      price,
-      minQty: rules.minQty,
-      minNotional: rules.minNotional,
-      stepSize: rules.stepSize,
-    });
-
     // Minimum based on notional value requirement
     const minQtyForNotional = rules.minNotional / price;
 
@@ -371,12 +327,6 @@ export class TradingRules {
     // Round up to nearest step size to ensure it's valid
     const steps = Math.ceil(minSellableQty / rules.stepSize);
     const result = parseFloat((steps * rules.stepSize).toFixed(8));
-
-    logger.info("Minimum sellable quantity calculated", {
-      minQtyForNotional,
-      minSellableQty,
-      rounded: result,
-    });
 
     return result;
   }

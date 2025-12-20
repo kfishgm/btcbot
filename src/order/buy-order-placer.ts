@@ -12,6 +12,7 @@ import { Decimal } from "decimal.js";
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
 import { SupabaseClient } from "@supabase/supabase-js";
+import type { StrategyConfig } from "../config/strategy-config-loader";
 
 export interface OrderPrepareParams {
   symbol: string;
@@ -100,6 +101,7 @@ export class BuyOrderPlacer extends EventEmitter {
   private tradingRules: TradingRules;
   private supabaseClient: SupabaseClient;
   private symbol: string;
+  private strategyConfig: StrategyConfig;
   private retryCount = 3;
   private retryDelay = 1000; // Start with 1 second
   private tradingRulesCache: SymbolTradingRules | null = null; // Cache trading rules
@@ -110,12 +112,14 @@ export class BuyOrderPlacer extends EventEmitter {
     tradingRules: TradingRules,
     supabaseClient: SupabaseClient,
     symbol: string,
+    strategyConfig: StrategyConfig,
   ) {
     super();
     this.binanceClient = binanceClient;
     this.tradingRules = tradingRules;
     this.supabaseClient = supabaseClient;
     this.symbol = symbol;
+    this.strategyConfig = strategyConfig;
   }
 
   // Set the cycle ID for database operations
@@ -166,13 +170,6 @@ export class BuyOrderPlacer extends EventEmitter {
       buyAmount.toNumber(), // Use target amount as capital limit
     );
     const quantity = new Decimal(quantityNumber);
-
-    // Log spending efficiency
-    const actualSpend = quantity.mul(currentPrice);
-    const efficiency = actualSpend.div(buyAmount).mul(100);
-    logger.info(
-      `Buy order spending efficiency: ${efficiency.toFixed(2)}% of target $${buyAmount.toFixed(2)}`,
-    );
 
     // Generate unique client order ID
     const clientOrderId = this.generateClientOrderId();
@@ -292,22 +289,14 @@ export class BuyOrderPlacer extends EventEmitter {
         ) {
           balanceRetryCount++;
           logger.warn(
-            `Insufficient USDT balance, retrying with refreshed balance (attempt ${balanceRetryCount}/${maxBalanceRetries})`,
-            {
-              originalAmount: buyAmount.toString(),
-              error: errorMessage,
-            },
+            `[BUY] Low USDT balance, retrying (${balanceRetryCount}/${maxBalanceRetries})`,
+            { timeframe: this.strategyConfig.timeframe },
           );
 
           try {
             // Refresh USDT balance from exchange
             const usdtBalance = await this.binanceClient.getBalance("USDT");
             const availableUsdt = new Decimal(usdtBalance.free);
-
-            logger.info("Refreshed USDT balance from exchange", {
-              availableUsdt: availableUsdt.toString(),
-              originalBuyAmount: buyAmount.toString(),
-            });
 
             // Calculate safe buy amount (min of available balance and intended amount)
             const safeBuyAmount = Decimal.min(
@@ -320,10 +309,6 @@ export class BuyOrderPlacer extends EventEmitter {
             const minNotional = new Decimal(10); // Binance minimum
 
             if (notional.lt(minNotional)) {
-              logger.error("Adjusted buy amount below minimum notional", {
-                safeBuyAmount: safeBuyAmount.toString(),
-                minNotional: minNotional.toString(),
-              });
               throw new Error(
                 `Insufficient balance: adjusted amount ${safeBuyAmount.toString()} USDT below minimum ${minNotional.toString()} USDT`,
               );
@@ -339,19 +324,17 @@ export class BuyOrderPlacer extends EventEmitter {
             // Validate the new order parameters
             await this.validateOrder(orderParams);
 
-            logger.info("Retrying buy with adjusted amount", {
-              originalAmount: buyAmount.toString(),
-              adjustedAmount: safeBuyAmount.toString(),
-              clientOrderId: orderParams.clientOrderId,
-            });
-
             // Don't increment main attempt counter for balance retries
             await this.sleep(1000); // Brief pause before retry
             continue;
           } catch (balanceError) {
-            logger.error("Failed to refresh balance or adjust buy amount", {
-              error: balanceError,
-            });
+            logger.error(
+              "[BUY] Failed to refresh balance or adjust buy amount",
+              {
+                timeframe: this.strategyConfig.timeframe,
+                error: balanceError,
+              },
+            );
             throw balanceError;
           }
         }
@@ -428,12 +411,6 @@ export class BuyOrderPlacer extends EventEmitter {
       const bnbFeeRate = new Decimal(0.00075); // 0.075%
       const imputedBTCFee = executedQty.mul(bnbFeeRate);
 
-      logger.info("📊 Fees paid in BNB, imputing BTC fee for reference price", {
-        bnbFee: bnbFee.toString(),
-        imputedBTCFee: imputedBTCFee.toString(),
-        explanation: "BNB fee gives 25% discount, imputing 0.075% BTC fee",
-      });
-
       // Use the imputed fee for reference price calculation
       feeBTC = imputedBTCFee;
     }
@@ -441,20 +418,6 @@ export class BuyOrderPlacer extends EventEmitter {
     // Verify we have fee data for executed orders
     // Only require fee data if the order was actually executed
     if (executedQty.gt(0)) {
-      // Log fee status for debugging
-      logger.info("Fee calculation results", {
-        feeBTC: feeBTC.toString(),
-        feeUSDT: feeUSDT.toString(),
-        feeOther: Object.entries(feeOther).map(([asset, amount]) => ({
-          asset,
-          amount: amount.toString(),
-        })),
-        hasAnyFees:
-          !feeBTC.isZero() ||
-          !feeUSDT.isZero() ||
-          Object.keys(feeOther).length > 0,
-      });
-
       if (
         fills.length === 0 ||
         (feeBTC.isZero() &&
@@ -462,19 +425,8 @@ export class BuyOrderPlacer extends EventEmitter {
           Object.keys(feeOther).length === 0)
       ) {
         // On testnet, commission might be 0. Use a small default fee for testing.
-        logger.warn(
-          "No fee data from Binance (testnet issue?). Using default 0.1% fee estimate.",
-          {
-            fills: fills.length,
-            executedQty: executedQty.toString(),
-          },
-        );
-
         // Use standard Binance fee of 0.1% if no fee data available
         feeBTC = executedQty.mul(new Decimal(0.001));
-        logger.info("Applied default fee estimate", {
-          feeBTC: feeBTC.toString(),
-        });
       }
     }
 
@@ -557,13 +509,9 @@ export class BuyOrderPlacer extends EventEmitter {
           `Cumulative quote quantity mismatch for order ${order.orderId}: binanceQuoteQty=${cummulativeQuoteQty}, calculated=${calculatedQuoteQty}, difference=${quoteDiff}`,
         );
       }
-
-      logger.debug("Consistency checks passed", {
-        orderId: order.orderId,
-        fillCount: fills.length,
-      });
     } catch (error) {
-      logger.warn("Error during consistency checks", {
+      logger.warn("[BUY] Error during consistency checks", {
+        timeframe: this.strategyConfig.timeframe,
         orderId: order.orderId,
         error,
       });
@@ -636,13 +584,6 @@ export class BuyOrderPlacer extends EventEmitter {
         ? { ...baseTradeRecord, cycle_id: this.cycleId }
         : baseTradeRecord;
 
-      // Warn if no cycle ID
-      if (!this.cycleId) {
-        logger.warn(
-          "⚠️ No cycle ID set for BuyOrderPlacer - trade will be saved without cycle association",
-        );
-      }
-
       // Always save trade to database
       const { data: tradeData, error } = await this.supabaseClient
         .from("trades")
@@ -652,7 +593,8 @@ export class BuyOrderPlacer extends EventEmitter {
 
       if (error) {
         // Log error but don't throw - we don't want to fail the entire order
-        logger.error("Failed to save trade record to database", {
+        logger.error("[BUY] Failed to save trade record to database", {
+          timeframe: this.strategyConfig.timeframe,
           error: error.message,
           tradeRecord: dbRecord,
         });
@@ -668,15 +610,6 @@ export class BuyOrderPlacer extends EventEmitter {
           },
         });
       } else {
-        logger.info("Trade record saved to database", {
-          orderId: result.orderId,
-          type: "BUY",
-          quantity: result.executedQty.toNumber(),
-          price: result.avgPrice.toNumber(),
-          feeDetails,
-          cycleId: this.cycleId || "NO_CYCLE_ID",
-        });
-
         // Save individual fills if we have them and got a trade ID
         if (tradeData?.id && result.fills.length > 0) {
           await this.saveTradeFills(tradeData.id, result.fills);
@@ -713,19 +646,13 @@ export class BuyOrderPlacer extends EventEmitter {
         .insert(fillRecords);
 
       if (error) {
-        logger.warn("Failed to save trade fills", {
-          error: error.message,
-          tradeId,
-          fillCount: fills.length,
-        });
-      } else {
-        logger.debug("Trade fills saved", {
-          tradeId,
-          fillCount: fills.length,
+        logger.warn(`[BUY] Failed to save trade fills for trade ${tradeId}`, {
+          timeframe: this.strategyConfig.timeframe,
         });
       }
     } catch (error) {
-      logger.warn("Error saving trade fills", {
+      logger.warn("[BUY] Error saving trade fills", {
+        timeframe: this.strategyConfig.timeframe,
         error,
         tradeId,
       });
@@ -808,19 +735,6 @@ export class BuyOrderPlacer extends EventEmitter {
       );
     }
 
-    logger.info("Order verification complete with fills", {
-      orderId,
-      status: finalOrder.status,
-      executedQty: finalOrder.executedQty,
-      fillCount: fills.length,
-      totalCommission: fills.reduce((sum, fill) => {
-        if (fill.commissionAsset === "BTC") {
-          return sum + parseFloat(fill.commission);
-        }
-        return sum;
-      }, 0),
-    });
-
     // Combine order data with fills
     return {
       ...finalOrder,
@@ -866,7 +780,8 @@ export class BuyOrderPlacer extends EventEmitter {
 
     // Log warning if fills are missing (not critical but good to know)
     if (!order.fills || order.fills.length === 0) {
-      logger.warn("No fills data in Binance response", {
+      logger.warn("[BUY] No fills data in Binance response", {
+        timeframe: this.strategyConfig.timeframe,
         orderId: order.orderId,
         status: order.status,
       });

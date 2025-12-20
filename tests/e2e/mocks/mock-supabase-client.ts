@@ -84,17 +84,7 @@ export class MockSupabaseClient {
     return {
       select: (_columns = "*") => {
         const queryBuilder = {
-          eq: (_column: string, value: unknown) => ({
-            single: async () => {
-              if (table === "cycle_state" || table === "strategy_config") {
-                const data = (tableData as Map<string, unknown>).get(
-                  value as string,
-                );
-                return { data, error: null };
-              }
-              return { data: null, error: null };
-            },
-          }),
+          eq: (_column: string, _value: unknown) => queryBuilder, // Return queryBuilder for chaining
           in: (_column: string, _values: unknown[]) => queryBuilder, // Support .in() for filtering - return queryBuilder for chaining
           single: async () => {
             if (table === "cycle_state" || table === "strategy_config") {
@@ -105,20 +95,9 @@ export class MockSupabaseClient {
             }
             return { data: null, error: null };
           },
-          order: (_column: string, _options?: { ascending?: boolean }) => ({
-            limit: (_count: number) => ({
-              single: async () => {
-                if (table === "cycle_state" || table === "strategy_config") {
-                  const values = Array.from(
-                    (tableData as Map<string, unknown>).values(),
-                  );
-                  // Return first value as single result
-                  return { data: values[0] || null, error: null };
-                }
-                return { data: null, error: null };
-              },
-            }),
-          }),
+          order: (_column: string, _options?: { ascending?: boolean }) =>
+            queryBuilder, // Return queryBuilder for chaining
+          limit: (_count: number) => queryBuilder, // Return queryBuilder for chaining
         };
         return queryBuilder;
       },

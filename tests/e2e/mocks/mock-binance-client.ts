@@ -184,8 +184,12 @@ export class MockBinanceClient {
 
     // Update balances
     if (side === "BUY") {
-      const usdtBalance = this.balances.get("USDT")!;
-      const btcBalance = this.balances.get("BTC")!;
+      const usdtBalance = this.balances.get("USDT");
+      const btcBalance = this.balances.get("BTC");
+
+      if (!usdtBalance || !btcBalance) {
+        throw new Error("Required balances not initialized");
+      }
 
       if (usdtBalance.free.lt(quoteQuantity)) {
         throw new Error("Insufficient USDT balance");
@@ -194,8 +198,12 @@ export class MockBinanceClient {
       usdtBalance.free = usdtBalance.free.minus(quoteQuantity);
       btcBalance.free = btcBalance.free.plus(netQuantity);
     } else if (side === "SELL") {
-      const btcBalance = this.balances.get("BTC")!;
-      const usdtBalance = this.balances.get("USDT")!;
+      const btcBalance = this.balances.get("BTC");
+      const usdtBalance = this.balances.get("USDT");
+
+      if (!btcBalance || !usdtBalance) {
+        throw new Error("Required balances not initialized");
+      }
 
       if (btcBalance.free.lt(quantity)) {
         throw new Error("Insufficient BTC balance");
@@ -315,9 +323,16 @@ export class MockBinanceClient {
   }
 
   getMockBalances(): { BTC: string; USDT: string } {
+    const btcBalance = this.balances.get("BTC");
+    const usdtBalance = this.balances.get("USDT");
+
+    if (!btcBalance || !usdtBalance) {
+      throw new Error("Required balances not initialized");
+    }
+
     return {
-      BTC: this.balances.get("BTC")!.free.toString(),
-      USDT: this.balances.get("USDT")!.free.toString(),
+      BTC: btcBalance.free.toString(),
+      USDT: usdtBalance.free.toString(),
     };
   }
 
@@ -326,12 +341,17 @@ export class MockBinanceClient {
   }
 
   reset(): void {
-    this.balances.get("BTC")!.free = new Decimal(
-      this.mockConfig.initialBalances.BTC,
-    );
-    this.balances.get("USDT")!.free = new Decimal(
-      this.mockConfig.initialBalances.USDT,
-    );
+    const btcBalance = this.balances.get("BTC");
+    const usdtBalance = this.balances.get("USDT");
+
+    if (btcBalance) {
+      btcBalance.free = new Decimal(this.mockConfig.initialBalances.BTC);
+    }
+
+    if (usdtBalance) {
+      usdtBalance.free = new Decimal(this.mockConfig.initialBalances.USDT);
+    }
+
     this.executedOrders = [];
     this.orderIdCounter = 1000;
   }

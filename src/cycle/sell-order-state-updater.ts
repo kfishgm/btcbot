@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import type { DiscordNotifier } from "../notifications/discord-notifier";
 import type { TradingRules } from "../exchange/trading-rules";
 import type { CommissionManager } from "../exchange/commission-manager";
+import type { StrategyConfig } from "../config/strategy-config-loader";
 import { calculateSellThreshold } from "../utils/pricing-calculations";
 
 export interface StateUpdateResult extends CycleState {
@@ -62,6 +63,7 @@ export class SellOrderStateUpdater extends EventEmitter {
   private discordNotifier?: DiscordNotifier;
   private commissionManager?: CommissionManager;
   private tradingRules: TradingRules;
+  private strategyConfig?: StrategyConfig;
   private baseAssetPrecision: number;
 
   constructor(
@@ -71,6 +73,7 @@ export class SellOrderStateUpdater extends EventEmitter {
     tradingRules: TradingRules,
     commissionManager?: CommissionManager,
     baseAssetPrecision: number = 8, // Default BTC precision
+    strategyConfig?: StrategyConfig,
   ) {
     super();
     this.supabase = supabase;
@@ -79,6 +82,7 @@ export class SellOrderStateUpdater extends EventEmitter {
     this.discordNotifier = discordNotifier;
     this.tradingRules = tradingRules;
     this.commissionManager = commissionManager;
+    this.strategyConfig = strategyConfig;
     this.baseAssetPrecision = baseAssetPrecision;
   }
 
@@ -116,13 +120,12 @@ export class SellOrderStateUpdater extends EventEmitter {
       // Check if this is a cycle completion signal
       if ("type" in updateResult && updateResult.type === "CREATE_NEW_CYCLE") {
         // Don't update the current cycle, just return the signal
-        logger.info(
-          "Cycle completion detected, signaling for new cycle creation",
-          {
-            previousCycleId: updateResult.previousCycleId,
-            profit: updateResult.completionData.finalProfit,
-          },
-        );
+        logger.info("[SELL] Cycle complete", {
+          timeframe: this.strategyConfig?.timeframe || "unknown",
+          cycleId: currentState.id,
+          profit: updateResult.completionData.finalProfit.toFixed(2),
+          carryCapital: updateResult.completionData.carryOverCapital.toFixed(2),
+        });
 
         // Send Discord notification for cycle completion (full sell)
         if (this.discordNotifier) {
@@ -137,6 +140,7 @@ export class SellOrderStateUpdater extends EventEmitter {
                 logger.warn(
                   "Failed to get commission rate for notification, using default 0.1%",
                   {
+                    timeframe: this.strategyConfig?.timeframe || "unknown",
                     error:
                       error instanceof Error ? error.message : String(error),
                   },
@@ -163,6 +167,11 @@ export class SellOrderStateUpdater extends EventEmitter {
               : null;
 
             const fields = [
+              {
+                name: "⏱️ Timeframe",
+                value: this.strategyConfig?.timeframe || "Unknown",
+                inline: true,
+              },
               {
                 name: "💰 Sell Price",
                 value: `$${orderResult.avgPrice.toFixed(2)}`,
@@ -213,7 +222,10 @@ export class SellOrderStateUpdater extends EventEmitter {
             ];
             await this.discordNotifier.sendSellNotification(fields);
           } catch (error) {
-            logger.error("Failed to send Discord notification", { error });
+            logger.error("Failed to send Discord notification", {
+              timeframe: this.strategyConfig?.timeframe || "unknown",
+              error,
+            });
           }
         }
 
@@ -250,17 +262,13 @@ export class SellOrderStateUpdater extends EventEmitter {
       };
 
       // Log successful update
-      logger.info(
-        `Sell order state update completed. Partial sale, cycle continues`,
-        {
-          cycleId: currentState.id,
-          orderId: orderResult.orderId,
-          updates,
-          cycleComplete: false,
-          currentAthPrice: currentState.ath_price,
-          newReferencePrice: updates.sell_reference_price,
-        },
-      );
+      logger.info("[SELL] Partial sale, cycle continues", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        cycleId: currentState.id,
+        orderId: orderResult.orderId,
+        btcRemaining: updates.btc_accumulated.toFixed(8),
+        capitalAvailable: updates.capital_available.toFixed(2),
+      });
 
       // Log to database
       await this.logStateUpdate(currentState.id, orderResult.orderId, updates);
@@ -278,6 +286,7 @@ export class SellOrderStateUpdater extends EventEmitter {
               logger.warn(
                 "Failed to get commission rate for notification, using default 0.1%",
                 {
+                  timeframe: this.strategyConfig?.timeframe || "unknown",
                   error: error instanceof Error ? error.message : String(error),
                 },
               );
@@ -309,6 +318,11 @@ export class SellOrderStateUpdater extends EventEmitter {
             : null;
 
           const fields = [
+            {
+              name: "⏱️ Timeframe",
+              value: this.strategyConfig?.timeframe || "Unknown",
+              inline: true,
+            },
             {
               name: "💰 Sell Price",
               value: `$${orderResult.avgPrice.toFixed(2)}`,
@@ -362,7 +376,10 @@ export class SellOrderStateUpdater extends EventEmitter {
           ];
           await this.discordNotifier.sendSellNotification(fields);
         } catch (error) {
-          logger.error("Failed to send Discord notification", { error });
+          logger.error("Failed to send Discord notification", {
+            timeframe: this.strategyConfig?.timeframe || "unknown",
+            error,
+          });
         }
       }
 
@@ -377,6 +394,7 @@ export class SellOrderStateUpdater extends EventEmitter {
     } catch (error) {
       // Log and emit error
       logger.error("Failed to update state after sell order", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
         cycleId: currentState.id,
         orderId: orderResult.orderId,
         error,
@@ -448,19 +466,10 @@ export class SellOrderStateUpdater extends EventEmitter {
         actualBtcSold = actualBtcSold.add(fillQty);
         actualUsdtReceived = actualUsdtReceived.add(fillQty.mul(fillPrice));
       }
-
-      logger.info("Post-trade reconciliation from fills", {
-        fillCount: orderResult.fills.length,
-        actualBtcSold: actualBtcSold.toString(),
-        actualUsdtReceived: actualUsdtReceived.toString(),
-        reportedExecutedQty: orderResult.executedQty.toString(),
-        reportedQuoteQty: orderResult.cummulativeQuoteQty.toString(),
-      });
     } else {
       // Fallback to reported values if no fills
       actualBtcSold = orderResult.executedQty;
       actualUsdtReceived = orderResult.cummulativeQuoteQty;
-      logger.warn("No fills data available, using reported values");
     }
 
     // Update BTC accumulated based on actual sold amount
@@ -499,22 +508,12 @@ export class SellOrderStateUpdater extends EventEmitter {
         .add(profit)
         .toNumber();
 
-      // Log dust preservation
-      if (newBtcAccumulated > 0) {
-        logger.info("Preserving dust for next cycle", {
-          dustAmount: newBtcAccumulated,
-          dustValue:
-            newBtcAccumulated * (currentState.sell_reference_price || 0),
-          minTradable: this.tradingRules.getMinTradableAmount("BTCUSDT"),
-        });
-      }
-
       // Return signal to create new cycle
-      logger.info("🔄 Cycle complete, signaling for new cycle creation", {
-        previousCycleId: currentState.id,
-        finalProfit: profit.toNumber(),
-        carryOverCapital: newCapitalAvailable,
-        carryOverDust: newBtcAccumulated,
+      logger.info("[SELL] Signaling new cycle - all BTC sold", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        cycleId: currentState.id,
+        profit: profit.toNumber().toFixed(2),
+        dust: newBtcAccumulated.toFixed(8),
       });
 
       return {
@@ -562,7 +561,11 @@ export class SellOrderStateUpdater extends EventEmitter {
       .single();
 
     if (error) {
-      logger.error("Failed to fetch cycle state", { cycleId, error });
+      logger.error("Failed to fetch cycle state", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        cycleId,
+        error,
+      });
       return null;
     }
 
@@ -586,7 +589,10 @@ export class SellOrderStateUpdater extends EventEmitter {
         } as unknown as Json,
       });
     } catch (error) {
-      logger.error("Failed to log state update event", { error });
+      logger.error("Failed to log state update event", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        error,
+      });
     }
   }
 }

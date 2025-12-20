@@ -12,6 +12,7 @@ import { Decimal } from "decimal.js";
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
 import { SupabaseClient } from "@supabase/supabase-js";
+import type { StrategyConfig } from "../config/strategy-config-loader";
 
 export interface OrderPrepareParams {
   symbol: string;
@@ -108,6 +109,7 @@ export class SellOrderPlacer extends EventEmitter {
   private tradingRules: TradingRules;
   private supabaseClient: SupabaseClient;
   private symbol: string;
+  private strategyConfig: StrategyConfig;
   private retryCount = 3;
   private retryDelay = 1000;
   private tradingRulesCache: SymbolTradingRules | null = null;
@@ -118,12 +120,14 @@ export class SellOrderPlacer extends EventEmitter {
     tradingRules: TradingRules,
     supabaseClient: SupabaseClient,
     symbol: string,
+    strategyConfig: StrategyConfig,
   ) {
     super();
     this.binanceClient = binanceClient;
     this.tradingRules = tradingRules;
     this.supabaseClient = supabaseClient;
     this.symbol = symbol;
+    this.strategyConfig = strategyConfig;
   }
 
   setCycleId(cycleId: string): void {
@@ -159,16 +163,6 @@ export class SellOrderPlacer extends EventEmitter {
 
     if (btcToSell.toNumber() < minSellableQty) {
       const notionalValue = btcToSell.mul(currentPrice).toNumber();
-      logger.info("Sell order below minimum requirements", {
-        btcToSell: btcToSell.toNumber(),
-        minSellableQty,
-        notionalValue,
-        minNotional: this.tradingRulesCache.minNotional,
-        reason:
-          notionalValue < this.tradingRulesCache.minNotional
-            ? "Below minimum notional value"
-            : "Below minimum quantity",
-      });
       throw new Error(
         `Quantity ${btcToSell.toNumber()} BTC below minimum sellable ${minSellableQty} BTC ` +
           `(notional: $${notionalValue.toFixed(2)} < $${this.tradingRulesCache.minNotional})`,
@@ -338,12 +332,8 @@ export class SellOrderPlacer extends EventEmitter {
           (lastError as ErrorWithCode).code === "-2010"
         ) {
           logger.warn(
-            `Insufficient balance detected, retrying with refreshed balance`,
-            {
-              attempt,
-              originalQuantity: btcToSell.toString(),
-              currentQuantity: currentQuantity.toString(),
-            },
+            `[SELL] Low BTC balance, retrying (${attempt}/${this.retryCount})`,
+            { timeframe: this.strategyConfig.timeframe },
           );
 
           // Refresh balance from exchange
@@ -364,14 +354,6 @@ export class SellOrderPlacer extends EventEmitter {
             .floor()
             .mul(stepSize);
 
-          logger.info(`Recalculated safe sell quantity`, {
-            spotBtc: spotBtc.toString(),
-            btcAccumulated: btcToSell.toString(),
-            safeQuantity: safeQuantity.toString(),
-            quantizedSafeQty: quantizedSafeQty.toString(),
-            stepSize,
-          });
-
           // Check if quantized quantity is still valid
           const minSellableQty = this.tradingRules.getMinimumSellableQuantity(
             currentPrice.toNumber(),
@@ -379,9 +361,6 @@ export class SellOrderPlacer extends EventEmitter {
           );
 
           if (quantizedSafeQty.lt(minSellableQty)) {
-            logger.error(
-              `Adjusted quantity ${quantizedSafeQty} below minimum ${minSellableQty}`,
-            );
             throw new Error(
               `Cannot sell: adjusted quantity ${quantizedSafeQty} below minimum ${minSellableQty}`,
             );
@@ -503,15 +482,6 @@ export class SellOrderPlacer extends EventEmitter {
       const bnbFeeRate = new Decimal(0.00075); // 0.075%
       const imputedUSDTFee = cummulativeQuoteQty.mul(bnbFeeRate);
 
-      logger.info(
-        "📊 Fees paid in BNB, imputing USDT fee for profit calculation",
-        {
-          bnbFee: bnbFee.toString(),
-          imputedUSDTFee: imputedUSDTFee.toString(),
-          explanation: "BNB fee gives 25% discount, imputing 0.075% USDT fee",
-        },
-      );
-
       // Use the imputed fee for profit calculation
       feeUSDT = imputedUSDTFee;
     }
@@ -526,19 +496,8 @@ export class SellOrderPlacer extends EventEmitter {
           Object.keys(feeOther).length === 0)
       ) {
         // On testnet, commission might be 0. Use a small default fee for testing.
-        logger.warn(
-          "No fee data from Binance (testnet issue?). Using default 0.1% fee estimate.",
-          {
-            fills: fills.length,
-            cummulativeQuoteQty: cummulativeQuoteQty.toString(),
-          },
-        );
-
         // Use standard Binance fee of 0.1% for USDT on sells
         feeUSDT = cummulativeQuoteQty.mul(new Decimal(0.001));
-        logger.info("Applied default fee estimate", {
-          feeUSDT: feeUSDT.toString(),
-        });
       }
     }
 
@@ -583,12 +542,9 @@ export class SellOrderPlacer extends EventEmitter {
 
       const qtyDiff = executedQty.sub(totalFillQty).abs();
       if (qtyDiff.gt(0.00000001)) {
-        logger.warn("Sell order fill quantity mismatch", {
-          orderId: order.orderId,
-          executedQty: executedQty.toString(),
-          sumOfFills: totalFillQty.toString(),
-          difference: qtyDiff.toString(),
-        });
+        throw new Error(
+          `Fill quantity mismatch for order ${order.orderId}: executedQty=${executedQty}, sumOfFills=${totalFillQty}, difference=${qtyDiff}`,
+        );
       }
 
       // Check 2: Verify weighted average price calculation
@@ -608,12 +564,9 @@ export class SellOrderPlacer extends EventEmitter {
 
         // Allow small difference due to rounding
         if (priceDiff.gt(0.01)) {
-          logger.warn("Sell order average price calculation mismatch", {
-            orderId: order.orderId,
-            calculatedAvgPrice: calculatedAvgPrice.toString(),
-            fillBasedAvgPrice: fillBasedAvgPrice.toString(),
-            difference: priceDiff.toString(),
-          });
+          throw new Error(
+            `Average price calculation mismatch for order ${order.orderId}: calculated=${calculatedAvgPrice}, fillBased=${fillBasedAvgPrice}, difference=${priceDiff}`,
+          );
         }
       }
 
@@ -623,20 +576,13 @@ export class SellOrderPlacer extends EventEmitter {
 
       // Allow small difference due to rounding (0.01 USDT)
       if (quoteDiff.gt(0.01)) {
-        logger.warn("Sell order cumulative quote quantity mismatch", {
-          orderId: order.orderId,
-          binanceQuoteQty: cummulativeQuoteQty.toString(),
-          calculatedQuoteQty: calculatedQuoteQty.toString(),
-          difference: quoteDiff.toString(),
-        });
+        throw new Error(
+          `Cumulative quote quantity mismatch for order ${order.orderId}: binanceQuoteQty=${cummulativeQuoteQty}, calculated=${calculatedQuoteQty}, difference=${quoteDiff}`,
+        );
       }
-
-      logger.debug("Sell order consistency checks passed", {
-        orderId: order.orderId,
-        fillCount: fills.length,
-      });
     } catch (error) {
-      logger.warn("Error during sell order consistency checks", {
+      logger.warn("[SELL] Error during sell order consistency checks", {
+        timeframe: this.strategyConfig.timeframe,
         orderId: order.orderId,
         error,
       });
@@ -709,13 +655,6 @@ export class SellOrderPlacer extends EventEmitter {
         ? { ...baseTradeRecord, cycle_id: this.cycleId }
         : baseTradeRecord;
 
-      // Warn if no cycle ID
-      if (!this.cycleId) {
-        logger.warn(
-          "⚠️ No cycle ID set for SellOrderPlacer - trade will be saved without cycle association",
-        );
-      }
-
       // Always save trade to database
       const { data: tradeData, error } = await this.supabaseClient
         .from("trades")
@@ -725,7 +664,8 @@ export class SellOrderPlacer extends EventEmitter {
 
       if (error) {
         // Log error but don't throw - we don't want to fail the entire order
-        logger.error("Failed to save trade record to database", {
+        logger.error("[SELL] Failed to save trade record to database", {
+          timeframe: this.strategyConfig.timeframe,
           error: error.message,
           tradeRecord: dbRecord,
         });
@@ -741,15 +681,6 @@ export class SellOrderPlacer extends EventEmitter {
           },
         });
       } else {
-        logger.info("Trade record saved to database", {
-          orderId: result.orderId,
-          type: "SELL",
-          quantity: result.executedQty.toNumber(),
-          price: result.avgPrice.toNumber(),
-          feeDetails,
-          cycleId: this.cycleId || "NO_CYCLE_ID",
-        });
-
         // Save individual fills if we have them and got a trade ID
         if (tradeData?.id && result.fills.length > 0) {
           await this.saveTradeFills(tradeData.id, result.fills);
@@ -785,19 +716,13 @@ export class SellOrderPlacer extends EventEmitter {
         .insert(fillRecords);
 
       if (error) {
-        logger.warn("Failed to save trade fills", {
-          error: error.message,
-          tradeId,
-          fillCount: fills.length,
-        });
-      } else {
-        logger.debug("Trade fills saved", {
-          tradeId,
-          fillCount: fills.length,
+        logger.warn(`[SELL] Failed to save trade fills for trade ${tradeId}`, {
+          timeframe: this.strategyConfig.timeframe,
         });
       }
     } catch (error) {
-      logger.warn("Error saving trade fills", {
+      logger.warn("[SELL] Error saving trade fills", {
+        timeframe: this.strategyConfig.timeframe,
         error,
         tradeId,
       });
@@ -876,19 +801,6 @@ export class SellOrderPlacer extends EventEmitter {
       );
     }
 
-    logger.info("Sell order verification complete with fills", {
-      orderId,
-      status: finalOrder.status,
-      executedQty: finalOrder.executedQty,
-      fillCount: fills.length,
-      totalCommission: fills.reduce((sum, fill) => {
-        if (fill.commissionAsset === "USDT") {
-          return sum + parseFloat(fill.commission);
-        }
-        return sum;
-      }, 0),
-    });
-
     // Combine order data with fills
     return {
       ...finalOrder,
@@ -934,7 +846,8 @@ export class SellOrderPlacer extends EventEmitter {
 
     // Log warning if fills are missing (not critical but good to know)
     if (!order.fills || order.fills.length === 0) {
-      logger.warn("No fills data in Binance response", {
+      logger.warn("[SELL] No fills data in Binance response", {
+        timeframe: this.strategyConfig.timeframe,
         orderId: order.orderId,
         status: order.status,
       });

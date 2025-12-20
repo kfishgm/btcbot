@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import { BuyTriggerDetector } from "../../src/cycle/buy-trigger-detector";
 import { BuyAmountCalculator } from "../../src/cycle/buy-amount-calculator";
+import type { StrategyConfig } from "../../src/config/strategy-config-loader";
 
 describe("Grid Anchoring Strategy", () => {
   let detector: BuyTriggerDetector;
@@ -8,7 +9,23 @@ describe("Grid Anchoring Strategy", () => {
 
   beforeEach(() => {
     buyAmountCalculator = new BuyAmountCalculator();
-    detector = new BuyTriggerDetector(buyAmountCalculator);
+
+    const mockStrategyConfig: StrategyConfig = {
+      id: "test-config",
+      timeframe: "15m",
+      dropPercentage: 0.003,
+      risePercentage: 0.005,
+      maxPurchases: 10,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 500,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 25,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    detector = new BuyTriggerDetector(buyAmountCalculator, mockStrategyConfig);
   });
 
   describe("Grid Quantization", () => {
@@ -25,7 +42,10 @@ describe("Grid Anchoring Strategy", () => {
       const anchorPrice = 116557.79; // First buy price
 
       // Build grid from anchor (simulating what happens after first buy)
-      const gridFromAnchor = await detector.buildGridFromAnchor(anchorPrice, config);
+      const gridFromAnchor = await detector.buildGridFromAnchor(
+        anchorPrice,
+        config,
+      );
 
       // All grid levels should be quantized to 0.01 (tick size)
       gridFromAnchor.forEach((level: number, index: number) => {

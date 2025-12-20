@@ -622,6 +622,46 @@ export class Logger {
     }
   }
 
+  // Discord logging integration
+  public enableDiscordLogging(webhookUrl: string): void {
+    try {
+      // Dynamically import the Discord transport
+      import("./discord-logs-transport.js")
+        .then((module) => {
+          const { DiscordLogsTransport } = module;
+          const discordTransport = new DiscordLogsTransport({
+            webhookUrl,
+            level: this.config.level || LogLevel.INFO,
+          });
+
+          // Add the transport
+          this.addTransport("discord", discordTransport);
+          // Add it to the active transports list if not already there
+          if (!this.config.transports?.includes("discord")) {
+            this.config.transports = [
+              ...(this.config.transports || []),
+              "discord",
+            ];
+          }
+          // Actually add it to Winston
+          this.winston.add(discordTransport);
+
+          this.info("Discord logging enabled");
+        })
+        .catch((error) => {
+          // Don't crash - just log error to stderr
+          process.stderr.write(
+            `Failed to enable Discord logging: ${error instanceof Error ? error.message : String(error)}\n`,
+          );
+        });
+    } catch (error) {
+      // Don't crash - just log error to stderr
+      process.stderr.write(
+        `Failed to enable Discord logging: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  }
+
   // Log tagging
   public withTags(tags: string[]): LoggerWithTags {
     return new LoggerWithTags(this, tags);

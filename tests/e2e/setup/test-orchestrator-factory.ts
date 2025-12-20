@@ -26,7 +26,7 @@ import { ConnectionManager } from "../../../src/database/connection-manager.js";
 import { StateTransactionManager } from "../../../src/cycle/state-transaction-manager.js";
 import { ReferencePriceCalculator } from "../../../src/cycle/reference-price-calculator.js";
 import { BuyAmountCalculator } from "../../../src/cycle/buy-amount-calculator.js";
-import { StrategyConfigLoader } from "../../../src/config/strategy-config-loader.js";
+// StrategyConfigLoader not needed - using mock strategyConfig directly
 import { TradingRules } from "../../../src/exchange/trading-rules.js";
 import type { BinanceClient } from "../../../src/exchange/binance-client.js";
 import type { WebSocketManager } from "../../../src/exchange/websocket-manager.js";
@@ -139,7 +139,22 @@ export async function createTestOrchestrator(
   const webSocketManager = mockWebSocket as unknown as WebSocketManager;
   const discordNotifier = mockDiscord as unknown as DiscordNotifier;
 
-  const strategyConfigLoader = new StrategyConfigLoader();
+  // Create mock strategy config for testing
+  const strategyConfig = {
+    id: "test-config-id",
+    timeframe: "15m", // Fixed timeframe for tests
+    dropPercentage,
+    risePercentage,
+    maxPurchases,
+    minBuyUsdt: 10,
+    initialCapitalUsdt: initialCapital,
+    slippageBuyPct: 0.003,
+    slippageSellPct: 0.003,
+    athWindow: config.historicalCandles || 25,
+    isActive: true,
+    updatedAt: new Date().toISOString(),
+  };
+
   const connectionManager = new ConnectionManager({
     url: process.env.SUPABASE_URL || "https://test.supabase.co",
     key: process.env.SUPABASE_SERVICE_ROLE_KEY || "test-key",
@@ -150,7 +165,9 @@ export async function createTestOrchestrator(
   // Note: OrderPriceCalculator is not used in test orchestrator
   // The order placers don't use it with the simplified constructor
 
-  const candleProcessor = new CandleProcessor({});
+  const candleProcessor = new CandleProcessor({
+    timeframe: config.scenario.interval,
+  });
 
   const cycleStateManager = new CycleStateManager(
     supabaseClient,
@@ -160,6 +177,8 @@ export async function createTestOrchestrator(
       minBuyUSDT: 10,
     },
     tradingRules,
+    "test-config-id",
+    config.scenario.interval, // Pass timeframe for logging context
   );
 
   const stateTransactionManager = new StateTransactionManager(supabaseClient);
@@ -175,6 +194,7 @@ export async function createTestOrchestrator(
 
   const buyTriggerDetector = new BuyTriggerDetector(
     buyAmountCalculator,
+    strategyConfig,
     tradingRules,
   );
 
@@ -186,6 +206,7 @@ export async function createTestOrchestrator(
   await commissionManager.initialize();
 
   const sellTriggerDetector = new SellTriggerDetector(
+    strategyConfig,
     tradingRules,
     commissionManager,
   );
@@ -197,6 +218,7 @@ export async function createTestOrchestrator(
     tradingRules,
     supabaseClient,
     config.scenario.symbol,
+    strategyConfig,
   );
 
   const sellOrderPlacer = new SellOrderPlacer(
@@ -204,11 +226,17 @@ export async function createTestOrchestrator(
     tradingRules,
     supabaseClient,
     config.scenario.symbol,
+    strategyConfig,
   );
 
   const buyOrderStateUpdater = new BuyOrderStateUpdater(
     supabaseClient,
     discordNotifier,
+    commissionManager,
+    0.00001,
+    8,
+    0.01,
+    strategyConfig,
   );
 
   const sellOrderStateUpdater = new SellOrderStateUpdater(
@@ -218,6 +246,9 @@ export async function createTestOrchestrator(
     },
     discordNotifier,
     tradingRules,
+    commissionManager,
+    8,
+    strategyConfig,
   );
 
   // Import the logger from utils
@@ -255,7 +286,7 @@ export async function createTestOrchestrator(
     stateTransactionManager,
     referencePriceCalculator,
     buyAmountCalculator,
-    strategyConfigLoader,
+    strategyConfig,
   });
 
   return {

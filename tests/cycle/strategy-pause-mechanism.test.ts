@@ -68,6 +68,8 @@ describe("StrategyPauseMechanism", () => {
         minBuyUSDT: 10,
       },
       mockTradingRules,
+      "test-config-id",
+      "1h",
     );
 
     mockDiscordNotifier = new DiscordNotifier({

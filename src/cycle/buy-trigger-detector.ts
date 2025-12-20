@@ -22,6 +22,7 @@ import {
 } from "./buy-amount-calculator.js";
 import { logger } from "../utils/logger.js";
 import type { TradingRules } from "../exchange/trading-rules.js";
+import type { StrategyConfig } from "../config/strategy-config-loader.js";
 
 export interface CycleState {
   status: "READY" | "HOLDING" | "PAUSED";
@@ -82,6 +83,7 @@ export class BuyTriggerDetector {
 
   constructor(
     private buyAmountCalculator: BuyAmountCalculator,
+    private strategyConfig: StrategyConfig,
     private tradingRules?: TradingRules,
   ) {}
 
@@ -100,6 +102,7 @@ export class BuyTriggerDetector {
         return rules.tickSize;
       } catch (error) {
         logger.warn("Failed to fetch trading rules, using default tickSize", {
+          timeframe: this.strategyConfig.timeframe,
           error,
         });
       }
@@ -185,21 +188,6 @@ export class BuyTriggerDetector {
         config,
         state.buy_anchor_price,
       );
-      const basePrice = state.buy_anchor_price || state.ath_reference_price;
-      logger.info(
-        `🏗️ Building buy grid from ${state.buy_anchor_price ? "anchor" : "ATH"} price: ${basePrice.toFixed(2)}`,
-        {
-          athPrice: state.ath_reference_price,
-          anchorPrice: state.buy_anchor_price,
-          basePrice,
-          dropPercentage: config.dropPercentage,
-          gridLevels: newGrid.map((level) => level.toFixed(2)),
-          currentPrice: candle.close,
-          maxPurchases: config.maxPurchases,
-          gridType: state.buy_anchor_price ? "ANCHORED" : "INITIAL",
-          triggerReason: "Price reached first trigger level",
-        },
-      );
 
       // Use the newly built grid for this buy check
       // Note: The grid will be saved to state by the caller
@@ -235,13 +223,6 @@ export class BuyTriggerDetector {
 
       // For first buy, only trigger ONE level regardless of how many are crossed
       if (isFirstBuy) {
-        logger.info("🎯 First buy detected - limiting to single level", {
-          totalLevelsCrossed: levelsTriggered,
-          currentPrice: candle.close,
-          anchorPrice: state.buy_anchor_price,
-          gridLevel: this.formatPrice(state.buy_grid[state.buy_index]),
-          note: "Grid will be rebuilt after this buy executes",
-        });
         break;
       }
 
@@ -315,14 +296,6 @@ export class BuyTriggerDetector {
     }
 
     // All checks passed - trigger buy
-    logger.info(`Grid buy triggered: ${levelsTriggered} level(s) crossed`, {
-      currentPrice: candle.close,
-      triggeredLevels,
-      levelsTriggered,
-      combinedAmount: totalBuyAmount,
-      currentBuyIndex: state.buy_index,
-      newBuyIndex,
-    });
 
     // Include the new grid if it was built dynamically
     const result: BuyTriggerResult = {
@@ -418,20 +391,6 @@ export class BuyTriggerDetector {
       grid.push(quantizedLevel);
     }
 
-    logger.debug(
-      `📊 Grid levels calculated from ${anchorPrice ? "anchor" : "ATH"}`,
-      {
-        basePrice: this.formatPrice(basePrice),
-        dropPercentage: config.dropPercentage,
-        maxPurchases: config.maxPurchases,
-        gridLevels: grid.map((level, index) => ({
-          level: index + 1,
-          price: this.formatPrice(level),
-          dropFromBase: `${((1 - level / basePrice) * 100).toFixed(2)}%`,
-        })),
-      },
-    );
-
     return grid;
   }
 
@@ -458,25 +417,9 @@ export class BuyTriggerDetector {
     // Verify first level is below anchor
     const firstLevelBelowAnchor = grid[0] && grid[0] < anchorPrice;
 
-    logger.info(
-      `🔄 Rebuilding grid from anchor price ${anchorPrice.toFixed(2)}`,
-      {
-        anchorPrice: this.formatPrice(anchorPrice),
-        dropPercentage: config.dropPercentage,
-        maxPurchases: config.maxPurchases,
-        tickSize,
-        gridLevels: grid.map((level) => this.formatPrice(level)),
-        firstLevel: grid[0] ? this.formatPrice(grid[0]) : "N/A",
-        firstLevelBelowAnchor,
-        gapFromAnchor: grid[0]
-          ? `${(((anchorPrice - grid[0]) / anchorPrice) * 100).toFixed(3)}%`
-          : "N/A",
-        rebuiltReason: "First buy executed - anchoring to execution price",
-      },
-    );
-
     if (!firstLevelBelowAnchor) {
-      logger.warn("⚠️ First grid level is NOT below anchor price!", {
+      logger.warn("First grid level is NOT below anchor price", {
+        timeframe: this.strategyConfig.timeframe,
         anchor: anchorPrice,
         firstLevel: grid[0],
       });

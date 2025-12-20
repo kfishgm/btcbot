@@ -237,7 +237,7 @@ export class EventLogger extends EventEmitter {
     }
     this.flushTimer = setInterval(() => {
       if (this.eventQueue.length > 0) {
-        this.flush().catch((error) => {
+        void this.flush().catch((error) => {
           this.logger.error("Failed to flush events", { error });
         });
       }
@@ -311,7 +311,7 @@ export class EventLogger extends EventEmitter {
       process.env.BINANCE_TESTNET === "true";
 
     if (isDevelopment || this.eventQueue.length >= this.batchSize) {
-      await this.flush();
+      void this.flush();
     }
   }
 
@@ -326,9 +326,7 @@ export class EventLogger extends EventEmitter {
     } catch (error) {
       if (this.offlineQueueEnabled) {
         this.offlineQueue.push(...eventsToFlush);
-        this.logger.warn("Database unavailable, queued events offline", {
-          queueSize: this.offlineQueue.length,
-        });
+        this.logger.warn("Database unavailable, queuing events offline");
       } else {
         // Retry logic
         for (const event of eventsToFlush) {
@@ -338,10 +336,8 @@ export class EventLogger extends EventEmitter {
           } else {
             this.logger.error("Failed to log event after retries", {
               event_type: event.event_type,
-              message: event.message,
               retryCount: event.retryCount,
               error: error instanceof Error ? error.message : String(error),
-              errorDetails: error,
             });
           }
         }
@@ -366,9 +362,6 @@ export class EventLogger extends EventEmitter {
       this.logger.error("Database insert failed", {
         error: error.message,
         code: error.code,
-        details: error.details,
-        hint: error.hint,
-        events: eventsToInsert,
       });
       throw error;
     }
@@ -381,12 +374,6 @@ export class EventLogger extends EventEmitter {
     }
 
     await this.flush();
-
-    if (this.offlineQueue.length > 0) {
-      this.logger.warn(
-        `Shutdown with ${this.offlineQueue.length} events in offline queue`,
-      );
-    }
   }
 
   // Trade event logging methods

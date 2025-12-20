@@ -24,10 +24,7 @@ import type { ConnectionManager } from "../database/connection-manager";
 import type { StateTransactionManager } from "../cycle/state-transaction-manager";
 import type { ReferencePriceCalculator } from "../cycle/reference-price-calculator";
 import type { BuyAmountCalculator } from "../cycle/buy-amount-calculator";
-import type {
-  StrategyConfigLoader,
-  StrategyConfig,
-} from "../config/strategy-config-loader";
+import type { StrategyConfig } from "../config/strategy-config-loader";
 import { StartupValidator } from "./startup-validator";
 import type { StartupValidatorConfig } from "./startup-validator";
 import type { BinanceClient } from "../exchange/binance-client";
@@ -57,7 +54,7 @@ export interface OrchestratorConfig {
   stateTransactionManager: StateTransactionManager;
   referencePriceCalculator: ReferencePriceCalculator;
   buyAmountCalculator: BuyAmountCalculator;
-  strategyConfigLoader: StrategyConfigLoader;
+  strategyConfig: StrategyConfig; // Now required - passed from pool
   enableHealthMonitoring?: boolean;
   healthCheckInterval?: number;
   memoryThresholdMB?: number;
@@ -98,7 +95,7 @@ export class MainOrchestrator extends EventEmitter {
   private performanceMetrics: OrchestratorPerformanceMetrics;
   private healthCheckTimer?: NodeJS.Timeout;
   private startTime: number = Date.now();
-  private strategyConfig?: StrategyConfig;
+  private strategyConfig: StrategyConfig; // Now always defined from config
   private startupValidator?: StartupValidator;
   private componentRefs: WeakMap<object, boolean> = new WeakMap();
   private errorObjects: Error[] = [];
@@ -108,6 +105,7 @@ export class MainOrchestrator extends EventEmitter {
     super();
     this.setMaxListeners(20); // Set reasonable limit for event listeners
     this.config = config;
+    this.strategyConfig = config.strategyConfig; // Set from config
 
     // Store component references for memory management
     this.componentRefs.set(config.webSocketManager, true);
@@ -136,18 +134,21 @@ export class MainOrchestrator extends EventEmitter {
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) {
-      logger.warn("Orchestrator already initialized");
+      logger.warn("Orchestrator already initialized", {
+        configId: this.strategyConfig.id,
+        timeframe: this.strategyConfig.timeframe,
+      });
       return;
     }
 
-    logger.info("🚀 Initializing Main Orchestrator");
+    logger.info("🚀 Initializing Main Orchestrator", {
+      configId: this.strategyConfig.id,
+      timeframe: this.strategyConfig.timeframe,
+    });
 
     try {
       // Ensure database connection
       await this.config.connectionManager.connect();
-
-      // Load strategy configuration
-      this.strategyConfig = await this.config.strategyConfigLoader.loadConfig();
       logger.info("Strategy configuration loaded", {
         maxPurchases: this.strategyConfig.maxPurchases,
         dropPercentage: this.strategyConfig.dropPercentage,
@@ -162,7 +163,7 @@ export class MainOrchestrator extends EventEmitter {
         balanceManager: this.config.balanceManager,
         discordNotifier: this.config.discordNotifier,
         cycleStateManager: this.config.cycleStateManager,
-        strategyConfigLoader: this.config.strategyConfigLoader,
+        // strategyConfigLoader omitted - validation done in bootstrap for multi-config
       };
       this.startupValidator = new StartupValidator(validatorConfig);
 
@@ -310,21 +311,16 @@ export class MainOrchestrator extends EventEmitter {
    */
   private async onCandleClose(candle: CandleData): Promise<void> {
     if (!this.isRunning) {
-      logger.debug("Orchestrator not running, skipping candle");
       return;
     }
 
     // Check if strategy is paused before processing
     if (this.config.strategyPauseMechanism?.isPausedStatus()) {
-      logger.info("Strategy is paused, skipping candle processing");
       return;
     }
 
     // Prevent concurrent processing
     if (this.isProcessingCandle) {
-      logger.debug("Already processing a candle, queueing", {
-        queueLength: this.processingQueue.length,
-      });
       this.processingQueue.push(candle);
       return;
     }
@@ -366,10 +362,6 @@ export class MainOrchestrator extends EventEmitter {
       typeof candle.close === "string"
         ? parseFloat(candle.close)
         : candle.close;
-    logger.debug("Processing candle close", {
-      closeTime: new Date(candle.closeTime).toISOString(),
-      price: closePrice,
-    });
 
     // Get current state
     const state = await this.config.cycleStateManager.getCurrentState();
@@ -389,11 +381,6 @@ export class MainOrchestrator extends EventEmitter {
     // Check if ATH has actually changed from the stored value
     const previousStoredATH = state.ath_price || 0;
     const athChanged = currentATH > previousStoredATH && currentATH > 0;
-
-    // Log candle close with ATH info
-    logger.info(
-      `Candle closed. Price: ${closePrice.toFixed(2)}, Window ATH: ${currentATH.toFixed(2)}, Stored ATH: ${previousStoredATH.toFixed(2)}`,
-    );
 
     // Convert state to mutable copy we can work with
     const workingState: CycleState = { ...state };
@@ -426,14 +413,6 @@ export class MainOrchestrator extends EventEmitter {
         // Update ATH reference price only if not holding meaningful BTC (for first buy trigger)
         if (shouldUpdateReferencePrice) {
           workingState.ath_reference_price = currentATH;
-          logger.info(
-            `Window ATH: ${currentATH.toFixed(2)}, Candle: ${closePrice.toFixed(2)} | ATH Ref updated to ${currentATH.toFixed(2)} (${isDust ? "dust" : "not holding"})`,
-          );
-        } else {
-          // When holding, ATH reference stays as-is, sell reference is used for sell trigger
-          logger.info(
-            `Window ATH: ${currentATH.toFixed(2)}, Candle: ${closePrice.toFixed(2)} | ATH Ref (frozen): ${workingState.ath_reference_price?.toFixed(2) || "N/A"}, Sell Ref: ${workingState.sell_reference_price?.toFixed(2) || "N/A"} (holding)`,
-          );
         }
 
         // Always persist ATH to database (can go up or down with rolling window)
@@ -475,31 +454,6 @@ export class MainOrchestrator extends EventEmitter {
         workingState.btc_accumulated > 0 &&
         !isDust
       ) {
-        logger.info(
-          `Holding ${workingState.btc_accumulated} BTC, checking sell condition`,
-        );
-
-        // Calculate sell details for logging
-        // Use commission-adjusted formula to match actual sell trigger
-        const commissionRate = 0.001; // Default 0.1% commission
-        const sellReferencePrice =
-          typeof workingState.sell_reference_price === "number"
-            ? workingState.sell_reference_price
-            : 0;
-        const sellTarget = sellReferencePrice
-          ? (sellReferencePrice *
-              (1 + (this.strategyConfig?.risePercentage || 0.03))) /
-            (1 - commissionRate)
-          : null;
-        const usdtAmount = workingState.btc_accumulated * closePrice;
-        const percentAwayFromSell = sellTarget
-          ? Math.abs((sellTarget - closePrice) / sellTarget) * 100
-          : 0;
-
-        logger.info(
-          `Sell check - Amount: ${workingState.btc_accumulated.toFixed(8)} BTC (${usdtAmount.toFixed(2)} USDT), Target: ${sellTarget?.toFixed(2) || "N/A"}, % Away: ${percentAwayFromSell.toFixed(2)}%`,
-        );
-
         const sellDecision =
           await this.config.sellTriggerDetector.checkSellTrigger(
             {
@@ -530,7 +484,7 @@ export class MainOrchestrator extends EventEmitter {
 
         if (sellDecision.shouldSell) {
           logger.info(
-            `✅ SELL CONDITION MET at ${closePrice} - Placing sell order`,
+            `[${this.strategyConfig.timeframe}] ✅ SELL CONDITION MET at ${closePrice}`,
             {
               btc_accumulated: workingState.btc_accumulated || 0,
               reason: sellDecision.reason,
@@ -573,12 +527,14 @@ export class MainOrchestrator extends EventEmitter {
               "type" in updateResult &&
               updateResult.type === "CREATE_NEW_CYCLE"
             ) {
-              logger.info("🔄 Cycle completed - creating new cycle", {
-                previousCycleId: updateResult.previousCycleId,
-                profit: updateResult.completionData.finalProfit,
-                carryOverCapital: updateResult.completionData.carryOverCapital,
-                carryOverDust: updateResult.completionData.carryOverDust,
-              });
+              logger.info(
+                `[${this.strategyConfig.timeframe}] 🔄 CYCLE COMPLETED - profit: ${updateResult.completionData.finalProfit.toFixed(2)} USDT`,
+                {
+                  previousCycleId: updateResult.previousCycleId,
+                  carryOverCapital:
+                    updateResult.completionData.carryOverCapital,
+                },
+              );
 
               // Create new cycle
               const previousState = workingState;
@@ -587,12 +543,6 @@ export class MainOrchestrator extends EventEmitter {
                   previousState,
                   updateResult.completionData,
                 );
-
-              logger.info("New cycle created", {
-                cycleId: newCycle.id,
-                capital: newCycle.capital_available,
-                dust: newCycle.btc_dust,
-              });
 
               // Log event
               await this.config.eventLogger.queueEvent({
@@ -608,21 +558,6 @@ export class MainOrchestrator extends EventEmitter {
                   carry_over_dust: updateResult.completionData.carryOverDust,
                 },
               });
-            } else {
-              // Normal sell update (partial sale)
-              logger.info(
-                `Sell order executed - State updated (partial sale)`,
-                {
-                  btc_remaining:
-                    "btc_accumulated" in updateResult
-                      ? updateResult.btc_accumulated
-                      : 0,
-                  capital_available:
-                    "capital_available" in updateResult
-                      ? updateResult.capital_available
-                      : 0,
-                },
-              );
             }
 
             // Log sell event
@@ -647,10 +582,6 @@ export class MainOrchestrator extends EventEmitter {
       // STEP 3: Check BUY condition (if not holding or only dust)
       // ===============================================================
       if (workingState.purchases_remaining > 0) {
-        logger.info(
-          `Have ${workingState.purchases_remaining} purchases remaining, checking buy condition`,
-        );
-
         const buyDecision =
           await this.config.buyTriggerDetector.checkBuyTrigger(
             {
@@ -687,32 +618,6 @@ export class MainOrchestrator extends EventEmitter {
             },
           );
 
-        // Calculate the buy details for logging
-        const buyIndex = workingState.buy_index || 0;
-        const maxPurchases = this.strategyConfig?.maxPurchases || 10;
-        const purchasesCompleted =
-          maxPurchases - workingState.purchases_remaining;
-        const currentGridLevelNumber = purchasesCompleted + 1;
-        const currentGridLevel =
-          workingState.buy_grid && buyIndex < workingState.buy_grid.length
-            ? workingState.buy_grid[buyIndex]
-            : null;
-        const buyTarget =
-          currentGridLevel ||
-          (workingState.ath_reference_price
-            ? workingState.ath_reference_price *
-              (1 - (this.strategyConfig?.dropPercentage || 0.003))
-            : null);
-        const percentAway = buyTarget
-          ? Math.abs((closePrice - buyTarget) / buyTarget) * 100
-          : null;
-        const purchaseAmount =
-          workingState.capital_available / workingState.purchases_remaining;
-
-        logger.info(
-          `Buy check - Grid Level: ${currentGridLevelNumber}, Purchase Amount: ${purchaseAmount.toFixed(2)} USDT, Buy Target: ${buyTarget ? buyTarget.toFixed(2) : "N/A"}, % Away: ${percentAway ? percentAway.toFixed(2) : "N/A"}%`,
-        );
-
         if (buyDecision.shouldBuy) {
           // Use the calculated buy amount from the trigger detector
           // This handles multi-level grid crossings correctly (combined amount)
@@ -720,10 +625,9 @@ export class MainOrchestrator extends EventEmitter {
             buyDecision.buyAmount || workingState.buy_amount || 100;
 
           logger.info(
-            `✅ BUY CONDITION MET at ${closePrice} - Placing buy order for ${buyUsdtAmount} USDT`,
+            `[${this.strategyConfig.timeframe}] ✅ BUY CONDITION MET at ${closePrice} for ${buyUsdtAmount} USDT`,
             {
               reason: buyDecision.reason,
-              grid_level: buyDecision.newBuyIndex,
               levels_triggered: buyDecision.levelsTriggered || 1,
             },
           );
@@ -764,13 +668,9 @@ export class MainOrchestrator extends EventEmitter {
                 this.strategyConfig?.dropPercentage,
               );
 
-            logger.info(`Buy order executed - State updated`, {
-              btc_accumulated: updatedState.btc_accumulated,
-              purchases_remaining: updatedState.purchases_remaining,
-              sell_reference_price: updatedState.sell_reference_price,
-              buy_anchor_price: updatedState.buy_anchor_price,
-              grid_level: updatedState.buy_index,
-            });
+            logger.info(
+              `[${this.strategyConfig.timeframe}] Buy executed: ${updatedState.btc_accumulated?.toFixed(8)} BTC (${updatedState.purchases_remaining} purchases left)`,
+            );
 
             // Log buy event
             await this.config.eventLogger.queueEvent({
@@ -853,13 +753,18 @@ export class MainOrchestrator extends EventEmitter {
       this.cleanupMemory();
     }
 
-    // Check for stale data
+    // Check for stale data (timeframe-aware threshold)
     if (this.health.lastCandleProcessed) {
       const timeSinceLastCandle = now - this.health.lastCandleProcessed;
-      if (timeSinceLastCandle > 5 * 60 * 1000) {
-        // 5 minutes
+      // Set threshold based on timeframe (2x candle interval + buffer)
+      const thresholdMs = this.getStaleDataThreshold();
+      if (timeSinceLastCandle > thresholdMs) {
         this.health.status = "degraded";
-        logger.warn("No candles processed in last 5 minutes");
+        logger.warn("No candles processed recently", {
+          timeframe: this.strategyConfig.timeframe,
+          timeSinceLastCandle: Math.round(timeSinceLastCandle / 1000 / 60),
+          thresholdMinutes: Math.round(thresholdMs / 1000 / 60),
+        });
       }
     }
 
@@ -893,6 +798,27 @@ export class MainOrchestrator extends EventEmitter {
     }
   }
 
+  /**
+   * Get timeframe-aware threshold for stale data detection
+   * Returns milliseconds - candles should arrive within 2x their interval
+   */
+  private getStaleDataThreshold(): number {
+    const timeframeMs: Record<string, number> = {
+      "1m": 1 * 60 * 1000,
+      "5m": 5 * 60 * 1000,
+      "15m": 15 * 60 * 1000,
+      "1h": 60 * 60 * 1000,
+      "4h": 4 * 60 * 60 * 1000,
+      "1d": 24 * 60 * 60 * 1000,
+      "1w": 7 * 24 * 60 * 60 * 1000,
+    };
+
+    const interval =
+      timeframeMs[this.strategyConfig.timeframe] || 5 * 60 * 1000;
+    // Allow 2x the candle interval before warning (e.g., 1h = 2 hours, 1d = 2 days)
+    return interval * 2;
+  }
+
   private updateHealthStatus(): void {
     const now = Date.now();
     const timeSinceLastCandle = this.health.lastCandleProcessed
@@ -905,12 +831,13 @@ export class MainOrchestrator extends EventEmitter {
     // Update uptime
     this.health.uptime = now - this.startTime;
 
-    // Determine health status
-    if (timeSinceLastCandle > 300000) {
-      // No candle in 5 minutes
+    // Determine health status (timeframe-aware)
+    const degradedThreshold = this.getStaleDataThreshold();
+    const unhealthyThreshold = degradedThreshold * 2;
+
+    if (timeSinceLastCandle > unhealthyThreshold) {
       this.health.status = "unhealthy";
-    } else if (timeSinceLastCandle > 120000) {
-      // No candle in 2 minutes
+    } else if (timeSinceLastCandle > degradedThreshold) {
       this.health.status = "degraded";
     } else if (this.health.errorsCount > 10) {
       this.health.status = "degraded";

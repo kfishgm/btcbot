@@ -265,19 +265,23 @@ describe("Buy Anchor E2E", () => {
     const testPrice = 99400;
     const updatedState = await components.cycleStateManager.getCurrentState();
 
+    if (!updatedState) {
+      throw new Error("Failed to get updated state for buy trigger check");
+    }
+
     const buyTrigger = await components.buyTriggerDetector.checkBuyTrigger(
       {
-        status: updatedState!.status as "READY" | "HOLDING" | "PAUSED",
-        ath_reference_price: updatedState!.ath_reference_price,
-        sell_reference_price: updatedState!.sell_reference_price,
-        purchases_remaining: updatedState!.purchases_remaining,
-        capital_available: updatedState!.capital_available,
-        buy_amount: updatedState!.buy_amount,
-        buy_anchor_price: updatedState!.buy_anchor_price,
-        btc_accumulated: updatedState!.btc_accumulated || 0,
-        btc_dust: updatedState!.btc_dust || undefined,
-        buy_grid: updatedState!.buy_grid,
-        buy_index: updatedState!.buy_index || 0,
+        status: updatedState.status as "READY" | "HOLDING" | "PAUSED",
+        ath_reference_price: updatedState.ath_reference_price,
+        sell_reference_price: updatedState.sell_reference_price,
+        purchases_remaining: updatedState.purchases_remaining,
+        capital_available: updatedState.capital_available,
+        buy_amount: updatedState.buy_amount,
+        buy_anchor_price: updatedState.buy_anchor_price,
+        btc_accumulated: updatedState.btc_accumulated || 0,
+        btc_dust: updatedState.btc_dust || undefined,
+        buy_grid: updatedState.buy_grid,
+        buy_index: updatedState.buy_index || 0,
       },
       {
         dropPercentage: 0.003,

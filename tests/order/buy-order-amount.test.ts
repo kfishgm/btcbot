@@ -4,6 +4,7 @@ import { BuyOrderPlacer } from "../../src/order/buy-order-placer";
 import { TradingRules } from "../../src/exchange/trading-rules";
 import type { BinanceClient } from "../../src/exchange/binance-client";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { StrategyConfig } from "../../src/config/strategy-config-loader";
 import type { SymbolTradingRules } from "../../src/exchange/types";
 import type { BinanceOrder, CreateOrderParams } from "../../src/exchange/types";
 
@@ -25,6 +26,7 @@ describe("Buy Order Amount Issues", () => {
   let mockBinanceClient: MockBinanceClient;
   let mockTradingRules: MockTradingRules;
   let mockSupabaseClient: SupabaseClient;
+  let mockStrategyConfig: StrategyConfig;
 
   const mockSymbolRules: SymbolTradingRules = {
     symbol: "BTCUSDT",
@@ -39,6 +41,22 @@ describe("Buy Order Amount Issues", () => {
   };
 
   beforeEach(() => {
+    // Create mock strategy config
+    mockStrategyConfig = {
+      id: "test-config",
+      timeframe: "15m",
+      dropPercentage: 0.02,
+      risePercentage: 0.03,
+      maxPurchases: 5,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 500,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 25,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
+
     mockBinanceClient = {
       createOrder: jest.fn(),
       getOrder: jest.fn(),
@@ -78,11 +96,27 @@ describe("Buy Order Amount Issues", () => {
       from: jest.fn().mockReturnValue(mockQueryBuilder),
     } as unknown as SupabaseClient;
 
+    mockStrategyConfig = {
+      id: "test-config",
+      timeframe: "15m",
+      dropPercentage: 0.02,
+      risePercentage: 0.03,
+      maxPurchases: 5,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 300,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 25,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
+
     buyOrderPlacer = new BuyOrderPlacer(
       mockBinanceClient as unknown as BinanceClient,
       mockTradingRules as unknown as TradingRules,
       mockSupabaseClient,
       "BTCUSDT",
+      mockStrategyConfig,
     );
   });
 

@@ -12,6 +12,7 @@ import type {
   BalanceInfo,
   CycleState as BuyTriggerCycleState,
 } from "../../src/cycle/buy-trigger-detector";
+import type { StrategyConfig } from "../../src/config/strategy-config-loader";
 import { Decimal } from "decimal.js";
 import { createMockSupabaseClient } from "../mocks/supabase-mock";
 import { BuyAmountCalculator } from "../../src/cycle/buy-amount-calculator";
@@ -49,8 +50,26 @@ describe("Buy Anchor Price End-to-End", () => {
     } as unknown as jest.Mocked<BuyAmountCalculator>;
 
     // Create instances
+    const mockStrategyConfig: StrategyConfig = {
+      id: "test-config",
+      timeframe: "15m",
+      dropPercentage: 0.02,
+      risePercentage: 0.03,
+      maxPurchases: 5,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 500,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 25,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
+
     buyOrderUpdater = new BuyOrderStateUpdater(supabase);
-    buyTriggerDetector = new BuyTriggerDetector(mockBuyAmountCalculator);
+    buyTriggerDetector = new BuyTriggerDetector(
+      mockBuyAmountCalculator,
+      mockStrategyConfig,
+    );
 
     // Setup initial cycle state (no anchor, no grid yet)
     mockCycleState = {

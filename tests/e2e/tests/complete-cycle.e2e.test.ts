@@ -195,7 +195,7 @@ describe("Complete Trading Cycle E2E", () => {
         if (
           (currentState.status === "HOLDING" ||
             currentState.status === "BUYING") &&
-          currentState.btc_accumulated! > 0
+          (currentState.btc_accumulated ?? 0) > 0
         ) {
           // Get current balances for the trigger check
           const btcBalance = await mocks.binance.getBalance("BTC");
@@ -243,11 +243,12 @@ describe("Complete Trading Cycle E2E", () => {
           if (sellTrigger.shouldSell) {
             console.log(`EXECUTING SELL at ${currentPrice}`);
             // Execute sell with real order placer logic
+            const btcAccumulated = currentState.btc_accumulated ?? 0;
             const sellResult = await mocks.binance.createOrder({
               symbol: "BTCUSDT",
               side: "SELL",
               type: "MARKET",
-              quantity: currentState.btc_accumulated!,
+              quantity: btcAccumulated,
             });
 
             expect(sellResult.status).toBe("FILLED");
@@ -259,7 +260,7 @@ describe("Complete Trading Cycle E2E", () => {
               btc_accumulated: 0,
               capital_available:
                 (currentState.capital_available || 0) +
-                currentState.btc_accumulated! * currentPrice * 0.999,
+                btcAccumulated * currentPrice * 0.999,
             } as CycleState;
             mocks.supabase.setCycleState("test-cycle", newState);
             components.cycleStateManager.updateCachedState(newState);

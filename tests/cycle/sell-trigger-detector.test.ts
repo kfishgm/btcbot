@@ -1,6 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { SellTriggerDetector } from "../../src/cycle/sell-trigger-detector";
 import { logger } from "../../src/utils/logger";
+import type { StrategyConfig } from "../../src/config/strategy-config-loader";
 
 // Import types that will be defined in the implementation
 import type {
@@ -14,7 +15,22 @@ describe("SellTriggerDetector", () => {
   let detector: SellTriggerDetector;
 
   beforeEach(() => {
-    detector = new SellTriggerDetector();
+    const mockStrategyConfig: StrategyConfig = {
+      id: "test-config",
+      timeframe: "15m",
+      dropPercentage: 0.02,
+      risePercentage: 0.03,
+      maxPurchases: 5,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 500,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 25,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    detector = new SellTriggerDetector(mockStrategyConfig);
   });
 
   describe("Basic Sell Trigger Detection", () => {

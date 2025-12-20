@@ -145,7 +145,7 @@ describe("HistoricalCandleManager", () => {
 
       expect(manager.getCandleHistory()).toHaveLength(50);
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("insufficient history"),
+        expect.stringContaining("Insufficient historical candles"),
         expect.objectContaining({
           symbol: testSymbol,
           received: 50,

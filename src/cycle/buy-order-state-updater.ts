@@ -8,6 +8,7 @@ import { Decimal } from "decimal.js";
 import { logger } from "../utils/logger";
 import type { DiscordNotifier } from "../notifications/discord-notifier";
 import type { CommissionManager } from "../exchange/commission-manager";
+import type { StrategyConfig } from "../config/strategy-config-loader";
 import { calculateTradeableBTC } from "../utils/btc-utils";
 import { calculateSellThreshold } from "../utils/pricing-calculations";
 
@@ -40,6 +41,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
   private transactionManager: StateTransactionManager;
   private discordNotifier?: DiscordNotifier;
   private commissionManager?: CommissionManager;
+  private strategyConfig?: StrategyConfig;
   private stepSize: number;
   private baseAssetPrecision: number;
   private tickSize: number;
@@ -51,12 +53,14 @@ export class BuyOrderStateUpdater extends EventEmitter {
     stepSize: number = 0.00001, // Default BTCUSDT stepSize
     baseAssetPrecision: number = 8, // Default BTC precision
     tickSize: number = 0.01, // Default BTCUSDT tickSize
+    strategyConfig?: StrategyConfig,
   ) {
     super();
     this.supabase = supabase;
     this.transactionManager = new StateTransactionManager(supabase);
     this.discordNotifier = discordNotifier;
     this.commissionManager = commissionManager;
+    this.strategyConfig = strategyConfig;
     this.stepSize = stepSize;
     this.baseAssetPrecision = baseAssetPrecision;
     this.tickSize = tickSize;
@@ -91,7 +95,6 @@ export class BuyOrderStateUpdater extends EventEmitter {
       this.validateOrderResult(orderResult);
       this.validateCycleState(currentState, orderResult);
 
-      logger.info("Calculating state updates", { levelsTriggered });
       // Calculate all updates
       const updates = this.calculateUpdates(
         currentState,
@@ -102,36 +105,9 @@ export class BuyOrderStateUpdater extends EventEmitter {
         dropPercentage,
       );
 
-      logger.info("Calculated updates", {
-        btc_accumulated: updates.btc_accumulated,
-        sell_reference_price: updates.sell_reference_price,
-        capital_available: updates.capital_available,
-      });
-
-      // Execute update atomically
-      logger.debug("Executing atomic state update", {
-        id: currentState.id,
-        idType: typeof currentState.id,
-        hasId: !!currentState.id,
-        fullState: JSON.stringify(currentState),
-      });
-
       if (!currentState.id) {
         throw new Error("Current state has no ID - cannot update");
       }
-
-      // Log the exact updates being sent
-      logger.debug("Sending updates to updateStateAtomic", {
-        botId: currentState.id,
-        updates: JSON.stringify(updates),
-        updateKeys: Object.keys(updates),
-        buyGridType: Array.isArray(updates.buy_grid)
-          ? "array"
-          : typeof updates.buy_grid,
-        buyGridLength: Array.isArray(updates.buy_grid)
-          ? updates.buy_grid.length
-          : null,
-      });
 
       const updatedState = await this.transactionManager.updateStateAtomic(
         currentState.id,
@@ -150,10 +126,13 @@ export class BuyOrderStateUpdater extends EventEmitter {
       };
 
       // Log successful update
-      logger.info("Buy order state update completed", {
+      logger.info("[BUY] State updated", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
         cycleId: currentState.id,
         orderId: orderResult.orderId,
-        updates,
+        btcAdded: orderResult.executedQty.sub(orderResult.feeBTC).toFixed(8),
+        srp: updates.sell_reference_price.toFixed(2),
+        capitalLeft: updates.capital_available.toFixed(2),
       });
 
       // Send Discord notification
@@ -169,6 +148,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
               logger.warn(
                 "Failed to get commission rate for notification, using default 0.1%",
                 {
+                  timeframe: this.strategyConfig?.timeframe || "unknown",
                   error: error instanceof Error ? error.message : String(error),
                 },
               );
@@ -223,6 +203,11 @@ export class BuyOrderStateUpdater extends EventEmitter {
           }
 
           const fields = [
+            {
+              name: "⏱️ Timeframe",
+              value: this.strategyConfig?.timeframe || "Unknown",
+              inline: true,
+            },
             {
               name: "💰 Buy Price",
               value: `$${orderResult.avgPrice.toFixed(2)}`,
@@ -305,7 +290,10 @@ export class BuyOrderStateUpdater extends EventEmitter {
           ];
           await this.discordNotifier.sendBuyNotification(fields);
         } catch (error) {
-          logger.error("Failed to send Discord notification", { error });
+          logger.error("Failed to send Discord notification", {
+            timeframe: this.strategyConfig?.timeframe || "unknown",
+            error,
+          });
         }
       }
 
@@ -320,6 +308,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     } catch (error) {
       // Log and emit error
       logger.error("Failed to update state after buy order", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
         cycleId: currentState.id,
         orderId: orderResult.orderId,
         error: error instanceof Error ? error.message : String(error),
@@ -356,12 +345,6 @@ export class BuyOrderStateUpdater extends EventEmitter {
     if (orderResult.cummulativeQuoteQty.lte(0)) {
       throw new Error("Order has no cumulative quote quantity");
     }
-
-    logger.info("Order validation passed", {
-      status: orderResult.status,
-      executedQty: orderResult.executedQty.toString(),
-      cummulativeQuoteQty: orderResult.cummulativeQuoteQty.toString(),
-    });
   }
 
   private validateCycleState(
@@ -407,38 +390,6 @@ export class BuyOrderStateUpdater extends EventEmitter {
     // If fees are in BTC or BNB, feeUSDT will be 0 and this correctly equals usdtSpent
     const totalCostUsdt = usdtSpent.add(usdtFee);
 
-    // Debug logging for reference price calculation with client's formula verification
-    const verifyAvgPriceTimesQty = orderResult.avgPrice.mul(
-      orderResult.executedQty,
-    );
-    const commissionRate = new Decimal(0.001); // 0.1% commission
-    const expectedFeeBTC = btcFilled.mul(commissionRate);
-
-    logger.debug("Reference price calculation inputs (client's formula):", {
-      // Client's formula values
-      fillPrice: orderResult.avgPrice.toString(),
-      executedQty: btcFilled.toString(),
-      "fillPrice * executedQty": verifyAvgPriceTimesQty.toString(),
-      cummulativeQuoteQty: usdtSpent.toString(),
-      "Formula match?": verifyAvgPriceTimesQty.sub(usdtSpent).abs().lt(0.01)
-        ? "✅ YES"
-        : "❌ NO",
-
-      // BTC calculations
-      feeBTC_actual: btcFee.toString(),
-      feeBTC_expected: expectedFeeBTC.toString(),
-      "btc_accum_net (executedQty - feeBTC)": netBtcReceived.toString(),
-
-      // USDT calculations
-      cost_accum_usdt: totalCostUsdt.toString(),
-
-      // State values
-      currentBtcAccum: currentState.btc_accumulated || 0,
-      currentCostAccum: currentState.cost_accum_usdt || 0,
-      currentBtcNet: currentState.btc_accum_net || 0,
-      currentDust: currentState.btc_dust || 0,
-    });
-
     // Update accumulators
     // btc_accum_net only tracks BTC from current cycle (excludes dust)
     const newBtcAccumNet = new Decimal(currentState.btc_accum_net || 0)
@@ -470,54 +421,17 @@ export class BuyOrderStateUpdater extends EventEmitter {
       newBtcAccumNet, // Excludes dust - only current cycle BTC
     );
 
-    // More debug logging with client's formula demonstration
-    logger.debug("Reference price calculation results (avg_cost_net):", {
-      // Client's formula: avg_cost_net = cost_accum_usdt / btc_accum_net
-      Formula: "avg_cost_net = cost_accum_usdt / btc_accum_net",
-      cost_accum_usdt: newCostAccumUsdt,
-      btc_accum_net: newBtcAccumNet,
-      "avg_cost_net (sell_reference_price)": referencePrice,
-
-      // Verification
-      "Manual calculation": `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
-      "Fill price (no fees)": orderResult.avgPrice.toString(),
-      "Difference from fill price": `${((referencePrice / orderResult.avgPrice.toNumber() - 1) * 100).toFixed(4)}%`,
-      "Expected ~0.1% higher":
-        referencePrice > orderResult.avgPrice.toNumber() ? "✅ YES" : "❌ NO",
-
-      // Total BTC including dust
-      "btc_accumulated (with dust)": newBtcAccumulated,
-      "btc_accum_net (current cycle)": newBtcAccumNet,
-      "Carried over dust": currentState.btc_dust || 0,
-      Note: "sell_reference_price uses tradeable BTC (excludes dust) for accurate cost basis per spec Section 5",
-    });
-
     // Verify reference price accounts for fees
     const avgPriceNumber = orderResult.avgPrice.toNumber();
     const priceDifferencePercent =
       (Math.abs(referencePrice - avgPriceNumber) / avgPriceNumber) * 100;
 
     if (priceDifferencePercent < 0.05) {
-      logger.warn(
-        "⚠️ Reference price is suspiciously close to average price!",
-        {
-          new_sell_reference_price: referencePrice,
-          cost_accum_usdt: newCostAccumUsdt,
-          btc_accum_net: newBtcAccumNet,
-          formula: `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
-          avgPrice: avgPriceNumber,
-          differencePercent: priceDifferencePercent.toFixed(4),
-          expectation: "Reference price should be ~0.1% higher due to BTC fees",
-        },
-      );
-    } else {
-      logger.info("✅ Sell reference price calculated with fee accounting", {
-        new_sell_reference_price: referencePrice,
-        cost_accum_usdt: newCostAccumUsdt,
-        btc_accum_net: newBtcAccumNet,
-        formula: `${newCostAccumUsdt} / ${newBtcAccumNet} = ${referencePrice}`,
-        avgPrice: avgPriceNumber,
-        differencePercent: priceDifferencePercent.toFixed(4),
+      logger.warn("[BUY] Reference price unusually close to fill price", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        srp: referencePrice.toFixed(2),
+        fillPrice: avgPriceNumber.toFixed(2),
+        diffPercent: priceDifferencePercent.toFixed(4),
       });
     }
 
@@ -551,34 +465,21 @@ export class BuyOrderStateUpdater extends EventEmitter {
     let rebuildBuyIndex = newBuyIndex;
 
     if (isFirstBuy) {
-      logger.info("Setting buy anchor price on first buy (quantized)", {
-        rawExecutionPrice: rawAnchorPrice,
-        quantizedAnchorPrice: buyAnchorPrice,
-        tickSize: this.tickSize,
-        athPrice: currentState.ath_price,
-        sellReferencePrice: currentState.sell_reference_price,
-      });
-
-      // CRITICAL FIX: Rebuild grid from anchor price after first buy
-      // Per STRATEGY.md: "Rebuild grid using anchor price as new reference"
-      // "Reset buy_index to 0 - grid is completely new from anchor"
+      // Rebuild grid from anchor price after first buy (per STRATEGY.md)
       if (buyAnchorPrice && maxPurchases) {
-        // Use actual dropPercentage from strategy config, not a calculated value
-        const actualDropPercentage = dropPercentage || 0.003; // Default to 0.3% if not provided
+        const actualDropPercentage = dropPercentage || 0.003;
         rebuildGrid = this.buildGridFromAnchor(
           buyAnchorPrice,
           maxPurchases,
           actualDropPercentage,
         );
-        rebuildBuyIndex = 0; // CRITICAL: Reset to 0 per spec
+        rebuildBuyIndex = 0;
 
-        logger.info("🔄 Grid rebuilt from anchor price after first buy", {
-          anchorPrice: buyAnchorPrice,
-          dropPercentage: actualDropPercentage,
-          maxPurchases,
-          gridLevels: rebuildGrid.map((level) => level.toFixed(2)),
-          resetBuyIndexTo: rebuildBuyIndex,
-          reason: "First buy completed - grid now anchored to execution price",
+        logger.info("[BUY] First buy - grid rebuilt from anchor", {
+          timeframe: this.strategyConfig?.timeframe || "unknown",
+          anchorPrice: buyAnchorPrice.toFixed(2),
+          dropPercent: (actualDropPercentage * 100).toFixed(1),
+          gridLevels: rebuildGrid.length,
         });
       }
     }
@@ -611,42 +512,15 @@ export class BuyOrderStateUpdater extends EventEmitter {
     );
 
     if (tradeableBTC === 0) {
-      logger.warn(
-        "No tradeable BTC available (all is dust), returning 0 for reference price",
-        {
-          btcAccumNet,
-          stepSize: this.stepSize,
-          baseAssetPrecision: this.baseAssetPrecision,
-          dustAmount: btcAccumNet,
-        },
-      );
+      logger.warn("[BUY] All BTC is dust, reference price = 0", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        btcNet: btcAccumNet,
+      });
       return 0;
     }
 
-    // Calculate reference price using ONLY tradeable BTC
     const referencePrice = costAccumUsdt / tradeableBTC;
-    const rounded = Math.round(referencePrice * 100) / 100;
-
-    // Log the difference for transparency
-    const dustAmount = btcAccumNet - tradeableBTC;
-    const oldReferencePrice = btcAccumNet > 0 ? costAccumUsdt / btcAccumNet : 0;
-
-    logger.debug("calculateReferencePrice with tradeable BTC:", {
-      costAccumUsdt,
-      btcAccumNet,
-      tradeableBTC,
-      dustAmount,
-      stepSize: this.stepSize,
-      baseAssetPrecision: this.baseAssetPrecision,
-      rawReferencePrice: referencePrice,
-      roundedReferencePrice: rounded,
-      oldCalculation: oldReferencePrice.toFixed(2),
-      newCalculation: referencePrice.toFixed(2),
-      difference: (referencePrice - oldReferencePrice).toFixed(2),
-      formula: `${costAccumUsdt} / ${tradeableBTC} (tradeable) = ${referencePrice}`,
-    });
-
-    return rounded;
+    return Math.round(referencePrice * 100) / 100;
   }
 
   async getCycleState(cycleId: string): Promise<CycleState | null> {
@@ -657,7 +531,11 @@ export class BuyOrderStateUpdater extends EventEmitter {
       .single();
 
     if (error) {
-      logger.error("Failed to fetch cycle state", { cycleId, error });
+      logger.error("Failed to fetch cycle state", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        cycleId,
+        error,
+      });
       return null;
     }
 
@@ -705,7 +583,10 @@ export class BuyOrderStateUpdater extends EventEmitter {
         } as unknown as Json,
       });
     } catch (error) {
-      logger.error("Failed to log state update event", { error });
+      logger.error("Failed to log state update event", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        error,
+      });
     }
   }
 }

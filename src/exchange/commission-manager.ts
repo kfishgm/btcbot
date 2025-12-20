@@ -31,10 +31,6 @@ export class CommissionManager {
   async initialize(): Promise<void> {
     try {
       await this.refreshRates();
-      logger.info("Commission rates initialized", {
-        takerCommission: this.commissionCache?.takerCommission,
-        makerCommission: this.commissionCache?.makerCommission,
-      });
     } catch (error) {
       logger.error("Failed to initialize commission rates, using defaults", {
         error: error instanceof Error ? error.message : String(error),
@@ -78,6 +74,10 @@ export class CommissionManager {
     // Refresh rates if expired or not cached
     try {
       await this.refreshRates();
+      // After successful refresh, cache is guaranteed to be set
+      if (this.commissionCache) {
+        return this.commissionCache;
+      }
     } catch (error) {
       logger.warn("Failed to refresh commission rates, using cached/default", {
         error: error instanceof Error ? error.message : String(error),
@@ -87,16 +87,14 @@ export class CommissionManager {
       if (this.commissionCache) {
         return this.commissionCache;
       }
-
-      // Last resort: return default rates
-      return {
-        takerCommission: CommissionManager.DEFAULT_COMMISSION,
-        makerCommission: CommissionManager.DEFAULT_COMMISSION,
-        lastUpdated: Date.now(),
-      };
     }
 
-    return this.commissionCache!;
+    // Last resort: return default rates
+    return {
+      takerCommission: CommissionManager.DEFAULT_COMMISSION,
+      makerCommission: CommissionManager.DEFAULT_COMMISSION,
+      lastUpdated: Date.now(),
+    };
   }
 
   /**
@@ -126,13 +124,6 @@ export class CommissionManager {
         makerCommission: finalMakerCommission,
         lastUpdated: Date.now(),
       };
-
-      logger.info("Commission rates refreshed", {
-        takerCommission: finalTakerCommission,
-        makerCommission: finalMakerCommission,
-        rawTaker: accountInfo.takerCommission,
-        rawMaker: accountInfo.makerCommission,
-      });
     } catch (error) {
       logger.error("Failed to fetch commission rates from Binance", {
         error: error instanceof Error ? error.message : String(error),
@@ -170,7 +161,6 @@ export class CommissionManager {
     this.autoRefreshInterval = setInterval(async () => {
       try {
         await this.refreshRates();
-        logger.debug("Auto-refreshed commission rates");
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         logger.error("Failed to auto-refresh commission rates", {
@@ -181,10 +171,6 @@ export class CommissionManager {
         }
       }
     }, intervalMs);
-
-    logger.info(
-      `Commission auto-refresh enabled (every ${intervalMs / 1000}s)`,
-    );
   }
 
   /**
@@ -194,7 +180,6 @@ export class CommissionManager {
     if (this.autoRefreshInterval) {
       clearInterval(this.autoRefreshInterval);
       this.autoRefreshInterval = undefined;
-      logger.info("Commission auto-refresh stopped");
     }
   }
 

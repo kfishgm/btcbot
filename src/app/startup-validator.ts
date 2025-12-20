@@ -18,7 +18,7 @@ export interface StartupValidatorConfig {
   discordNotifier?: DiscordNotifier;
   balanceManager: BalanceManager;
   cycleStateManager: CycleStateManager;
-  strategyConfigLoader: StrategyConfigLoader;
+  strategyConfigLoader?: StrategyConfigLoader; // Optional - validation done in bootstrap for multi-config
 }
 
 export class StartupValidator {
@@ -118,44 +118,46 @@ export class StartupValidator {
       }
     }
 
-    // Load and validate strategy configuration
-    try {
-      const strategyConfig =
-        await this.config.strategyConfigLoader.loadConfig();
-      if (!strategyConfig) {
+    // Load and validate strategy configuration (if loader provided)
+    if (this.config.strategyConfigLoader) {
+      try {
+        const strategyConfig =
+          await this.config.strategyConfigLoader.loadConfig();
+        if (!strategyConfig) {
+          errors.push({
+            code: "NO_STRATEGY_CONFIG",
+            message: "No active strategy configuration found",
+          });
+        } else {
+          // Validate strategy config values
+
+          if (
+            !strategyConfig.dropPercentage ||
+            strategyConfig.dropPercentage <= 0
+          ) {
+            errors.push({
+              code: "INVALID_DROP_PERCENTAGE",
+              message: `Invalid drop_percentage: ${strategyConfig.dropPercentage}`,
+            });
+          }
+
+          if (
+            !strategyConfig.risePercentage ||
+            strategyConfig.risePercentage <= 0
+          ) {
+            errors.push({
+              code: "INVALID_RISE_PERCENTAGE",
+              message: `Invalid rise_percentage: ${strategyConfig.risePercentage}`,
+            });
+          }
+        }
+      } catch (error) {
         errors.push({
-          code: "NO_STRATEGY_CONFIG",
-          message: "No active strategy configuration found",
+          code: "STRATEGY_CONFIG_ERROR",
+          message: `Failed to load strategy configuration: ${error instanceof Error ? error.message : String(error)}`,
+          details: error,
         });
-      } else {
-        // Validate strategy config values
-
-        if (
-          !strategyConfig.dropPercentage ||
-          strategyConfig.dropPercentage <= 0
-        ) {
-          errors.push({
-            code: "INVALID_DROP_PERCENTAGE",
-            message: `Invalid drop_percentage: ${strategyConfig.dropPercentage}`,
-          });
-        }
-
-        if (
-          !strategyConfig.risePercentage ||
-          strategyConfig.risePercentage <= 0
-        ) {
-          errors.push({
-            code: "INVALID_RISE_PERCENTAGE",
-            message: `Invalid rise_percentage: ${strategyConfig.risePercentage}`,
-          });
-        }
       }
-    } catch (error) {
-      errors.push({
-        code: "STRATEGY_CONFIG_ERROR",
-        message: `Failed to load strategy configuration: ${error instanceof Error ? error.message : String(error)}`,
-        details: error,
-      });
     }
 
     // Test API credentials

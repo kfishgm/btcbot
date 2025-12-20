@@ -26,23 +26,32 @@ export class CycleStateManager {
   private config: CycleStateManagerConfig;
   private currentState: CycleState | null = null;
   private tradingRules: TradingRules;
+  private strategyConfigId: string;
+  private timeframe: string;
 
   constructor(
     supabase: SupabaseClient<Database>,
     config: CycleStateManagerConfig,
     tradingRules: TradingRules,
+    strategyConfigId: string,
+    timeframe: string,
   ) {
     this.supabase = supabase;
     this.config = config;
     this.tradingRules = tradingRules;
+    this.strategyConfigId = strategyConfigId;
+    this.timeframe = timeframe;
   }
 
   async initialize(): Promise<void> {
     try {
-      // First, check if any cycle states exist
+      // First, check if any active cycle states exist for this strategy config
+      // Only load READY, HOLDING, or PAUSED cycles (skip COMPLETED)
       const { data: allStates, error: countError } = await this.supabase
         .from("cycle_state")
         .select("*")
+        .eq("strategy_config_id", this.strategyConfigId)
+        .in("status", ["READY", "HOLDING", "PAUSED"])
         .order("updated_at", { ascending: false })
         .limit(10);
 
@@ -57,11 +66,8 @@ export class CycleStateManager {
       // Handle multiple rows case
       if (allStates && allStates.length > 1) {
         logger.warn(
-          `Found ${allStates.length} cycle_state rows! Using most recent.`,
-          {
-            ids: allStates.map((s) => s.id),
-            updated_at: allStates.map((s) => s.updated_at),
-          },
+          `Found ${allStates.length} cycle_state rows for config ${this.strategyConfigId}. Using most recent.`,
+          { timeframe: this.timeframe },
         );
 
         // Use the most recently updated state
@@ -69,12 +75,6 @@ export class CycleStateManager {
         const isValid = await this.validateAndHandleState(existingState);
         if (isValid) {
           this.currentState = existingState;
-          logger.info("Recovered existing cycle state (from multiple)", {
-            id: existingState.id,
-            status: existingState.status,
-            capital_available: existingState.capital_available,
-            btc_accumulated: existingState.btc_accumulated,
-          });
         }
         return;
       }
@@ -82,15 +82,7 @@ export class CycleStateManager {
       // Single row case
       const existingState = allStates?.[0] || null;
 
-      logger.info("Queried cycle state from database", {
-        hasData: !!existingState,
-        hasId: existingState ? !!existingState.id : false,
-        id: existingState?.id,
-      });
-
       if (!existingState) {
-        // Check if this is truly a first-time startup
-        logger.info("No existing cycle state found - creating initial state");
         await this.createInitialState();
         return;
       }
@@ -99,28 +91,16 @@ export class CycleStateManager {
       const isValid = await this.validateAndHandleState(existingState);
       if (isValid) {
         this.currentState = existingState;
-
-        // Log what state we're resuming from
-        const stateDescription =
-          existingState.status === "READY" &&
-          existingState.btc_accumulated === 0
-            ? "Starting fresh cycle (READY state with no BTC)"
-            : existingState.status === "HOLDING"
-              ? `Resuming HOLDING state with ${existingState.btc_accumulated} BTC`
-              : `Resuming ${existingState.status} state`;
-
-        logger.info(`✅ Recovered existing cycle state: ${stateDescription}`, {
-          id: existingState.id,
-          status: existingState.status,
-          capital_available: existingState.capital_available,
-          btc_accumulated: existingState.btc_accumulated,
-          purchases_remaining: existingState.purchases_remaining,
-          sell_reference_price: existingState.sell_reference_price,
-          ath_reference_price: existingState.ath_reference_price,
-        });
+        logger.info(
+          `Recovered cycle state [${this.strategyConfigId}]: ${existingState.status} - ${existingState.btc_accumulated} BTC, ${existingState.purchases_remaining} purchases remaining`,
+          { timeframe: this.timeframe },
+        );
       }
     } catch (error) {
-      logger.error("Failed to initialize cycle state", { error });
+      logger.error("Failed to initialize cycle state", {
+        error,
+        timeframe: this.timeframe,
+      });
       throw error;
     }
   }
@@ -142,6 +122,7 @@ export class CycleStateManager {
       btc_dust: 0,
       ath_price: null,
       buy_amount: buyAmount,
+      strategy_config_id: this.strategyConfigId,
     };
 
     const { data, error } = await this.supabase
@@ -155,7 +136,10 @@ export class CycleStateManager {
     }
 
     this.currentState = data;
-    logger.info("Created initial cycle state", initialState);
+    logger.info(
+      `Created initial cycle state [${this.strategyConfigId}]: ${this.config.initialCapitalUSDT} USDT, ${this.config.maxPurchases} purchases`,
+      { timeframe: this.timeframe },
+    );
 
     await this.logBotEvent(
       "CYCLE_STATE_INITIALIZED",
@@ -169,7 +153,10 @@ export class CycleStateManager {
     const validationErrors = await this.getValidationErrors(state);
 
     if (validationErrors.length > 0) {
-      logger.error("Cycle state validation failed", { validationErrors });
+      logger.error("Cycle state validation failed", {
+        validationErrors,
+        timeframe: this.timeframe,
+      });
 
       await this.pauseWithCorruption(state, validationErrors);
       return false;
@@ -269,7 +256,7 @@ export class CycleStateManager {
         // If we can't get trading rules, fall back to a reasonable default
         logger.warn(
           "Could not fetch trading rules for validation, using fallback",
-          { error },
+          { error, timeframe: this.timeframe },
         );
         if (meaningfulBtc >= 0.00001 && !state.sell_reference_price) {
           errors.push({
@@ -322,7 +309,10 @@ export class CycleStateManager {
       .eq("id", state.id);
 
     if (updateError) {
-      logger.error("Failed to pause corrupted state", { error: updateError });
+      logger.error("Failed to pause corrupted state", {
+        error: updateError,
+        timeframe: this.timeframe,
+      });
     }
 
     await this.logBotEvent(
@@ -354,40 +344,37 @@ export class CycleStateManager {
       };
       await this.supabase.from("bot_events").insert(insertData);
     } catch (error) {
-      logger.error("Failed to log bot event", { error, eventType, message });
+      logger.error("Failed to log bot event", {
+        error,
+        eventType,
+        message,
+        timeframe: this.timeframe,
+      });
     }
   }
 
   async getCurrentState(): Promise<CycleState | null> {
     // Always fetch fresh from database to avoid stale cache issues
-    logger.debug("Fetching current state from database");
-
     const { data, error } = await this.supabase
       .from("cycle_state")
       .select("*")
+      .eq("strategy_config_id", this.strategyConfigId)
       .in("status", ["READY", "HOLDING", "PAUSED"])
       .order("updated_at", { ascending: false })
       .limit(1)
       .single();
 
     if (error) {
-      logger.error("Failed to fetch current state from database", { error });
+      logger.error(`Failed to fetch cycle state [${this.strategyConfigId}]`, {
+        error,
+        timeframe: this.timeframe,
+      });
       return null;
     }
 
     if (data) {
       // Update cache with fresh data
       this.currentState = data;
-      logger.debug("State loaded from database", {
-        id: data.id,
-        status: data.status,
-        btc_accumulated: data.btc_accumulated,
-        purchases_remaining: data.purchases_remaining,
-        buy_index: data.buy_index,
-        ath_price: data.ath_price,
-        sell_reference_price: data.sell_reference_price,
-        ath_reference_price: data.ath_reference_price,
-      });
     }
 
     return data;
@@ -399,12 +386,6 @@ export class CycleStateManager {
    */
   updateCachedState(newState: CycleState): void {
     this.currentState = newState;
-    logger.info("Updated cached state", {
-      btc_accumulated: newState.btc_accumulated,
-      sell_reference_price: newState.sell_reference_price,
-      ath_reference_price: newState.ath_reference_price,
-      status: newState.status,
-    });
   }
 
   async validateState(state: CycleState): Promise<boolean> {
@@ -431,15 +412,14 @@ export class CycleStateManager {
           .single();
 
         if (error) {
-          logger.error("Failed to update buy_amount", { error });
+          logger.error(
+            `Failed to update buy_amount [${this.strategyConfigId}]`,
+            { error, timeframe: this.timeframe },
+          );
           throw error;
         }
 
         this.currentState = data;
-        logger.info("Updated buy_amount due to configuration change", {
-          oldBuyAmount: data.buy_amount,
-          newBuyAmount,
-        });
       }
     }
   }
@@ -472,26 +452,23 @@ export class CycleStateManager {
       .eq("id", previousCycle.id);
 
     if (updateError) {
-      logger.error("Failed to mark previous cycle as completed", {
-        cycleId: previousCycle.id,
-        error: updateError,
-      });
+      logger.error(
+        `Failed to mark previous cycle as completed [${this.strategyConfigId}]`,
+        { error: updateError, timeframe: this.timeframe },
+      );
       throw new Error(
         `Failed to complete previous cycle: ${updateError.message}`,
       );
     }
 
-    // Get active strategy config
+    // Get strategy config for this cycle
     const { data: strategyConfig, error: configError } = await this.supabase
       .from("strategy_config")
       .select("*")
-      .eq("is_active", true)
+      .eq("id", this.strategyConfigId)
       .single();
 
     if (configError || !strategyConfig) {
-      logger.error("No active strategy configuration found", {
-        error: configError,
-      });
       throw new Error("No active strategy configuration found");
     }
 
@@ -530,18 +507,17 @@ export class CycleStateManager {
       .single();
 
     if (insertError || !newCycle) {
-      logger.error("Failed to create new cycle", { error: insertError });
+      logger.error(`Failed to create new cycle [${this.strategyConfigId}]`, {
+        error: insertError,
+        timeframe: this.timeframe,
+      });
       throw new Error(`Failed to create new cycle: ${insertError?.message}`);
     }
 
-    logger.info("New cycle created after completion", {
-      previousCycleId: previousCycle.id,
-      newCycleId: newCycle.id,
-      carryOverCapital: completionData.carryOverCapital,
-      carryOverDust: completionData.carryOverDust,
-      finalProfit: completionData.finalProfit,
-      strategyConfigId: strategyConfig.id,
-    });
+    logger.info(
+      `New cycle created [${this.strategyConfigId}]: profit ${completionData.finalProfit}, carryover ${completionData.carryOverCapital} USDT`,
+      { timeframe: this.timeframe },
+    );
 
     // Update cached state
     this.currentState = newCycle;

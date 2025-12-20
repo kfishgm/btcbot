@@ -7,6 +7,7 @@ import { BuyTriggerDetector } from "../../src/cycle/buy-trigger-detector";
 import { BuyAmountCalculator } from "../../src/cycle/buy-amount-calculator";
 import { StateTransactionManager } from "../../src/cycle/state-transaction-manager";
 import type { Database } from "../../types/supabase";
+import type { StrategyConfig } from "../../src/config/strategy-config-loader";
 import { Decimal } from "decimal.js";
 import type {
   BinanceOrder,
@@ -160,15 +161,35 @@ describe("Buy Order Flow Integration", () => {
 
     tradingRules = new TradingRules(binanceClient);
 
+    buyAmountCalculator = new BuyAmountCalculator();
+
+    const mockStrategyConfig: StrategyConfig = {
+      id: "test-config",
+      timeframe: "15m",
+      dropPercentage: 0.02,
+      risePercentage: 0.03,
+      maxPurchases: 5,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 300,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 25,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
+
     buyOrderPlacer = new BuyOrderPlacer(
       binanceClient,
       tradingRules,
       mockSupabase,
       "BTCUSDT",
+      mockStrategyConfig,
     );
 
-    buyAmountCalculator = new BuyAmountCalculator();
-    buyTriggerDetector = new BuyTriggerDetector(buyAmountCalculator);
+    buyTriggerDetector = new BuyTriggerDetector(
+      buyAmountCalculator,
+      mockStrategyConfig,
+    );
 
     // CycleStateManager removed as it's not used in tests
 
@@ -288,8 +309,13 @@ describe("Buy Order Flow Integration", () => {
       ).mockResolvedValueOnce(mockTrades);
 
       // Place the order
+      // Since shouldBuy is true, buyAmount must be defined
+      if (triggerResult.buyAmount === undefined) {
+        throw new Error("buyAmount should be defined when shouldBuy is true");
+      }
+
       const orderResult = await buyOrderPlacer.placeOrder(
-        new Decimal(triggerResult.buyAmount!),
+        new Decimal(triggerResult.buyAmount),
         new Decimal(candle.close),
         0.003, // slippage
       );

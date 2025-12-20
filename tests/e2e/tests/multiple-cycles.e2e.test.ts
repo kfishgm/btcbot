@@ -183,7 +183,7 @@ describe("Multiple Cycles E2E", () => {
         if (
           (currentState.status === "HOLDING" ||
             currentState.status === "BUYING") &&
-          currentState.btc_accumulated! > 0
+          (currentState.btc_accumulated ?? 0) > 0
         ) {
           const btcBalance = await mocks.binance.getBalance("BTC");
           const usdtBalance = await mocks.binance.getBalance("USDT");
@@ -228,11 +228,12 @@ describe("Multiple Cycles E2E", () => {
           if (sellTrigger.shouldSell) {
             console.log(`Cycle ${currentCycle}: SELL at ${currentPrice}`);
 
+            const btcAccumulated = currentState.btc_accumulated ?? 0;
             const sellResult = await mocks.binance.createOrder({
               symbol: "BTCUSDT",
               side: "SELL",
               type: "MARKET",
-              quantity: currentState.btc_accumulated!,
+              quantity: btcAccumulated,
             });
 
             expect(sellResult.status).toBe("FILLED");
@@ -240,7 +241,7 @@ describe("Multiple Cycles E2E", () => {
             // Calculate cycle results
             const endCapital =
               (currentState.capital_available || 0) +
-              currentState.btc_accumulated! * currentPrice * 0.999;
+              btcAccumulated * currentPrice * 0.999;
             const profit = endCapital - cycleStartCapital;
 
             cycleResults.push({
@@ -502,13 +503,17 @@ describe("Multiple Cycles E2E", () => {
       usdtSpot: parseFloat(usdtBalance?.free || "0"),
     };
 
+    if (!partialState) {
+      throw new Error("Failed to get partial state for sell trigger check");
+    }
+
     const sellTrigger = await components.sellTriggerDetector.checkSellTrigger(
       {
         status: "HOLDING",
-        sell_reference_price: partialState!.sell_reference_price,
-        purchases_remaining: partialState!.purchases_remaining,
-        capital_available: partialState!.capital_available,
-        btc_accumulated: partialState!.btc_accumulated || 0,
+        sell_reference_price: partialState.sell_reference_price,
+        purchases_remaining: partialState.purchases_remaining,
+        capital_available: partialState.capital_available,
+        btc_accumulated: partialState.btc_accumulated || 0,
       },
       {
         risePercentage: 0.005,

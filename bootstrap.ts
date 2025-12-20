@@ -10,6 +10,7 @@
 import { config as dotenvConfig } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { MainOrchestrator } from "./src/app/main-orchestrator.js";
+import { OrchestratorPool } from "./src/app/orchestrator-pool.js";
 import { getConfig } from "./src/config/index.js";
 import { logger } from "./src/utils/logger.js";
 
@@ -37,7 +38,10 @@ import { SellOrderPlacer } from "./src/order/sell-order-placer.js";
 import { ConnectionManager } from "./src/database/connection-manager.js";
 import { EventLogger } from "./src/monitoring/event-logger.js";
 import { DiscordNotifier } from "./src/notifications/discord-notifier.js";
-import { StrategyConfigLoader } from "./src/config/strategy-config-loader.js";
+import {
+  StrategyConfigLoader,
+  type StrategyConfig,
+} from "./src/config/strategy-config-loader.js";
 
 import type { Database } from "./types/supabase.js";
 
@@ -45,7 +49,36 @@ import type { Database } from "./types/supabase.js";
 dotenvConfig({ path: ".env.local" });
 dotenvConfig({ path: ".env" });
 
-async function createDependencies() {
+// Increase max listeners for multi-config support (7 orchestrators + pool + system handlers)
+process.setMaxListeners(20);
+
+/**
+ * Shared dependencies used across all orchestrators
+ */
+interface SharedDependencies {
+  appConfig: ReturnType<typeof getConfig>;
+  supabase: ReturnType<typeof createClient<Database>>;
+  binanceClient: BinanceClient;
+  strategyConfigLoader: StrategyConfigLoader;
+  connectionManager: ConnectionManager;
+  eventLogger: EventLogger;
+  balanceManager: BalanceManager;
+  stateTransactionManager: StateTransactionManager;
+  referencePriceCalculator: ReferencePriceCalculator;
+  buyAmountCalculator: BuyAmountCalculator;
+  tradingRules: TradingRules;
+  commissionManager: CommissionManager;
+  discordNotifier: DiscordNotifier | undefined;
+  baseAssetPrecision: number;
+  quoteAssetPrecision: number;
+  stepSize: number;
+  tickSize: number;
+}
+
+/**
+ * Create shared dependencies that are used by all orchestrators
+ */
+async function createSharedDependencies(): Promise<SharedDependencies> {
   const appConfig = getConfig();
 
   const supabase = createClient<Database>(
@@ -60,11 +93,6 @@ async function createDependencies() {
   });
 
   const strategyConfigLoader = new StrategyConfigLoader();
-  const strategyConfig = await strategyConfigLoader.loadConfig();
-
-  if (!strategyConfig || !strategyConfig.isActive) {
-    throw new Error("No active strategy configuration found");
-  }
 
   const connectionManager = new ConnectionManager({
     url: appConfig.supabase.url,
@@ -84,52 +112,9 @@ async function createDependencies() {
   // Create TradingRules instance early so it can be shared
   const tradingRules = new TradingRules(binanceClient);
 
-  const cycleStateManager = new CycleStateManager(
-    supabase,
-    {
-      initialCapitalUSDT: strategyConfig.initialCapitalUsdt,
-      maxPurchases: strategyConfig.maxPurchases,
-      minBuyUSDT: strategyConfig.minBuyUsdt,
-    },
-    tradingRules,
-  );
-
-  const strategyPauseMechanism = new StrategyPauseMechanism(
-    supabase,
-    cycleStateManager,
-  );
-
-  const historicalCandleManager = new HistoricalCandleManager(
-    binanceClient,
-    "BTCUSDT",
-    strategyConfig.timeframe,
-    {
-      maxCandles: strategyConfig.athWindow,
-    },
-  );
-
-  const webSocketManager = new WebSocketManager({
-    symbol: "BTCUSDT",
-    timeframe: strategyConfig.timeframe,
-    testnet: appConfig.binance.testnet,
-  });
-  const candleProcessor = new CandleProcessor();
-
-  // Connect candle processor to WebSocket manager
-  candleProcessor.attachToWebSocketManager(webSocketManager);
-
   // Initialize commission manager for fee tracking
   const commissionManager = new CommissionManager(binanceClient);
   await commissionManager.initialize();
-
-  const buyTriggerDetector = new BuyTriggerDetector(
-    buyAmountCalculator,
-    tradingRules,
-  );
-  const sellTriggerDetector = new SellTriggerDetector(
-    tradingRules,
-    commissionManager,
-  );
 
   // Get trading rules and exchange info for BTCUSDT
   const btcRules = await tradingRules.getRules("BTCUSDT");
@@ -153,12 +138,6 @@ async function createDependencies() {
 
   // Set precision in buy amount calculator
   buyAmountCalculator.setQuotePrecision(quoteAssetPrecision);
-
-  // Set precision in sell trigger detector
-  sellTriggerDetector.setTradingPrecision(
-    baseAssetPrecision,
-    quoteAssetPrecision,
-  );
 
   // Enable auto-refresh of trading rules every 4 hours
   tradingRules.startAutoRefresh(
@@ -186,19 +165,10 @@ async function createDependencies() {
 
   logger.info("Commission rates auto-refresh enabled (every 4 hours)");
 
-  const buyOrderPlacer = new BuyOrderPlacer(
-    binanceClient,
-    tradingRules,
-    supabase,
-    "BTCUSDT",
-  );
-
-  const sellOrderPlacer = new SellOrderPlacer(
-    binanceClient,
-    tradingRules,
-    supabase,
-    "BTCUSDT",
-  );
+  // Enable Discord logging if webhook URL is provided
+  if (process.env.DISCORD_LOGS_WEBHOOK_URL) {
+    logger.enableDiscordLogging(process.env.DISCORD_LOGS_WEBHOOK_URL);
+  }
 
   let discordNotifier: DiscordNotifier | undefined;
   if (process.env.DISCORD_WEBHOOK_URL) {
@@ -207,35 +177,147 @@ async function createDependencies() {
     });
   }
 
+  return {
+    appConfig,
+    supabase,
+    binanceClient,
+    strategyConfigLoader,
+    connectionManager,
+    eventLogger,
+    balanceManager,
+    stateTransactionManager,
+    referencePriceCalculator,
+    buyAmountCalculator,
+    tradingRules,
+    commissionManager,
+    discordNotifier,
+    baseAssetPrecision,
+    quoteAssetPrecision,
+    stepSize,
+    tickSize,
+  };
+}
+
+/**
+ * Create an orchestrator for a specific strategy config
+ */
+async function createOrchestratorForConfig(
+  strategyConfig: StrategyConfig,
+  shared: SharedDependencies,
+): Promise<MainOrchestrator> {
+  const {
+    appConfig,
+    supabase,
+    binanceClient,
+    tradingRules,
+    commissionManager,
+  } = shared;
+
+  // Create config-specific cycle state manager
+  const cycleStateManager = new CycleStateManager(
+    supabase,
+    {
+      initialCapitalUSDT: strategyConfig.initialCapitalUsdt,
+      maxPurchases: strategyConfig.maxPurchases,
+      minBuyUSDT: strategyConfig.minBuyUsdt,
+    },
+    tradingRules,
+    strategyConfig.id, // Pass strategy config ID for filtering
+    strategyConfig.timeframe, // Pass timeframe for logging context
+  );
+
+  const strategyPauseMechanism = new StrategyPauseMechanism(
+    supabase,
+    cycleStateManager,
+  );
+
+  const historicalCandleManager = new HistoricalCandleManager(
+    binanceClient,
+    "BTCUSDT",
+    strategyConfig.timeframe,
+    {
+      maxCandles: strategyConfig.athWindow,
+    },
+  );
+
+  const webSocketManager = new WebSocketManager({
+    symbol: "BTCUSDT",
+    timeframe: strategyConfig.timeframe,
+    testnet: appConfig.binance.testnet,
+  });
+
+  const candleProcessor = new CandleProcessor({
+    timeframe: strategyConfig.timeframe,
+  });
+  candleProcessor.attachToWebSocketManager(webSocketManager);
+
+  // Add error handler to WebSocketManager
+  webSocketManager.on("error", (error: { message: string; code?: number }) => {
+    logger.error("WebSocket error", {
+      message: error.message,
+      code: error.code,
+      configId: strategyConfig.id,
+      timeframe: strategyConfig.timeframe,
+    });
+  });
+
+  const buyTriggerDetector = new BuyTriggerDetector(
+    shared.buyAmountCalculator,
+    strategyConfig,
+    tradingRules,
+  );
+
+  const sellTriggerDetector = new SellTriggerDetector(
+    strategyConfig,
+    tradingRules,
+    commissionManager,
+  );
+
+  // Set precision in sell trigger detector
+  sellTriggerDetector.setTradingPrecision(
+    shared.baseAssetPrecision,
+    shared.quoteAssetPrecision,
+  );
+
+  const buyOrderPlacer = new BuyOrderPlacer(
+    binanceClient,
+    tradingRules,
+    supabase,
+    "BTCUSDT",
+    strategyConfig,
+  );
+
+  const sellOrderPlacer = new SellOrderPlacer(
+    binanceClient,
+    tradingRules,
+    supabase,
+    "BTCUSDT",
+    strategyConfig,
+  );
+
   const buyOrderStateUpdater = new BuyOrderStateUpdater(
     supabase,
-    discordNotifier,
+    shared.discordNotifier,
     commissionManager,
-    stepSize,
-    baseAssetPrecision,
-    tickSize,
+    shared.stepSize,
+    shared.baseAssetPrecision,
+    shared.tickSize,
+    strategyConfig,
   );
+
   const sellOrderStateUpdater = new SellOrderStateUpdater(
     supabase,
     {
       maxPurchases: strategyConfig.maxPurchases,
     },
-    discordNotifier,
+    shared.discordNotifier,
     tradingRules,
     commissionManager,
+    shared.baseAssetPrecision,
+    strategyConfig,
   );
 
-  // Add error handler to WebSocketManager to prevent unhandled errors
-  webSocketManager.on("error", (error: { message: string; code?: number }) => {
-    logger.error("WebSocket error", {
-      message: error.message,
-      code: error.code,
-      module: "bootstrap",
-    });
-    // Don't crash on WebSocket errors - let the manager handle reconnection
-  });
-
-  return {
+  return new MainOrchestrator({
     supabaseClient: supabase,
     binanceClient,
     webSocketManager,
@@ -249,48 +331,88 @@ async function createDependencies() {
     buyOrderStateUpdater,
     sellOrderStateUpdater,
     strategyPauseMechanism,
-    discordNotifier,
-    eventLogger,
-    balanceManager,
-    connectionManager,
-    stateTransactionManager,
-    referencePriceCalculator,
-    buyAmountCalculator,
-    strategyConfigLoader,
+    discordNotifier: shared.discordNotifier,
+    eventLogger: shared.eventLogger,
+    balanceManager: shared.balanceManager,
+    connectionManager: shared.connectionManager,
+    stateTransactionManager: shared.stateTransactionManager,
+    referencePriceCalculator: shared.referencePriceCalculator,
+    buyAmountCalculator: shared.buyAmountCalculator,
+    strategyConfig, // Pass config directly
     enableHealthMonitoring: true,
     healthCheckInterval: 60000,
     memoryThresholdMB: 500,
-  };
+  });
 }
 
 async function main() {
-  let orchestrator: MainOrchestrator | null = null;
+  let pool: OrchestratorPool | null = null;
 
   try {
-    console.log("Starting BTC Trading Bot...");
+    console.log("🚀 Starting BTC Trading Bot (Multi-Config)...");
 
-    const dependencies = await createDependencies();
-    orchestrator = new MainOrchestrator(dependencies);
+    // Create shared dependencies
+    const shared = await createSharedDependencies();
 
-    await orchestrator.initialize();
-    await orchestrator.start();
+    // Load all active strategy configs with validation
+    const usdtBalance = await shared.balanceManager.getBalance("USDT");
 
-    console.log("BTC Trading Bot started successfully!");
+    // Use INITIAL_CAPITAL_USDT from .env as the capital pool for percentage calculations
+    const capitalPool = parseFloat(process.env.INITIAL_CAPITAL_USDT || "3000");
 
-    process.on("SIGINT", async () => {
-      console.log("\nShutting down gracefully...");
-      if (orchestrator) await orchestrator.stop();
+    // Validate we have enough balance for the capital pool
+    const actualBalance = usdtBalance.total.toNumber();
+    if (capitalPool > actualBalance) {
+      throw new Error(
+        `Capital pool ($${capitalPool}) exceeds available USDT balance ($${actualBalance.toFixed(2)})`,
+      );
+    }
+
+    const strategyConfigs =
+      await shared.strategyConfigLoader.loadAllActiveConfigs(capitalPool);
+
+    console.log(
+      `✅ Loaded ${strategyConfigs.length} active strategy config(s)`,
+    );
+    for (const config of strategyConfigs) {
+      console.log(
+        `   - ${config.timeframe}: drop=${config.dropPercentage * 100}%, rise=${config.risePercentage * 100}%, capital=$${config.initialCapitalUsdt}`,
+      );
+    }
+
+    // Create orchestrator pool
+    pool = new OrchestratorPool(strategyConfigs);
+
+    // Create and register an orchestrator for each config
+    for (const config of strategyConfigs) {
+      const orchestrator = await createOrchestratorForConfig(config, shared);
+      pool.registerOrchestrator(config.id, orchestrator);
+    }
+
+    // Initialize and start all orchestrators
+    await pool.initializeAll();
+    await pool.startAll();
+
+    console.log(
+      `✅ BTC Trading Bot started successfully with ${pool.getCount()} active config(s)!`,
+    );
+
+    // Graceful shutdown handlers
+    const shutdown = async () => {
+      console.log("\n🛑 Shutting down gracefully...");
+      if (pool) {
+        await pool.stopAll();
+      }
       process.exit(0);
-    });
+    };
 
-    process.on("SIGTERM", async () => {
-      console.log("\nShutting down gracefully...");
-      if (orchestrator) await orchestrator.stop();
-      process.exit(0);
-    });
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   } catch (error) {
-    console.error("Failed to start bot:", error);
-    if (orchestrator) await orchestrator.stop();
+    console.error("❌ Failed to start bot:", error);
+    if (pool) {
+      await pool.stopAll();
+    }
     process.exit(1);
   }
 }

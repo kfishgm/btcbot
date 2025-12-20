@@ -4,6 +4,7 @@ import { BinanceClient } from "../../src/exchange/binance-client";
 import { TradingRules } from "../../src/exchange/trading-rules";
 import { Decimal } from "decimal.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { StrategyConfig } from "../../src/config/strategy-config-loader";
 import type {
   SymbolTradingRules,
   BinanceOrder,
@@ -52,7 +53,24 @@ describe("BuyOrderPlacer - Retry Logic", () => {
   let mockSupabaseClient: SupabaseClient;
   let mockBinanceClient: MockBinanceClient;
   let mockTradingRules: MockTradingRules;
+  let mockStrategyConfig: StrategyConfig;
   beforeEach(() => {
+    // Create mock strategy config
+    mockStrategyConfig = {
+      id: "test-config",
+      timeframe: "15m",
+      dropPercentage: 0.02,
+      risePercentage: 0.03,
+      maxPurchases: 5,
+      minBuyUsdt: 10,
+      initialCapitalUsdt: 500,
+      slippageBuyPct: 0.003,
+      slippageSellPct: 0.003,
+      athWindow: 25,
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
+
     // Create mock Supabase client
     mockSupabaseClient = {
       from: jest.fn(() => ({
@@ -106,6 +124,7 @@ describe("BuyOrderPlacer - Retry Logic", () => {
       mockTradingRules as unknown as TradingRules,
       mockSupabaseClient,
       "BTCUSDT",
+      mockStrategyConfig,
     );
 
     // Mock the private sleep method to eliminate delays in tests

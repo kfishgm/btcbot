@@ -6,6 +6,7 @@ export interface CandleProcessorOptions {
   maxTimestampDrift?: number;
   maxCacheSize?: number;
   logger?: (message: string, error: Error) => void;
+  timeframe?: string;
 }
 
 export interface CandleProcessorStats {
@@ -30,14 +31,18 @@ export class CandleProcessor extends EventEmitter {
   private stats: CandleProcessorStats;
   private processedCandles: Map<string, CandleData>;
   private processingTimes: number[] = [];
+  private timeframe: string;
 
   constructor(options: CandleProcessorOptions = {}) {
     super();
-    this.options = {
+    this.timeframe = options.timeframe ?? "unknown";
+    const requiredOptions: Required<CandleProcessorOptions> = {
       maxTimestampDrift: options.maxTimestampDrift ?? 60000, // 60 seconds default
       maxCacheSize: options.maxCacheSize ?? 1000,
       logger: options.logger ?? (() => {}), // No-op by default
+      timeframe: this.timeframe,
     };
+    this.options = requiredOptions;
 
     this.stats = {
       messagesProcessed: 0,
@@ -132,11 +137,14 @@ export class CandleProcessor extends EventEmitter {
     if (k.x === true) {
       const volume = parseFloat(k.v);
       if (volume === 0) {
-        logger.warn("Zero volume detected for closed candle", {
-          symbol: k.s,
-          timestamp: new Date(k.t).toISOString(),
-          module: "CandleProcessor",
-        });
+        logger.warn(
+          `[${this.timeframe}] Zero volume detected for closed candle`,
+          {
+            symbol: k.s,
+            timestamp: new Date(k.t).toISOString(),
+            timeframe: this.timeframe,
+          },
+        );
         // Continue processing - zero volume can happen on testnet
       }
     }

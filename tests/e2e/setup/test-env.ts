@@ -62,9 +62,9 @@ validateTestEnvironment();
 // Export for use in tests
 export const TEST_CONFIG = {
   initialCapitalUsdt: parseFloat(process.env.INITIAL_CAPITAL_USDT || "1000"),
-  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  binanceApiKey: process.env.BINANCE_API_KEY!,
-  binanceApiSecret: process.env.BINANCE_API_SECRET!,
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL as string,
+  supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY as string,
+  binanceApiKey: process.env.BINANCE_API_KEY as string,
+  binanceApiSecret: process.env.BINANCE_API_SECRET as string,
   isTestnet: process.env.BINANCE_TESTNET === "true",
 };

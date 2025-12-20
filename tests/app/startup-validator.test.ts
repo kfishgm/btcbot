@@ -101,6 +101,8 @@ describe("StartupValidator", () => {
         minBuyUSDT: 10,
       },
       mockTradingRules,
+      "test-config-id",
+      "1h",
     );
     strategyConfigLoader = new StrategyConfigLoader();
 
