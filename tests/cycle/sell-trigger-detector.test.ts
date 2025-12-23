@@ -28,6 +28,7 @@ describe("SellTriggerDetector", () => {
       athWindow: 25,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic",
     };
 
     detector = new SellTriggerDetector(mockStrategyConfig);

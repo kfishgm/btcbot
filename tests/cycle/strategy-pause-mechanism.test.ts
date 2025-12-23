@@ -118,6 +118,8 @@ describe("StrategyPauseMechanism", () => {
     strategy_config_id: null,
     updated_at: null,
     version: 1,
+    p_last_buy: null,
+    state_version: 2,
     ...overrides,
   });
 

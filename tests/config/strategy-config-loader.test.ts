@@ -182,8 +182,11 @@ describe("StrategyConfigLoader", () => {
         initial_capital_usdt: 300,
         slippage_buy_pct: 0.003,
         slippage_sell_pct: 0.003,
+        ath_window: 25,
         is_active: true,
         updated_at: "2025-01-01T00:00:00Z",
+        buy_mode: "arithmetic",
+        capital_allocation_pct: null,
       };
 
       // Mock the return for order() chain (final method that returns Promise)
@@ -207,8 +210,11 @@ describe("StrategyConfigLoader", () => {
         initialCapitalUsdt: 300,
         slippageBuyPct: 0.003,
         slippageSellPct: 0.003,
+        athWindow: 25,
         isActive: true,
         updatedAt: "2025-01-01T00:00:00Z",
+        buyMode: "arithmetic",
+        capitalAllocationPct: undefined, // null from DB converts to undefined in JS
       });
     });
 

@@ -64,6 +64,7 @@ export interface TestOrchestratorConfig {
   risePercentage?: number; // Sell trigger rise percentage (default: 0.005)
   maxPurchases?: number; // Max grid purchases (default: 10)
   skipValidation?: boolean; // Skip startup validation (default: true for tests)
+  buyMode?: "arithmetic" | "geom_modified"; // Buy mode (default: "arithmetic")
 }
 
 export interface TestOrchestratorResult {
@@ -93,6 +94,7 @@ export async function createTestOrchestrator(
   const dropPercentage = config.dropPercentage ?? 0.003;
   const risePercentage = config.risePercentage ?? 0.005;
   const maxPurchases = config.maxPurchases ?? 10;
+  const buyMode = config.buyMode ?? "arithmetic";
 
   // Create shared candle manager
   const candleManager = new MockCandleManager(config.scenario.candles);
@@ -130,6 +132,7 @@ export async function createTestOrchestrator(
     slippage_sell_pct: 0.003,
     ath_window: 25,
     is_active: true,
+    buy_mode: buyMode,
   });
 
   // Create real production components with mocked services
@@ -153,6 +156,7 @@ export async function createTestOrchestrator(
     athWindow: config.historicalCandles || 25,
     isActive: true,
     updatedAt: new Date().toISOString(),
+    buyMode: buyMode,
   };
 
   const connectionManager = new ConnectionManager({

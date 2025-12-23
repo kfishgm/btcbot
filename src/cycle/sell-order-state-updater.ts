@@ -173,6 +173,14 @@ export class SellOrderStateUpdater extends EventEmitter {
                 inline: true,
               },
               {
+                name: "🔧 Mode",
+                value:
+                  this.strategyConfig?.buyMode === "geom_modified"
+                    ? "Geometric Modified"
+                    : "Arithmetic",
+                inline: true,
+              },
+              {
                 name: "💰 Sell Price",
                 value: `$${orderResult.avgPrice.toFixed(2)}`,
                 inline: false,
@@ -321,6 +329,14 @@ export class SellOrderStateUpdater extends EventEmitter {
             {
               name: "⏱️ Timeframe",
               value: this.strategyConfig?.timeframe || "Unknown",
+              inline: true,
+            },
+            {
+              name: "🔧 Mode",
+              value:
+                this.strategyConfig?.buyMode === "geom_modified"
+                  ? "Geometric Modified"
+                  : "Arithmetic",
               inline: true,
             },
             {

@@ -1181,7 +1181,7 @@ describe("HistoricalCandleManager", () => {
       manager.addCandle(zeroVolumeCandle);
 
       expect(warnSpy).toHaveBeenCalledWith(
-        "Zero volume candle detected",
+        expect.stringContaining("Zero volume candle detected"),
         expect.objectContaining({
           symbol: testSymbol,
         }),

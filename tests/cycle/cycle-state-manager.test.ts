@@ -48,6 +48,8 @@ describe("CycleStateManager", () => {
     final_profit: null,
     previous_cycle_id: null,
     strategy_config_id: null,
+    p_last_buy: null,
+    state_version: 2,
     ...overrides,
   });
 

@@ -63,6 +63,7 @@ describe("Buy Anchor Price End-to-End", () => {
       athWindow: 25,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic",
     };
 
     buyOrderUpdater = new BuyOrderStateUpdater(supabase);
@@ -94,6 +95,8 @@ describe("Buy Anchor Price End-to-End", () => {
       buy_grid: null, // No grid yet
       buy_index: 0,
       version: 1,
+      p_last_buy: null,
+      state_version: 2,
     };
   });
 

@@ -1,14 +1,9 @@
--- Fix buy_grid null handling in update_state_atomic function
--- This fixes the error "cannot extract elements from a scalar" when buy_grid is set to null
-
+-- Migration: Separate Reference Prices - Part 3: Update function
 CREATE OR REPLACE FUNCTION update_state_atomic(
     p_bot_id UUID,
     p_updates JSONB,
     p_expected_version INTEGER DEFAULT NULL
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-AS $$
+) RETURNS JSONB AS $$
 DECLARE
     v_current_version INTEGER;
     v_result RECORD;
@@ -48,10 +43,14 @@ BEGIN
         btc_accumulated = COALESCE((p_updates->>'btc_accumulated')::DECIMAL, btc_accumulated),
         cost_accum_usdt = COALESCE((p_updates->>'cost_accum_usdt')::DECIMAL, cost_accum_usdt),
         btc_accum_net = COALESCE((p_updates->>'btc_accum_net')::DECIMAL, btc_accum_net),
+        btc_dust = COALESCE((p_updates->>'btc_dust')::DECIMAL, btc_dust),
         capital_available = COALESCE((p_updates->>'capital_available')::DECIMAL, capital_available),
         purchases_remaining = COALESCE((p_updates->>'purchases_remaining')::INTEGER, purchases_remaining),
-        reference_price = COALESCE((p_updates->>'reference_price')::DECIMAL, reference_price),
+        -- Handle both reference prices separately
+        ath_reference_price = COALESCE((p_updates->>'ath_reference_price')::DECIMAL, ath_reference_price),
+        sell_reference_price = COALESCE((p_updates->>'sell_reference_price')::DECIMAL, sell_reference_price),
         ath_price = COALESCE((p_updates->>'ath_price')::DECIMAL, ath_price),
+        buy_anchor_price = COALESCE((p_updates->>'buy_anchor_price')::DECIMAL, buy_anchor_price),
         status = COALESCE(p_updates->>'status', status),
         buy_index = COALESCE((p_updates->>'buy_index')::INTEGER, buy_index),
         buy_grid = CASE
@@ -67,8 +66,4 @@ BEGIN
     -- Return the updated state as JSONB
     RETURN to_jsonb(v_result);
 END;
-$$;
-
--- Add comment explaining the fix
-COMMENT ON FUNCTION update_state_atomic(UUID, JSONB, INTEGER) IS
-'Atomically updates cycle state with optimistic locking. Fixed to properly handle null buy_grid values during cycle resets.';
+$$ LANGUAGE plpgsql;

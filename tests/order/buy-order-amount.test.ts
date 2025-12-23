@@ -55,6 +55,7 @@ describe("Buy Order Amount Issues", () => {
       athWindow: 25,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic" as const,
     };
 
     mockBinanceClient = {
@@ -109,6 +110,7 @@ describe("Buy Order Amount Issues", () => {
       athWindow: 25,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic" as const,
     };
 
     buyOrderPlacer = new BuyOrderPlacer(

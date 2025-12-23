@@ -46,6 +46,8 @@ describe("SellOrderStateUpdater", () => {
     strategy_config_id: null,
     updated_at: new Date().toISOString(),
     version: 1,
+    p_last_buy: null,
+    state_version: 2,
     ...overrides,
   });
 

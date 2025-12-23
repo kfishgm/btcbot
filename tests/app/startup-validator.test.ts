@@ -120,6 +120,7 @@ describe("StartupValidator", () => {
       athWindow: 20,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic",
     });
 
     validator = new StartupValidator({

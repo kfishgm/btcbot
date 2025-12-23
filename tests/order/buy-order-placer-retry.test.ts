@@ -69,6 +69,7 @@ describe("BuyOrderPlacer - Retry Logic", () => {
       athWindow: 25,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic",
     };
 
     // Create mock Supabase client

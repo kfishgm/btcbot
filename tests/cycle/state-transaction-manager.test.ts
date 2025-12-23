@@ -58,6 +58,8 @@ describe("StateTransactionManager", () => {
     buy_grid: null,
     buy_index: 0,
     version: 1,
+    p_last_buy: null,
+    state_version: 2,
     ...overrides,
   });
 

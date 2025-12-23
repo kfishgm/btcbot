@@ -100,6 +100,9 @@ export class MainOrchestrator extends EventEmitter {
   private componentRefs: WeakMap<object, boolean> = new WeakMap();
   private errorObjects: Error[] = [];
   private maxErrorObjects = 100;
+  private staleCandleAlertSent = false;
+  private recoveryAttempts = 0;
+  private maxRecoveryAttempts = 3;
 
   constructor(config: OrchestratorConfig) {
     super();
@@ -596,6 +599,8 @@ export class MainOrchestrator extends EventEmitter {
               btc_dust: workingState.btc_dust || 0,
               buy_grid: workingState.buy_grid,
               buy_index: workingState.buy_index || 0,
+              // GeomModified-only: p_last_buy for dynamic threshold anchoring
+              p_last_buy: workingState.p_last_buy,
             },
             {
               dropPercentage: this.strategyConfig?.dropPercentage || 0.003,
@@ -666,6 +671,7 @@ export class MainOrchestrator extends EventEmitter {
                 this.strategyConfig?.maxPurchases,
                 this.strategyConfig?.risePercentage,
                 this.strategyConfig?.dropPercentage,
+                this.strategyConfig?.buyMode,
               );
 
             logger.info(
@@ -696,6 +702,11 @@ export class MainOrchestrator extends EventEmitter {
   }
 
   private setupEventListeners(): void {
+    // Remove existing listeners first to allow safe re-attachment
+    // This enables recovery after connectivity issues
+    this.config.candleProcessor.removeAllListeners("candle_closed");
+    this.config.webSocketManager.removeAllListeners("reconnected");
+
     // Listen for candle close events
     this.config.candleProcessor.on("candle_closed", (candle: CandleData) => {
       this.onCandleClose(candle).catch((error) => {
@@ -706,17 +717,146 @@ export class MainOrchestrator extends EventEmitter {
     // Listen for WebSocket reconnection
     this.config.webSocketManager.on("reconnected", () => {
       logger.info("WebSocket reconnected, waiting for next real-time candle");
+      // Reset stale alert flag on successful reconnection
+      this.staleCandleAlertSent = false;
+      this.recoveryAttempts = 0;
     });
 
-    // Setup graceful shutdown handlers
+    // Setup graceful shutdown handlers (only once)
+    // Note: process event handlers should not be duplicated
+    process.off("SIGTERM", this.boundShutdownHandler);
+    process.off("SIGINT", this.boundShutdownHandler);
     process.on("SIGTERM", () => this.handleShutdown("SIGTERM"));
     process.on("SIGINT", () => this.handleShutdown("SIGINT"));
   }
+
+  // Handler reference for cleanup
+  private boundShutdownHandler = () => {};
 
   private removeAllEventListeners(): void {
     this.config.candleProcessor.removeAllListeners();
     this.config.webSocketManager.removeAllListeners();
     this.removeAllListeners();
+  }
+
+  /**
+   * Attempt to recover from stale candle processing
+   * This reconnects WebSocket and re-attaches event listeners
+   */
+  private async attemptRecovery(): Promise<void> {
+    if (this.recoveryAttempts >= this.maxRecoveryAttempts) {
+      logger.error(
+        `Max recovery attempts (${this.maxRecoveryAttempts}) reached. Manual intervention required.`,
+        { timeframe: this.strategyConfig.timeframe },
+      );
+
+      // Send critical Discord alert
+      if (this.config.discordNotifier) {
+        try {
+          await this.config.discordNotifier.sendAlert(
+            `CRITICAL: Bot Recovery Failed for ${this.strategyConfig.timeframe}. Manual restart required.`,
+            "critical",
+            [
+              {
+                name: "Timeframe",
+                value: this.strategyConfig.timeframe,
+                inline: true,
+              },
+              {
+                name: "Recovery Attempts",
+                value: `${this.recoveryAttempts}/${this.maxRecoveryAttempts}`,
+                inline: true,
+              },
+              {
+                name: "Action Required",
+                value: "Manual restart needed",
+                inline: false,
+              },
+            ],
+          );
+        } catch (notifyError) {
+          logger.error("Failed to send critical alert", { error: notifyError });
+        }
+      }
+
+      this.emit("criticalFailure", new Error("Max recovery attempts reached"));
+      return;
+    }
+
+    this.recoveryAttempts++;
+    logger.warn(
+      `Attempting recovery (${this.recoveryAttempts}/${this.maxRecoveryAttempts})`,
+      { timeframe: this.strategyConfig.timeframe },
+    );
+
+    try {
+      // 1. Disconnect WebSocket
+      logger.info("Recovery: Disconnecting WebSocket...");
+      this.config.webSocketManager.disconnect();
+
+      // Wait a moment before reconnecting
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // 2. Re-setup event listeners (this removes old ones first)
+      logger.info("Recovery: Re-attaching event listeners...");
+      this.setupEventListeners();
+
+      // 3. Reconnect WebSocket
+      logger.info("Recovery: Reconnecting WebSocket...");
+      this.config.webSocketManager.connect();
+
+      // Wait for WebSocket to be connected
+      let retries = 0;
+      while (!this.config.webSocketManager.isConnected() && retries < 30) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        retries++;
+      }
+
+      if (this.config.webSocketManager.isConnected()) {
+        logger.info("Recovery successful: WebSocket reconnected", {
+          timeframe: this.strategyConfig.timeframe,
+        });
+
+        // Send recovery success notification
+        if (this.config.discordNotifier) {
+          try {
+            await this.config.discordNotifier.sendAlert(
+              `Bot Recovery Successful for ${this.strategyConfig.timeframe}`,
+              "info",
+              [
+                {
+                  name: "Timeframe",
+                  value: this.strategyConfig.timeframe,
+                  inline: true,
+                },
+                {
+                  name: "Attempt",
+                  value: `${this.recoveryAttempts}`,
+                  inline: true,
+                },
+              ],
+            );
+          } catch (notifyError) {
+            logger.warn("Failed to send recovery success notification", {
+              error: notifyError,
+            });
+          }
+        }
+
+        // Reset counters on successful recovery
+        this.staleCandleAlertSent = false;
+      } else {
+        throw new Error("WebSocket failed to reconnect after 3 seconds");
+      }
+    } catch (error) {
+      logger.error("Recovery attempt failed", {
+        error,
+        attempt: this.recoveryAttempts,
+        timeframe: this.strategyConfig.timeframe,
+      });
+
+      // Will retry on next health check if under max attempts
+    }
   }
 
   private async handleShutdown(signal: string): Promise<void> {
@@ -758,13 +898,68 @@ export class MainOrchestrator extends EventEmitter {
       const timeSinceLastCandle = now - this.health.lastCandleProcessed;
       // Set threshold based on timeframe (2x candle interval + buffer)
       const thresholdMs = this.getStaleDataThreshold();
+
       if (timeSinceLastCandle > thresholdMs) {
         this.health.status = "degraded";
+        const staleMinutes = Math.round(timeSinceLastCandle / 1000 / 60);
+
         logger.warn("No candles processed recently", {
           timeframe: this.strategyConfig.timeframe,
-          timeSinceLastCandle: Math.round(timeSinceLastCandle / 1000 / 60),
+          timeSinceLastCandle: staleMinutes,
           thresholdMinutes: Math.round(thresholdMs / 1000 / 60),
         });
+
+        // Send Discord alert (only once per incident)
+        if (!this.staleCandleAlertSent && this.config.discordNotifier) {
+          this.staleCandleAlertSent = true;
+          this.config.discordNotifier
+            .sendAlert(
+              `Stale Data Alert: No candles processed for ${staleMinutes} minutes`,
+              "warning",
+              [
+                {
+                  name: "Timeframe",
+                  value: this.strategyConfig.timeframe,
+                  inline: true,
+                },
+                {
+                  name: "Minutes Since Last Candle",
+                  value: `${staleMinutes}`,
+                  inline: true,
+                },
+                {
+                  name: "Status",
+                  value: "Attempting auto-recovery...",
+                  inline: false,
+                },
+              ],
+            )
+            .catch((err: Error) => {
+              logger.error("Failed to send stale data alert", { error: err });
+            });
+        }
+
+        // If critically stale (3x threshold), attempt auto-recovery
+        if (timeSinceLastCandle > thresholdMs * 3) {
+          this.health.status = "unhealthy";
+          logger.error(
+            "Critical: No candles for 3x threshold, attempting recovery",
+            {
+              timeframe: this.strategyConfig.timeframe,
+              staleMinutes,
+            },
+          );
+          // Run recovery async (don't block health check)
+          this.attemptRecovery().catch((err) => {
+            logger.error("Recovery failed in health check", { error: err });
+          });
+        }
+      } else {
+        // Reset alert flag when candles are processing normally
+        if (this.staleCandleAlertSent) {
+          this.staleCandleAlertSent = false;
+          this.recoveryAttempts = 0;
+        }
       }
     }
 

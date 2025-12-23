@@ -176,6 +176,7 @@ describe("Buy Order Flow Integration", () => {
       athWindow: 25,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic",
     };
 
     buyOrderPlacer = new BuyOrderPlacer(

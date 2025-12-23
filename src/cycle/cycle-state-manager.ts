@@ -495,6 +495,7 @@ export class CycleStateManager {
       buy_anchor_price: null,
       buy_grid: null,
       buy_index: 0,
+      p_last_buy: null, // Reset for new cycle - first buy will use ATH
       strategy_config_id: strategyConfig.id,
       previous_cycle_id: previousCycle.id,
       updated_at: new Date().toISOString(),

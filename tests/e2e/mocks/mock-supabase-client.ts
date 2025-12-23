@@ -48,6 +48,7 @@ export class MockSupabaseClient {
       ath_window: 25,
       is_active: true,
       updated_at: new Date().toISOString(),
+      buy_mode: "arithmetic",
     };
     this.mockData.strategy_config.set("test-strategy", defaultStrategy);
 
@@ -74,6 +75,8 @@ export class MockSupabaseClient {
       strategy_config_id: null,
       updated_at: new Date().toISOString(),
       version: 1,
+      p_last_buy: null,
+      state_version: 2,
     };
     this.mockData.cycle_state.set("test-cycle", defaultCycle);
   }
@@ -233,6 +236,8 @@ export class MockSupabaseClient {
       strategy_config_id: null,
       version: 1,
       updated_at: new Date().toISOString(),
+      p_last_buy: null,
+      state_version: 2,
     };
   }
 
@@ -250,6 +255,7 @@ export class MockSupabaseClient {
       ath_window: 25,
       is_active: true,
       updated_at: new Date().toISOString(),
+      buy_mode: "arithmetic",
     };
   }
 

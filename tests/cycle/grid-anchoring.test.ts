@@ -23,6 +23,7 @@ describe("Grid Anchoring Strategy", () => {
       athWindow: 25,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic",
     };
 
     detector = new BuyTriggerDetector(buyAmountCalculator, mockStrategyConfig);

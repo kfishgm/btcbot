@@ -8,7 +8,7 @@ import { Decimal } from "decimal.js";
 import { logger } from "../utils/logger";
 import type { DiscordNotifier } from "../notifications/discord-notifier";
 import type { CommissionManager } from "../exchange/commission-manager";
-import type { StrategyConfig } from "../config/strategy-config-loader";
+import type { StrategyConfig, BuyMode } from "../config/strategy-config-loader";
 import { calculateTradeableBTC } from "../utils/btc-utils";
 import { calculateSellThreshold } from "../utils/pricing-calculations";
 
@@ -34,6 +34,8 @@ export interface StateUpdateData {
   buy_grid?: number[] | null;
   buy_anchor_price?: number | null;
   ath_price?: number | null;
+  // GeomModified only - set on confirmed fill
+  p_last_buy?: number | null;
 }
 
 export class BuyOrderStateUpdater extends EventEmitter {
@@ -83,6 +85,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     maxPurchases?: number,
     risePercentage?: number,
     dropPercentage?: number,
+    buyMode?: BuyMode,
   ): Promise<StateUpdateResult> {
     // Emit start event
     this.emit("stateUpdateStarted", {
@@ -103,6 +106,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
         maxPurchases,
         risePercentage,
         dropPercentage,
+        buyMode,
       );
 
       if (!currentState.id) {
@@ -206,6 +210,14 @@ export class BuyOrderStateUpdater extends EventEmitter {
             {
               name: "⏱️ Timeframe",
               value: this.strategyConfig?.timeframe || "Unknown",
+              inline: true,
+            },
+            {
+              name: "🔧 Mode",
+              value:
+                this.strategyConfig?.buyMode === "geom_modified"
+                  ? "Geometric Modified"
+                  : "Arithmetic",
               inline: true,
             },
             {
@@ -372,6 +384,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
     maxPurchases?: number,
     _risePercentage?: number, // Not used in this method, but passed through from updateAfterBuyOrder
     dropPercentage?: number,
+    buyMode?: BuyMode,
   ): StateUpdateData {
     // Calculate BTC amounts according to client's formula:
     // btc_accum_net = executedQty - feeBTC
@@ -484,6 +497,22 @@ export class BuyOrderStateUpdater extends EventEmitter {
       }
     }
 
+    // For geom_modified mode, set p_last_buy to the execution price
+    // CRITICAL: Only set on confirmed fill (this method is only called after confirmed fill)
+    const pLastBuy =
+      buyMode === "geom_modified"
+        ? orderResult.avgPrice.toNumber()
+        : currentState.p_last_buy;
+
+    if (buyMode === "geom_modified") {
+      logger.info("[GEOM_MOD] p_last_buy updated on confirmed fill", {
+        timeframe: this.strategyConfig?.timeframe || "unknown",
+        previousPLastBuy: currentState.p_last_buy,
+        newPLastBuy: pLastBuy,
+        avgPrice: orderResult.avgPrice.toFixed(2),
+      });
+    }
+
     return {
       btc_accumulated: newBtcAccumulated,
       cost_accum_usdt: newCostAccumUsdt,
@@ -497,6 +526,7 @@ export class BuyOrderStateUpdater extends EventEmitter {
       status: newStatus,
       buy_index: rebuildBuyIndex, // Use rebuilt index if grid was rebuilt
       buy_grid: rebuildGrid || currentState.buy_grid || null, // Use rebuilt grid if available
+      p_last_buy: pLastBuy, // GeomModified: set on confirmed fill
     };
   }
 

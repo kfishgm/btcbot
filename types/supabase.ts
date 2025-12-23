@@ -77,9 +77,11 @@ export type Database = {
           cost_accum_usdt: number | null;
           final_profit: number | null;
           id: string;
+          p_last_buy: number | null;
           previous_cycle_id: string | null;
           purchases_remaining: number;
           sell_reference_price: number | null;
+          state_version: number;
           status: string;
           strategy_config_id: string | null;
           updated_at: string | null;
@@ -100,9 +102,11 @@ export type Database = {
           cost_accum_usdt?: number | null;
           final_profit?: number | null;
           id?: string;
+          p_last_buy?: number | null;
           previous_cycle_id?: string | null;
           purchases_remaining: number;
           sell_reference_price?: number | null;
+          state_version?: number;
           status: string;
           strategy_config_id?: string | null;
           updated_at?: string | null;
@@ -123,9 +127,11 @@ export type Database = {
           cost_accum_usdt?: number | null;
           final_profit?: number | null;
           id?: string;
+          p_last_buy?: number | null;
           previous_cycle_id?: string | null;
           purchases_remaining?: number;
           sell_reference_price?: number | null;
+          state_version?: number;
           status?: string;
           strategy_config_id?: string | null;
           updated_at?: string | null;
@@ -187,6 +193,7 @@ export type Database = {
       strategy_config: {
         Row: {
           ath_window: number | null;
+          buy_mode: string | null;
           drop_percentage: number;
           id: string;
           initial_capital_usdt: number;
@@ -201,6 +208,7 @@ export type Database = {
         };
         Insert: {
           ath_window?: number | null;
+          buy_mode?: string | null;
           drop_percentage: number;
           id?: string;
           initial_capital_usdt: number;
@@ -215,6 +223,7 @@ export type Database = {
         };
         Update: {
           ath_window?: number | null;
+          buy_mode?: string | null;
           drop_percentage?: number;
           id?: string;
           initial_capital_usdt?: number;

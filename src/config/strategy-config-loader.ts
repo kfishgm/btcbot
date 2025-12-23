@@ -2,6 +2,9 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { getConfig } from "./index.js";
 import { logger } from "../utils/logger.js";
 
+// Buy mode type - determines which buy engine to use
+export type BuyMode = "arithmetic" | "geom_modified";
+
 // Strategy configuration interface matching database schema
 export interface StrategyConfig {
   id: string;
@@ -17,6 +20,7 @@ export interface StrategyConfig {
   isActive: boolean;
   updatedAt: string;
   capitalAllocationPct?: number; // Optional percentage 0-100
+  buyMode: BuyMode; // Buy mode: arithmetic (default) or geom_modified
 }
 
 // Database record interface (snake_case from database)
@@ -34,6 +38,7 @@ interface DatabaseStrategyConfig {
   is_active: boolean;
   updated_at: string;
   capital_allocation_pct: number | null;
+  buy_mode: string | null;
 }
 
 // Configuration error class
@@ -275,6 +280,7 @@ export class StrategyConfigLoader {
       "isActive",
       "updatedAt",
       "capitalAllocationPct",
+      "buyMode",
     ];
     for (const field in cfg) {
       if (!allowedFields.includes(field)) {
@@ -384,6 +390,7 @@ export class StrategyConfigLoader {
       ath_window: 20, // Default value (configurable 10-500)
       is_active: true, // Auto-activate for convenience
       capital_allocation_pct: null, // Default to null (use initial_capital_usdt instead)
+      buy_mode: "arithmetic", // Default to arithmetic grid strategy
     };
 
     // Insert default configuration
@@ -427,6 +434,10 @@ export class StrategyConfigLoader {
   private convertFromDatabase(
     dbConfig: DatabaseStrategyConfig,
   ): StrategyConfig {
+    // Default to "arithmetic" if buy_mode is null/undefined (backward compatibility)
+    const buyMode: BuyMode =
+      dbConfig.buy_mode === "geom_modified" ? "geom_modified" : "arithmetic";
+
     return {
       id: dbConfig.id,
       timeframe: dbConfig.timeframe,
@@ -441,6 +452,7 @@ export class StrategyConfigLoader {
       isActive: dbConfig.is_active,
       updatedAt: dbConfig.updated_at,
       capitalAllocationPct: dbConfig.capital_allocation_pct ?? undefined,
+      buyMode,
     };
   }
 }

@@ -70,6 +70,7 @@ describe("SellOrderPlacer", () => {
       athWindow: 25,
       isActive: true,
       updatedAt: new Date().toISOString(),
+      buyMode: "arithmetic",
     };
 
     // Mock SupabaseClient with chaining support
