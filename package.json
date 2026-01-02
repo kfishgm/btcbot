@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "tsx bootstrap.ts",
+    "start:test": "tsx bootstrap.ts --test",
     "start:dev": "NODE_ENV=development tsx watch bootstrap.ts",
     "start:prod": "NODE_ENV=production node dist/index.js",
     "test:e2e": "NODE_ENV=test NODE_OPTIONS='--experimental-vm-modules' jest --config jest.e2e.config.mjs",

@@ -50,7 +50,10 @@ describe("Configuration Module", () => {
         binance: {
           apiKey: "",
           apiSecret: "",
-          testnet: true,
+        },
+        binanceTestnet: {
+          apiKey: "",
+          apiSecret: "",
         },
       };
 

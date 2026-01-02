@@ -21,11 +21,11 @@ export async function createBinanceClient(options?: {
     );
   }
 
-  // Create Binance config
+  // Create Binance config (defaults to mainnet unless forceTestnet is true)
   const binanceConfig: BinanceConfig = {
     apiKey: config.binance.apiKey,
     apiSecret: config.binance.apiSecret,
-    testnet: options?.forceTestnet ?? config.binance.testnet,
+    testnet: options?.forceTestnet ?? false,
   };
 
   // Create client
@@ -70,7 +70,7 @@ export function validateBinanceConfig(): {
       errors.push("BINANCE_API_SECRET environment variable is not set");
     }
 
-    // Check for obvious test credentials
+    // Check for obvious test credentials in production credentials
     if (config.binance.apiKey && config.binance.apiSecret) {
       const testPatterns = [/test/i, /demo/i, /xxx/i, /123456/];
       const looksLikeTest = testPatterns.some(
@@ -79,30 +79,11 @@ export function validateBinanceConfig(): {
           pattern.test(config.binance.apiSecret),
       );
 
-      if (looksLikeTest && !config.binance.testnet) {
+      if (looksLikeTest) {
         warnings.push(
-          "API credentials appear to be test/demo credentials but testnet is disabled",
+          "API credentials appear to be test/demo credentials - use --test flag for testnet trading",
         );
       }
-
-      if (!looksLikeTest && config.binance.testnet) {
-        warnings.push(
-          "Using production-like credentials with testnet enabled - ensure this is intentional",
-        );
-      }
-    }
-
-    // Check NODE_ENV consistency
-    if (config.app.isProduction && config.binance.testnet) {
-      warnings.push(
-        "Running in production mode but Binance testnet is enabled",
-      );
-    }
-
-    if (!config.app.isProduction && !config.binance.testnet) {
-      warnings.push(
-        "Running in development mode but Binance testnet is disabled - using real API",
-      );
     }
   } catch (error) {
     errors.push(

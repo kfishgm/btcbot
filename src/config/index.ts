@@ -28,7 +28,10 @@ export interface Config {
   binance: {
     apiKey: string;
     apiSecret: string;
-    testnet: boolean;
+  };
+  binanceTestnet: {
+    apiKey: string;
+    apiSecret: string;
   };
 }
 
@@ -188,8 +191,10 @@ export function getConfig(): Config {
     binance: {
       apiKey: process.env.BINANCE_API_KEY || "",
       apiSecret: process.env.BINANCE_API_SECRET || "",
-      testnet:
-        process.env.BINANCE_TESTNET === "true" || nodeEnv !== "production",
+    },
+    binanceTestnet: {
+      apiKey: process.env.BINANCE_TESTNET_API_KEY || "",
+      apiSecret: process.env.BINANCE_TESTNET_API_SECRET || "",
     },
   };
 

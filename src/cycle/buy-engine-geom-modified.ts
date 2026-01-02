@@ -86,7 +86,12 @@ export class GeomModifiedBuyEngine implements IBuyEngine {
     logger.debug("[GEOM_MOD] State check", {
       timeframe: this.strategyConfig.timeframe,
       p_last_buy: state.p_last_buy,
-      p_last_buy_type: typeof state.p_last_buy,
+      p_last_buy_type:
+        state.p_last_buy === null
+          ? "null"
+          : state.p_last_buy === undefined
+            ? "undefined"
+            : "number",
       ath_reference_price: state.ath_reference_price,
       purchases_remaining: state.purchases_remaining,
     });

@@ -473,11 +473,12 @@ export class BuyOrderStateUpdater extends EventEmitter {
       ? quantizedAnchorPrice
       : currentState.buy_anchor_price;
 
-    // Rebuild grid from anchor after first buy (per STRATEGY.md lines 159-195)
+    // Rebuild grid from anchor after first buy (arithmetic mode only)
+    // Geom_modified uses p_last_buy for dynamic thresholds, no grid needed
     let rebuildGrid: number[] | null = null;
     let rebuildBuyIndex = newBuyIndex;
 
-    if (isFirstBuy) {
+    if (isFirstBuy && buyMode !== "geom_modified") {
       // Rebuild grid from anchor price after first buy (per STRATEGY.md)
       if (buyAnchorPrice && maxPurchases) {
         const actualDropPercentage = dropPercentage || 0.003;

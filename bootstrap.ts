@@ -44,10 +44,14 @@ import {
 } from "./src/config/strategy-config-loader.js";
 
 import type { Database } from "./types/supabase.js";
+import { ConfigurationError } from "./src/config/index.js";
 
 // Load .env.local first, then .env as fallback
 dotenvConfig({ path: ".env.local" });
 dotenvConfig({ path: ".env" });
+
+// Parse --test flag for hybrid mode (mainnet data + testnet trading)
+const isHybridTestMode = process.argv.includes("--test");
 
 // Increase max listeners for multi-config support (7 orchestrators + pool + system handlers)
 process.setMaxListeners(20);
@@ -58,7 +62,9 @@ process.setMaxListeners(20);
 interface SharedDependencies {
   appConfig: ReturnType<typeof getConfig>;
   supabase: ReturnType<typeof createClient<Database>>;
-  binanceClient: BinanceClient;
+  marketDataClient: BinanceClient; // For candles, prices, exchange info (mainnet in hybrid mode)
+  tradingClient: BinanceClient; // For orders and balances (testnet in hybrid mode)
+  isHybridTestMode: boolean;
   strategyConfigLoader: StrategyConfigLoader;
   connectionManager: ConnectionManager;
   eventLogger: EventLogger;
@@ -86,11 +92,34 @@ async function createSharedDependencies(): Promise<SharedDependencies> {
     appConfig.supabase.serviceRoleKey,
   );
 
-  const binanceClient = new BinanceClient({
+  // Market data client always uses mainnet (real prices)
+  const marketDataClient = new BinanceClient({
     apiKey: appConfig.binance.apiKey,
     apiSecret: appConfig.binance.apiSecret,
-    testnet: appConfig.binance.testnet,
+    testnet: false,
   });
+
+  // Trading client: testnet when --test flag, mainnet otherwise
+  let tradingClient: BinanceClient;
+  if (isHybridTestMode) {
+    // Validate testnet credentials exist
+    if (
+      !appConfig.binanceTestnet.apiKey ||
+      !appConfig.binanceTestnet.apiSecret
+    ) {
+      throw new ConfigurationError(
+        "Test mode requires BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET environment variables",
+      );
+    }
+    tradingClient = new BinanceClient({
+      apiKey: appConfig.binanceTestnet.apiKey,
+      apiSecret: appConfig.binanceTestnet.apiSecret,
+      testnet: true,
+    });
+  } else {
+    // Production: same mainnet client for both
+    tradingClient = marketDataClient;
+  }
 
   const strategyConfigLoader = new StrategyConfigLoader();
 
@@ -104,25 +133,26 @@ async function createSharedDependencies(): Promise<SharedDependencies> {
     logger: logger,
   });
 
-  const balanceManager = new BalanceManager(binanceClient);
+  // Balance manager uses trading client (reads testnet balances in hybrid mode)
+  const balanceManager = new BalanceManager(tradingClient);
   const referencePriceCalculator = new ReferencePriceCalculator();
   const buyAmountCalculator = new BuyAmountCalculator();
   const stateTransactionManager = new StateTransactionManager(supabase);
 
-  // Create TradingRules instance early so it can be shared
-  const tradingRules = new TradingRules(binanceClient);
+  // Trading rules and commission use market data client (mainnet data in hybrid mode)
+  const tradingRules = new TradingRules(marketDataClient);
 
-  // Initialize commission manager for fee tracking
-  const commissionManager = new CommissionManager(binanceClient);
+  // Commission manager uses market data client for rate lookups
+  const commissionManager = new CommissionManager(marketDataClient);
   await commissionManager.initialize();
 
-  // Get trading rules and exchange info for BTCUSDT
+  // Get trading rules and exchange info for BTCUSDT (from market data source)
   const btcRules = await tradingRules.getRules("BTCUSDT");
   const stepSize = btcRules.stepSize;
   const tickSize = btcRules.tickSize;
 
-  // Get exchange info to get asset precisions
-  const exchangeInfo = await binanceClient.getExchangeInfo("BTCUSDT");
+  // Get exchange info to get asset precisions (from market data source)
+  const exchangeInfo = await marketDataClient.getExchangeInfo("BTCUSDT");
   const symbolInfo = exchangeInfo.symbols.find((s) => s.symbol === "BTCUSDT");
   const baseAssetPrecision = symbolInfo?.baseAssetPrecision || 8; // Default to 8 for BTC
   const quoteAssetPrecision = symbolInfo?.quoteAssetPrecision || 8; // Default to 8 for USDT
@@ -180,7 +210,9 @@ async function createSharedDependencies(): Promise<SharedDependencies> {
   return {
     appConfig,
     supabase,
-    binanceClient,
+    marketDataClient,
+    tradingClient,
+    isHybridTestMode,
     strategyConfigLoader,
     connectionManager,
     eventLogger,
@@ -206,9 +238,9 @@ async function createOrchestratorForConfig(
   shared: SharedDependencies,
 ): Promise<MainOrchestrator> {
   const {
-    appConfig,
     supabase,
-    binanceClient,
+    marketDataClient,
+    tradingClient,
     tradingRules,
     commissionManager,
   } = shared;
@@ -231,8 +263,9 @@ async function createOrchestratorForConfig(
     cycleStateManager,
   );
 
+  // Historical candles use market data client (mainnet in hybrid mode)
   const historicalCandleManager = new HistoricalCandleManager(
-    binanceClient,
+    marketDataClient,
     "BTCUSDT",
     strategyConfig.timeframe,
     {
@@ -240,10 +273,11 @@ async function createOrchestratorForConfig(
     },
   );
 
+  // WebSocket always uses mainnet for real-time market data
   const webSocketManager = new WebSocketManager({
     symbol: "BTCUSDT",
     timeframe: strategyConfig.timeframe,
-    testnet: appConfig.binance.testnet,
+    testnet: false,
   });
 
   const candleProcessor = new CandleProcessor({
@@ -279,8 +313,9 @@ async function createOrchestratorForConfig(
     shared.quoteAssetPrecision,
   );
 
+  // Order placers use trading client (testnet in hybrid mode)
   const buyOrderPlacer = new BuyOrderPlacer(
-    binanceClient,
+    tradingClient,
     tradingRules,
     supabase,
     "BTCUSDT",
@@ -288,7 +323,7 @@ async function createOrchestratorForConfig(
   );
 
   const sellOrderPlacer = new SellOrderPlacer(
-    binanceClient,
+    tradingClient,
     tradingRules,
     supabase,
     "BTCUSDT",
@@ -319,7 +354,7 @@ async function createOrchestratorForConfig(
 
   return new MainOrchestrator({
     supabaseClient: supabase,
-    binanceClient,
+    binanceClient: tradingClient, // Use trading client for order operations
     webSocketManager,
     candleProcessor,
     cycleStateManager,
@@ -349,7 +384,10 @@ async function main() {
   let pool: OrchestratorPool | null = null;
 
   try {
-    console.log("🚀 Starting BTC Trading Bot (Multi-Config)...");
+    const modeLabel = isHybridTestMode
+      ? "🧪 HYBRID TEST MODE"
+      : "🚀 PRODUCTION MODE";
+    console.log(`${modeLabel}: Starting BTC Trading Bot (Multi-Config)...`);
 
     // Create shared dependencies
     const shared = await createSharedDependencies();
@@ -393,9 +431,14 @@ async function main() {
     await pool.initializeAll();
     await pool.startAll();
 
-    console.log(
-      `✅ BTC Trading Bot started successfully with ${pool.getCount()} active config(s)!`,
-    );
+    const successLabel = isHybridTestMode
+      ? "✅ BTC Trading Bot started in HYBRID TEST MODE"
+      : "✅ BTC Trading Bot started successfully";
+    console.log(`${successLabel} with ${pool.getCount()} active config(s)!`);
+    if (isHybridTestMode) {
+      console.log("   📊 Market data: MAINNET (real prices)");
+      console.log("   💰 Trading: TESTNET (paper money)");
+    }
 
     // Graceful shutdown handlers
     const shutdown = async () => {

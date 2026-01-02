@@ -450,6 +450,38 @@ export class MainOrchestrator extends EventEmitter {
       }
 
       // ===============================================================
+      // Log candle close with trading status
+      // ===============================================================
+      const dropPct = this.strategyConfig?.dropPercentage || 0.003;
+      const risePct = this.strategyConfig?.risePercentage || 0.005;
+
+      // Calculate buy target based on current reference
+      // For first buy: ATH * (1 - drop), for subsequent: depends on p_last_buy or sell_reference
+      const buyReferencePrice =
+        workingState.p_last_buy ||
+        workingState.sell_reference_price ||
+        workingState.ath_reference_price ||
+        currentATH;
+      const buyTarget = buyReferencePrice * (1 - dropPct);
+
+      // Calculate sell target (only meaningful if holding)
+      const sellTarget = workingState.sell_reference_price
+        ? workingState.sell_reference_price * (1 + risePct)
+        : null;
+
+      logger.info(
+        `[${this.strategyConfig.timeframe}] 📊 Candle close: ${closePrice.toFixed(2)}`,
+        {
+          close: closePrice.toFixed(2),
+          ath: currentATH.toFixed(2),
+          buyTarget: buyTarget.toFixed(2),
+          sellTarget: sellTarget?.toFixed(2) || "N/A",
+          purchasesLeft: workingState.purchases_remaining,
+          btcHeld: (workingState.btc_accumulated || 0).toFixed(8),
+        },
+      );
+
+      // ===============================================================
       // STEP 2: Check SELL condition FIRST (only if holding meaningful BTC, not dust)
       // ===============================================================
       if (
