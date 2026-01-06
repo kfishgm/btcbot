@@ -1,0 +1,93 @@
+# BTC Bot Multi-Timeframe Strategy Configuration
+# ================================================
+#
+# This file defines trading configurations for multiple timeframes.
+# Each config runs independently with its own capital, state, and ATH tracking.
+#
+# USAGE:
+#   pnpm tsx scripts/setup-multi-config.ts configs/strategy.yaml
+#
+# OPTIONS:
+#   --dry-run     Show what would happen without making changes
+#   --reset       Also reset cycle states (create fresh cycles)
+#
+# CAPITAL ALLOCATION:
+#   You can use either:
+#   - capitalPct: Percentage of account balance (all configs must use this)
+#   - capitalUsdt: Fixed USDT amount (all configs must use this)
+#   Don't mix them - the bot will reject mixed allocation methods.
+#
+# TIMEFRAMES:
+#   Valid values: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+#   Each timeframe can only appear once across all active configs.
+#
+# BUY MODES:
+#   arithmetic:     Grid-based with pre-calculated levels from ATH
+#                   - Multiple buys can trigger in single candle
+#                   - Grid rebuilds from anchor price after first buy
+#
+#   geom_modified:  Dynamic threshold from last buy price
+#                   - Max 1 buy per candle
+#                   - Each fill becomes anchor for next threshold
+#                   - Better for volatile/fast timeframes
+
+configs:
+  # 5-minute: Aggressive scalping with tight thresholds
+  - timeframe: "5m"
+    dropPct: 0.3 # 0.3% drop to trigger buy (valid range: 0.15 to 8)
+    risePct: 0.3 # 0.3% rise to trigger sell
+    maxPurchases: 10
+    minBuyUsdt: 10
+    athWindow: 100 # 100 candles = ~8 hours of 5m data
+    mode: "geom_modified" # Dynamic thresholds for fast timeframe
+    capitalPct: 25 # 25% of account balance
+
+  # 15-minute: Medium-term swing trading
+  - timeframe: "15m"
+    dropPct: 2.0 # 2% drop
+    risePct: 2.0 # 2% rise
+    maxPurchases: 10
+    minBuyUsdt: 10
+    athWindow: 100 # 100 candles = ~25 hours
+    mode: "geom_modified"
+    capitalPct: 25
+
+  # 1-hour: Standard swing trading
+  - timeframe: "1h"
+    dropPct: 3.0 # 3% drop
+    risePct: 3.0 # 3% rise
+    maxPurchases: 10
+    minBuyUsdt: 10
+    athWindow: 50 # 50 candles = ~2 days
+    mode: "arithmetic" # Grid works well for slower timeframes
+    capitalPct: 25
+
+  # 4-hour: Position trading
+  - timeframe: "4h"
+    dropPct: 3.0 # 3% drop
+    risePct: 3.0 # 3% rise
+    maxPurchases: 10
+    minBuyUsdt: 10
+    athWindow: 20 # 20 candles = ~3.3 days
+    mode: "arithmetic"
+    capitalPct: 25
+
+# Alternative: Fixed USDT allocation (uncomment to use instead of percentages)
+# configs:
+#   - timeframe: "5m"
+#     dropPct: 1.0
+#     risePct: 1.0
+#     maxPurchases: 10
+#     minBuyUsdt: 10
+#     athWindow: 100
+#     mode: "geom_modified"
+#     capitalUsdt: 250      # Fixed $250 allocation
+#
+#   - timeframe: "4h"
+#     dropPct: 3.0
+#     risePct: 3.0
+#     maxPurchases: 10
+#     minBuyUsdt: 10
+#     athWindow: 20
+#     mode: "arithmetic"
+#     capitalUsdt: 250

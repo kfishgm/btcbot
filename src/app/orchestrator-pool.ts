@@ -60,28 +60,38 @@ export class OrchestratorPool {
   }
 
   /**
-   * Start all orchestrators in parallel
-   * Each orchestrator runs independently - one failure doesn't stop others
+   * Start all orchestrators with staggered delays
+   * Uses sequential startup with 1 second delay between each to avoid
+   * overwhelming Binance WebSocket connections and hitting rate limits
    */
   async startAll(): Promise<void> {
-    const startResults = await Promise.allSettled(
-      Array.from(this.orchestrators.entries()).map(async ([configId, orch]) => {
-        try {
-          await orch.start();
-          return { configId, success: true };
-        } catch (error) {
-          logger.error(`Failed to start orchestrator for config ${configId}`, {
-            error,
-          });
-          // Don't throw - let other orchestrators continue
-          return { configId, success: false, error };
-        }
-      }),
-    );
+    const entries = Array.from(this.orchestrators.entries());
+    const results: { configId: string; success: boolean; error?: unknown }[] =
+      [];
+
+    for (let i = 0; i < entries.length; i++) {
+      const [configId, orch] = entries[i];
+
+      // Add 1 second delay between orchestrator starts (except first)
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+
+      try {
+        await orch.start();
+        results.push({ configId, success: true });
+      } catch (error) {
+        logger.error(`Failed to start orchestrator for config ${configId}`, {
+          error,
+        });
+        // Don't throw - let other orchestrators continue
+        results.push({ configId, success: false, error });
+      }
+    }
 
     // Check if all failed
-    const failures = startResults.filter((r) => r.status === "rejected");
-    if (failures.length === startResults.length) {
+    const failures = results.filter((r) => !r.success);
+    if (failures.length === results.length) {
       throw new Error("All orchestrators failed to start");
     }
   }

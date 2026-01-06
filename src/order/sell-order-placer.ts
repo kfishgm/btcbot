@@ -718,6 +718,8 @@ export class SellOrderPlacer extends EventEmitter {
       if (error) {
         logger.warn(`[SELL] Failed to save trade fills for trade ${tradeId}`, {
           timeframe: this.strategyConfig.timeframe,
+          error: error.message,
+          code: error.code,
         });
       }
     } catch (error) {

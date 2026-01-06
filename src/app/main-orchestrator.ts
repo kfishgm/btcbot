@@ -252,15 +252,15 @@ export class MainOrchestrator extends EventEmitter {
       logger.info("Connecting WebSocket");
       this.config.webSocketManager.connect();
 
-      // Wait for WebSocket to be connected
+      // Wait for WebSocket to be connected (up to 10 seconds)
       let retries = 0;
-      while (!this.config.webSocketManager.isConnected() && retries < 30) {
+      while (!this.config.webSocketManager.isConnected() && retries < 100) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         retries++;
       }
 
       if (!this.config.webSocketManager.isConnected()) {
-        throw new Error("Failed to connect WebSocket after 3 seconds");
+        throw new Error("Failed to connect WebSocket after 10 seconds");
       }
 
       // Bot only processes real-time candles, not historical ones for trading decisions
@@ -837,9 +837,9 @@ export class MainOrchestrator extends EventEmitter {
       logger.info("Recovery: Reconnecting WebSocket...");
       this.config.webSocketManager.connect();
 
-      // Wait for WebSocket to be connected
+      // Wait for WebSocket to be connected (up to 10 seconds)
       let retries = 0;
-      while (!this.config.webSocketManager.isConnected() && retries < 30) {
+      while (!this.config.webSocketManager.isConnected() && retries < 100) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         retries++;
       }
@@ -878,7 +878,7 @@ export class MainOrchestrator extends EventEmitter {
         // Reset counters on successful recovery
         this.staleCandleAlertSent = false;
       } else {
-        throw new Error("WebSocket failed to reconnect after 3 seconds");
+        throw new Error("WebSocket failed to reconnect after 10 seconds");
       }
     } catch (error) {
       logger.error("Recovery attempt failed", {
