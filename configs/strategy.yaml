@@ -30,6 +30,49 @@
 #                   - Max 1 buy per candle
 #                   - Each fill becomes anchor for next threshold
 #                   - Better for volatile/fast timeframes
+#
+# PROFIT POOL (optional):
+#   When enabled, profits from completed cycles are automatically managed:
+#
+#   HOW IT WORKS:
+#   1. Cycle completes with profit (e.g., $100)
+#   2. Profit is split: reinvestmentPercentage% to pool, rest to funding wallet
+#   3. Reinvestment stays in pool until a NEW cycle is created
+#   4. New cycle picks up its share (based on reinvestmentPct) → higher capital
+#   5. Funding wallet amounts accumulate until >= minFundingTransferAmount
+#
+#   CONFIGURATION:
+#   - pool.enabled: true/false - Enable/disable the feature
+#   - pool.reinvestmentPercentage: % of profit to reinvest (0-100)
+#   - pool.fundingWalletPercentage: % of profit to transfer out (0-100)
+#   - pool.minFundingTransferAmount: Min USDT before Binance transfer triggers
+#   - config.reinvestmentPct: Each config's share of pool (must sum to 100)
+#
+#   EXAMPLE FLOW:
+#   - Config A (60% share) and Config B (40% share) are running
+#   - Config A cycle closes with $100 profit
+#   - $70 goes to reinvestment pool, $30 to funding wallet
+#   - Config B creates new cycle → picks up $70 × 40% = $28 extra capital
+#   - Config A creates new cycle → picks up remaining $42 extra capital
+#
+#   VALIDATION RULES:
+#   - reinvestmentPercentage + fundingWalletPercentage must equal 100
+#   - All active configs must have reinvestmentPct when pool is enabled
+#   - Sum of all config reinvestmentPct values must equal 100
+#
+pool:
+  enabled: true
+  reinvestmentPercentage: 70   # 70% of profit to reinvestment pool
+  fundingWalletPercentage: 30  # 30% of profit to funding wallet
+  minFundingTransferAmount: 2 # Min USDT to trigger Binance transfer
+#
+# configs:
+#   - timeframe: "1h"
+#     reinvestmentPct: 60  # Gets 60% of pool's reinvestment
+#     # ... other fields
+#   - timeframe: "4h"
+#     reinvestmentPct: 40  # Gets 40% of pool's reinvestment
+#     # ... other fields
 
 configs:
   # 5-minute: Aggressive scalping with tight thresholds
@@ -61,6 +104,7 @@ configs:
     athWindow: 40 # 50 candles = ~2 days
     mode: "geom_modified" # Grid works well for slower timeframes
     capitalPct: 100
+    reinvestmentPct: 100
   # - timeframe: "1h"
   #   dropPct: 1.2
   #   risePct: 2

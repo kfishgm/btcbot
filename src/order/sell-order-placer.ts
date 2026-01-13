@@ -13,6 +13,7 @@ import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
 import { SupabaseClient } from "@supabase/supabase-js";
 import type { StrategyConfig } from "../config/strategy-config-loader";
+import type { ProfitPoolService } from "../pool/profit-pool-service";
 
 export interface OrderPrepareParams {
   symbol: string;
@@ -114,6 +115,7 @@ export class SellOrderPlacer extends EventEmitter {
   private retryDelay = 1000;
   private tradingRulesCache: SymbolTradingRules | null = null;
   private cycleId: string | null = null;
+  private profitPoolService: ProfitPoolService | null = null;
 
   constructor(
     binanceClient: BinanceClient,
@@ -121,6 +123,7 @@ export class SellOrderPlacer extends EventEmitter {
     supabaseClient: SupabaseClient,
     symbol: string,
     strategyConfig: StrategyConfig,
+    profitPoolService?: ProfitPoolService,
   ) {
     super();
     this.binanceClient = binanceClient;
@@ -128,6 +131,7 @@ export class SellOrderPlacer extends EventEmitter {
     this.supabaseClient = supabaseClient;
     this.symbol = symbol;
     this.strategyConfig = strategyConfig;
+    this.profitPoolService = profitPoolService ?? null;
   }
 
   setCycleId(cycleId: string): void {
@@ -315,6 +319,19 @@ export class SellOrderPlacer extends EventEmitter {
             result.avgPrice,
           );
           this.emit("profitCalculated", profitData);
+
+          // Add profit to pool if enabled and pool service available
+          if (
+            this.profitPoolService &&
+            this.strategyConfig.pool?.enabled &&
+            profitData.profit.gt(0)
+          ) {
+            await this.profitPoolService.addNetProfit(
+              profitData.profit,
+              "SELL",
+              this.cycleId,
+            );
+          }
         }
 
         // Emit completion event

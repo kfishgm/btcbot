@@ -190,6 +190,45 @@ export type Database = {
         };
         Relationships: [];
       };
+      profit_pool: {
+        Row: {
+          id: string;
+          total_net_profits: number;
+          allocated_to_reinvestment: number;
+          allocated_to_funding_wallet: number;
+          is_enabled: boolean;
+          reinvestment_percentage: number;
+          funding_wallet_percentage: number;
+          min_funding_transfer_amount: number;
+          last_updated_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          total_net_profits?: number;
+          allocated_to_reinvestment?: number;
+          allocated_to_funding_wallet?: number;
+          is_enabled?: boolean;
+          reinvestment_percentage?: number;
+          funding_wallet_percentage?: number;
+          min_funding_transfer_amount?: number;
+          last_updated_at?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          total_net_profits?: number;
+          allocated_to_reinvestment?: number;
+          allocated_to_funding_wallet?: number;
+          is_enabled?: boolean;
+          reinvestment_percentage?: number;
+          funding_wallet_percentage?: number;
+          min_funding_transfer_amount?: number;
+          last_updated_at?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       strategy_config: {
         Row: {
           ath_window: number | null;

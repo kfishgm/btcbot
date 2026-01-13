@@ -152,6 +152,21 @@ export interface BinanceListenKey {
   listenKey: string;
 }
 
+export interface UniversalTransferParams {
+  type:
+    | "MAIN_FUNDING"
+    | "MAIN_UMFUTURE"
+    | "MAIN_CMFUTURE"
+    | "FUNDING_UMFUTURE"
+    | "FUNDING_CMFUTURE";
+  asset: string;
+  amount: number;
+}
+
+export interface UniversalTransferResult {
+  tranId: string;
+}
+
 export interface BinanceExchangeInfo {
   timezone: string;
   serverTime: number;

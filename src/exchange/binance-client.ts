@@ -648,6 +648,38 @@ export class BinanceClient {
     );
   }
 
+  /**
+   * Universal Transfer - Transfer funds between main account and sub-accounts/futures accounts
+   * Used for moving USDT from spot trading account to funding wallet
+   */
+  async universalTransfer(
+    params: import("./types.js").UniversalTransferParams,
+  ): Promise<import("./types.js").UniversalTransferResult> {
+    // Validate inputs
+    if (!params.type) {
+      throw new Error("Transfer type is required");
+    }
+    if (!params.asset) {
+      throw new Error("Asset is required");
+    }
+    if (params.amount <= 0) {
+      throw new Error("Amount must be greater than 0");
+    }
+
+    const transferParams: Record<string, unknown> = {
+      type: params.type,
+      asset: params.asset,
+      amount: params.amount,
+    };
+
+    return this.makeRequest<import("./types.js").UniversalTransferResult>(
+      "/sapi/v1/asset/transfer",
+      "POST",
+      transferParams,
+      true,
+    );
+  }
+
   getStreamUrl(streams: string | string[]): string {
     if (Array.isArray(streams)) {
       return `${this.wsUrl}/stream?streams=${streams.join("/")}`;

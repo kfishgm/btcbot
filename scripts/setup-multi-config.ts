@@ -41,10 +41,19 @@ interface YamlConfig {
   mode: "arithmetic" | "geom_modified";
   capitalPct?: number;
   capitalUsdt?: number;
+  reinvestmentPct?: number; // Share of pool reinvestment distribution (0-100)
+}
+
+interface YamlPoolConfig {
+  enabled: boolean;
+  reinvestmentPercentage: number; // % of profit to reinvestment pool
+  fundingWalletPercentage: number; // % of profit to funding wallet
+  minFundingTransferAmount: number; // Min USDT to trigger transfer
 }
 
 interface YamlFile {
   configs: YamlConfig[];
+  pool?: YamlPoolConfig; // Optional pool configuration
 }
 
 interface CliOptions {
@@ -241,7 +250,10 @@ function validateConfig(config: YamlConfig, index: number): void {
   }
 }
 
-function validateAllConfigs(configs: YamlConfig[]): void {
+function validateAllConfigs(
+  configs: YamlConfig[],
+  poolConfig?: YamlPoolConfig,
+): void {
   if (!configs || configs.length === 0) {
     throw new Error("No configs found in YAML file");
   }
@@ -275,6 +287,85 @@ function validateAllConfigs(configs: YamlConfig[]): void {
     if (totalPct > 100) {
       throw new Error(`Total capitalPct exceeds 100% (got ${totalPct}%)`);
     }
+  }
+
+  // Validate pool configuration if provided
+  if (poolConfig?.enabled) {
+    validatePoolConfig(poolConfig, configs);
+  }
+}
+
+function validatePoolConfig(
+  poolConfig: YamlPoolConfig,
+  configs: YamlConfig[],
+): void {
+  // Validate pool percentages sum to 100
+  const poolSum =
+    poolConfig.reinvestmentPercentage + poolConfig.fundingWalletPercentage;
+  if (Math.abs(poolSum - 100) > 0.01) {
+    throw new Error(
+      `Pool percentages must sum to 100. Got reinvestmentPercentage=${poolConfig.reinvestmentPercentage} + fundingWalletPercentage=${poolConfig.fundingWalletPercentage} = ${poolSum}`,
+    );
+  }
+
+  // Validate percentages are in valid range
+  if (
+    poolConfig.reinvestmentPercentage < 0 ||
+    poolConfig.reinvestmentPercentage > 100
+  ) {
+    throw new Error(
+      `reinvestmentPercentage must be between 0 and 100, got ${poolConfig.reinvestmentPercentage}`,
+    );
+  }
+  if (
+    poolConfig.fundingWalletPercentage < 0 ||
+    poolConfig.fundingWalletPercentage > 100
+  ) {
+    throw new Error(
+      `fundingWalletPercentage must be between 0 and 100, got ${poolConfig.fundingWalletPercentage}`,
+    );
+  }
+
+  // Validate minFundingTransferAmount
+  if (poolConfig.minFundingTransferAmount <= 0) {
+    throw new Error(
+      `minFundingTransferAmount must be > 0, got ${poolConfig.minFundingTransferAmount}`,
+    );
+  }
+
+  // When pool is enabled, all configs must have reinvestmentPct
+  const configsWithoutReinvestmentPct = configs.filter(
+    (c) => c.reinvestmentPct === undefined || c.reinvestmentPct === null,
+  );
+
+  if (configsWithoutReinvestmentPct.length > 0) {
+    throw new Error(
+      `When pool is enabled, all configs must have reinvestmentPct. Missing for: ${configsWithoutReinvestmentPct.map((c) => c.timeframe).join(", ")}`,
+    );
+  }
+
+  // Validate reinvestmentPct values are in range
+  for (const config of configs) {
+    if (
+      config.reinvestmentPct !== undefined &&
+      (config.reinvestmentPct < 0 || config.reinvestmentPct > 100)
+    ) {
+      throw new Error(
+        `Config ${config.timeframe} has invalid reinvestmentPct: ${config.reinvestmentPct} (must be 0-100)`,
+      );
+    }
+  }
+
+  // Validate reinvestmentPct values sum to 100
+  const totalReinvestmentPct = configs.reduce(
+    (sum, c) => sum + (c.reinvestmentPct ?? 0),
+    0,
+  );
+  if (Math.abs(totalReinvestmentPct - 100) > 0.01) {
+    throw new Error(
+      `Config reinvestmentPct values must sum to 100 when pool is enabled. Got ${totalReinvestmentPct}. ` +
+        `Values: ${configs.map((c) => `${c.timeframe}=${c.reinvestmentPct ?? 0}`).join(", ")}`,
+    );
   }
 }
 
@@ -343,6 +434,7 @@ async function batchUpsertConfigs(
     ath_window: number;
     buy_mode: string;
     capital_allocation_pct: number | null;
+    reinvestment_allocation_pct: number | null;
     is_active: boolean;
     updated_at: string;
   }
@@ -367,6 +459,7 @@ async function batchUpsertConfigs(
       ath_window: config.athWindow,
       buy_mode: config.mode,
       capital_allocation_pct: config.capitalPct || null,
+      reinvestment_allocation_pct: config.reinvestmentPct ?? null,
       is_active: true,
       updated_at: new Date().toISOString(),
     };
@@ -483,6 +576,53 @@ async function batchUpsertConfigs(
   }
 
   return results;
+}
+
+async function updatePoolConfig(
+  supabase: SupabaseClient<Database>,
+  poolConfig: YamlPoolConfig | undefined,
+  dryRun: boolean,
+): Promise<void> {
+  if (dryRun) {
+    return;
+  }
+
+  // First, check if profit_pool singleton exists
+  const { data: existingPool } = await supabase
+    .from("profit_pool")
+    .select("id")
+    .limit(1)
+    .single();
+
+  if (!existingPool) {
+    // Create singleton if it doesn't exist
+    const { error: insertError } = await supabase.from("profit_pool").insert({
+      is_enabled: poolConfig?.enabled ?? false,
+      reinvestment_percentage: poolConfig?.reinvestmentPercentage ?? 70,
+      funding_wallet_percentage: poolConfig?.fundingWalletPercentage ?? 30,
+      min_funding_transfer_amount: poolConfig?.minFundingTransferAmount ?? 10,
+    });
+
+    if (insertError) {
+      throw new Error(`Failed to create pool config: ${insertError.message}`);
+    }
+  } else {
+    // Update existing singleton
+    const { error: updateError } = await supabase
+      .from("profit_pool")
+      .update({
+        is_enabled: poolConfig?.enabled ?? false,
+        reinvestment_percentage: poolConfig?.reinvestmentPercentage ?? 70,
+        funding_wallet_percentage: poolConfig?.fundingWalletPercentage ?? 30,
+        min_funding_transfer_amount: poolConfig?.minFundingTransferAmount ?? 10,
+        last_updated_at: new Date().toISOString(),
+      })
+      .eq("id", existingPool.id);
+
+    if (updateError) {
+      throw new Error(`Failed to update pool config: ${updateError.message}`);
+    }
+  }
 }
 
 async function resetCycleForConfig(
@@ -620,14 +760,26 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Validate configs
+  // Validate configs (including pool config if enabled)
   try {
-    validateAllConfigs(yamlContent.configs);
+    validateAllConfigs(yamlContent.configs, yamlContent.pool);
   } catch (error) {
     console.error(
       `❌ Validation failed: ${error instanceof Error ? error.message : error}`,
     );
     process.exit(1);
+  }
+
+  // Display pool config if enabled
+  if (yamlContent.pool?.enabled) {
+    console.log("💰 Pool Configuration:");
+    console.log(`   Reinvestment: ${yamlContent.pool.reinvestmentPercentage}%`);
+    console.log(
+      `   Funding Wallet: ${yamlContent.pool.fundingWalletPercentage}%`,
+    );
+    console.log(
+      `   Min Transfer: $${yamlContent.pool.minFundingTransferAmount}\n`,
+    );
   }
 
   console.log(`✓ Validated ${yamlContent.configs.length} configurations\n`);
@@ -700,6 +852,12 @@ async function main(): Promise<void> {
     allExisting,
     options.dryRun,
   );
+
+  // Update pool configuration in database
+  await updatePoolConfig(supabase, yamlContent.pool, options.dryRun);
+  if (!options.dryRun && yamlContent.pool?.enabled) {
+    console.log("   💰 Pool config updated in database\n");
+  }
 
   // Handle cycle resets
   const results: Array<{

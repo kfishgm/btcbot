@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/supabase.js";
 import { logger } from "../utils/logger.js";
 import type { TradingRules } from "../exchange/trading-rules.js";
+import Decimal from "decimal.js";
+import type { ProfitPoolService } from "../pool/profit-pool-service.js";
 
 export interface CycleStateManagerConfig {
   initialCapitalUSDT: number;
@@ -28,6 +30,7 @@ export class CycleStateManager {
   private tradingRules: TradingRules;
   private strategyConfigId: string;
   private timeframe: string;
+  private profitPoolService: ProfitPoolService | null = null;
 
   constructor(
     supabase: SupabaseClient<Database>,
@@ -35,12 +38,14 @@ export class CycleStateManager {
     tradingRules: TradingRules,
     strategyConfigId: string,
     timeframe: string,
+    profitPoolService?: ProfitPoolService,
   ) {
     this.supabase = supabase;
     this.config = config;
     this.tradingRules = tradingRules;
     this.strategyConfigId = strategyConfigId;
     this.timeframe = timeframe;
+    this.profitPoolService = profitPoolService ?? null;
   }
 
   async initialize(): Promise<void> {
@@ -461,6 +466,15 @@ export class CycleStateManager {
       );
     }
 
+    // Add final profit to pool if enabled
+    if (this.profitPoolService && completionData.finalProfit > 0) {
+      await this.profitPoolService.addNetProfit(
+        new Decimal(completionData.finalProfit),
+        "CYCLE_CLOSED",
+        previousCycle.id,
+      );
+    }
+
     // Get strategy config for this cycle
     const { data: strategyConfig, error: configError } = await this.supabase
       .from("strategy_config")
@@ -472,17 +486,28 @@ export class CycleStateManager {
       throw new Error("No active strategy configuration found");
     }
 
+    // Get accumulated reinvestment from pool if enabled
+    let reinvestmentAmount = new Decimal(0);
+    if (this.profitPoolService) {
+      reinvestmentAmount =
+        await this.profitPoolService.getReinvestmentForConfig(
+          this.strategyConfigId,
+        );
+    }
+
+    // Calculate total available capital (carryover + reinvestment from pool)
+    const totalCapital =
+      completionData.carryOverCapital + reinvestmentAmount.toNumber();
+
     // Calculate buy amount for new cycle with proper precision
     const buyAmount =
-      Math.floor(
-        (completionData.carryOverCapital / strategyConfig.max_purchases) *
-          100000000,
-      ) / 100000000;
+      Math.floor((totalCapital / strategyConfig.max_purchases) * 100000000) /
+      100000000;
 
     // Create new cycle with fresh ID
     const newCycleData: CycleStateInsert = {
       status: "READY",
-      capital_available: completionData.carryOverCapital,
+      capital_available: totalCapital,
       btc_accumulated: completionData.carryOverDust,
       btc_dust: completionData.carryOverDust,
       btc_accum_net: 0,
@@ -516,7 +541,7 @@ export class CycleStateManager {
     }
 
     logger.info(
-      `New cycle created [${this.strategyConfigId}]: profit ${completionData.finalProfit}, carryover ${completionData.carryOverCapital} USDT`,
+      `New cycle created [${this.strategyConfigId}]: profit ${completionData.finalProfit}, carryover ${completionData.carryOverCapital} + reinvestment ${reinvestmentAmount.toString()} = total ${totalCapital} USDT`,
       { timeframe: this.timeframe },
     );
 

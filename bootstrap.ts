@@ -42,9 +42,62 @@ import {
   StrategyConfigLoader,
   type StrategyConfig,
 } from "./src/config/strategy-config-loader.js";
+import { ProfitPoolService } from "./src/pool/profit-pool-service.js";
 
 import type { Database } from "./types/supabase.js";
 import { ConfigurationError } from "./src/config/index.js";
+import type { PoolConfig } from "./src/types/pool.types.js";
+
+/**
+ * Load pool configuration from database (profit_pool table)
+ * Returns undefined if no pool config exists or pool is disabled
+ */
+async function loadPoolConfigFromDatabase(
+  supabase: ReturnType<typeof createClient<Database>>,
+): Promise<PoolConfig | undefined> {
+  try {
+    const { data: poolRow, error } = await supabase
+      .from("profit_pool")
+      .select(
+        "is_enabled, reinvestment_percentage, funding_wallet_percentage, min_funding_transfer_amount",
+      )
+      .limit(1)
+      .single();
+
+    if (error) {
+      logger.warn("Failed to load pool config from database, pool disabled", {
+        error: error.message,
+      });
+      return undefined;
+    }
+
+    if (!poolRow || !poolRow.is_enabled) {
+      logger.info("Pool is disabled in database configuration");
+      return undefined;
+    }
+
+    const poolConfig: PoolConfig = {
+      enabled: poolRow.is_enabled,
+      reinvestmentPercentage: poolRow.reinvestment_percentage,
+      fundingWalletPercentage: poolRow.funding_wallet_percentage,
+      minFundingTransferAmount: poolRow.min_funding_transfer_amount,
+    };
+
+    logger.info("Pool configuration loaded from database", {
+      enabled: poolConfig.enabled,
+      reinvestmentPct: poolConfig.reinvestmentPercentage,
+      fundingWalletPct: poolConfig.fundingWalletPercentage,
+      minFundingTransfer: poolConfig.minFundingTransferAmount,
+    });
+
+    return poolConfig;
+  } catch (error) {
+    logger.warn("Failed to load pool config from database, pool disabled", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
+}
 
 // Load .env.local first, then .env as fallback
 dotenvConfig({ path: ".env.local" });
@@ -245,6 +298,16 @@ async function createOrchestratorForConfig(
     commissionManager,
   } = shared;
 
+  // Create profit pool service if pool is enabled
+  let profitPoolService: ProfitPoolService | undefined;
+  if (strategyConfig.pool?.enabled) {
+    profitPoolService = new ProfitPoolService(
+      supabase,
+      strategyConfig.pool,
+      tradingClient,
+    );
+  }
+
   // Create config-specific cycle state manager
   const cycleStateManager = new CycleStateManager(
     supabase,
@@ -256,6 +319,7 @@ async function createOrchestratorForConfig(
     tradingRules,
     strategyConfig.id, // Pass strategy config ID for filtering
     strategyConfig.timeframe, // Pass timeframe for logging context
+    profitPoolService, // Pass profit pool service if available
   );
 
   const strategyPauseMechanism = new StrategyPauseMechanism(
@@ -328,6 +392,7 @@ async function createOrchestratorForConfig(
     supabase,
     "BTCUSDT",
     strategyConfig,
+    profitPoolService, // Pass profit pool service if available
   );
 
   const buyOrderStateUpdater = new BuyOrderStateUpdater(
@@ -398,6 +463,24 @@ async function main() {
 
     const strategyConfigs =
       await shared.strategyConfigLoader.loadAllActiveConfigs(capitalPool);
+
+    // Load pool configuration from database and attach to strategy configs
+    const poolConfig = await loadPoolConfigFromDatabase(shared.supabase);
+    if (poolConfig) {
+      // Attach pool config to each strategy config
+      for (const config of strategyConfigs) {
+        config.pool = poolConfig;
+      }
+      console.log("💰 Profit Pool ENABLED");
+      console.log(
+        `   - Reinvestment: ${poolConfig.reinvestmentPercentage}% | Funding: ${poolConfig.fundingWalletPercentage}%`,
+      );
+      console.log(
+        `   - Min funding transfer: $${poolConfig.minFundingTransferAmount}`,
+      );
+    } else {
+      console.log("💰 Profit Pool: disabled");
+    }
 
     console.log(
       `✅ Loaded ${strategyConfigs.length} active strategy config(s)`,

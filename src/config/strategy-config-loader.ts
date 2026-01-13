@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { getConfig } from "./index.js";
 import { logger } from "../utils/logger.js";
+import type { PoolConfig } from "../types/pool.types.js";
 
 // Buy mode type - determines which buy engine to use
 export type BuyMode = "arithmetic" | "geom_modified";
@@ -21,6 +22,7 @@ export interface StrategyConfig {
   updatedAt: string;
   capitalAllocationPct?: number; // Optional percentage 0-100
   buyMode: BuyMode; // Buy mode: arithmetic (default) or geom_modified
+  pool?: PoolConfig; // Optional profit pool configuration
 }
 
 // Database record interface (snake_case from database)
