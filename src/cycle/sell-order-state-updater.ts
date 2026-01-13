@@ -196,7 +196,7 @@ export class SellOrderStateUpdater extends EventEmitter {
                 inline: false,
               },
               {
-                name: "💹 Sell Reference Price",
+                name: "💹 Avg Buy Price",
                 value: currentState.sell_reference_price
                   ? `$${currentState.sell_reference_price.toFixed(2)}`
                   : "Not set",
@@ -205,6 +205,28 @@ export class SellOrderStateUpdater extends EventEmitter {
               {
                 name: "🎯 Target Price (was)",
                 value: targetPrice ? `$${targetPrice.toFixed(2)}` : "Not set",
+                inline: false,
+              },
+              {
+                name: `📈 ATH (${this.strategyConfig?.athWindow || 20}-candle lookback)`,
+                value: currentState.ath_reference_price
+                  ? `$${currentState.ath_reference_price.toFixed(2)}`
+                  : "Not set",
+                inline: false,
+              },
+              {
+                name:
+                  this.strategyConfig?.buyMode === "geom_modified"
+                    ? "📊 Last Buy Price (p_last_buy)"
+                    : "📊 Buy Anchor (grid base)",
+                value:
+                  this.strategyConfig?.buyMode === "geom_modified"
+                    ? currentState.p_last_buy
+                      ? `$${currentState.p_last_buy.toFixed(2)}`
+                      : "Not set"
+                    : currentState.buy_anchor_price
+                      ? `$${currentState.buy_anchor_price.toFixed(2)}`
+                      : "Not set",
                 inline: false,
               },
               {
@@ -355,7 +377,7 @@ export class SellOrderStateUpdater extends EventEmitter {
               inline: false,
             },
             {
-              name: "💹 Sell Reference Price",
+              name: "💹 Avg Buy Price",
               value: currentState.sell_reference_price
                 ? `$${currentState.sell_reference_price.toFixed(2)}`
                 : "Not set",
@@ -364,6 +386,28 @@ export class SellOrderStateUpdater extends EventEmitter {
             {
               name: "🎯 Target Price (was)",
               value: targetPrice ? `$${targetPrice.toFixed(2)}` : "Not set",
+              inline: false,
+            },
+            {
+              name: `📈 ATH (${this.strategyConfig?.athWindow || 20}-candle lookback)`,
+              value: currentState.ath_reference_price
+                ? `$${currentState.ath_reference_price.toFixed(2)}`
+                : "Not set",
+              inline: false,
+            },
+            {
+              name:
+                this.strategyConfig?.buyMode === "geom_modified"
+                  ? "📊 Last Buy Price (p_last_buy)"
+                  : "📊 Buy Anchor (grid base)",
+              value:
+                this.strategyConfig?.buyMode === "geom_modified"
+                  ? currentState.p_last_buy
+                    ? `$${currentState.p_last_buy.toFixed(2)}`
+                    : "Not set"
+                  : currentState.buy_anchor_price
+                    ? `$${currentState.buy_anchor_price.toFixed(2)}`
+                    : "Not set",
               inline: false,
             },
             {

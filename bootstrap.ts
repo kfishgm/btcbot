@@ -393,18 +393,8 @@ async function main() {
     const shared = await createSharedDependencies();
 
     // Load all active strategy configs with validation
-    const usdtBalance = await shared.balanceManager.getBalance("USDT");
-
     // Use INITIAL_CAPITAL_USDT from .env as the capital pool for percentage calculations
     const capitalPool = parseFloat(process.env.INITIAL_CAPITAL_USDT || "3000");
-
-    // Validate we have enough balance for the capital pool
-    const actualBalance = usdtBalance.total.toNumber();
-    if (capitalPool > actualBalance) {
-      throw new Error(
-        `Capital pool ($${capitalPool}) exceeds available USDT balance ($${actualBalance.toFixed(2)})`,
-      );
-    }
 
     const strategyConfigs =
       await shared.strategyConfigLoader.loadAllActiveConfigs(capitalPool);

@@ -94,10 +94,10 @@ describe("SellTriggerDetector", () => {
       };
 
       const candle: Candle = {
-        close: 51302, // At threshold with commission: (50000 * 1.025) / 0.999 = 51301.3
+        close: 51250, // At threshold: 50000 * 1.025 = 51250 (no fee adjustment)
         high: 51350,
-        low: 51250,
-        open: 51280,
+        low: 51200,
+        open: 51200,
         volume: 100,
         timestamp: Date.now(),
       };
@@ -588,9 +588,9 @@ describe("SellTriggerDetector", () => {
         exchangeMinNotional: 10,
       };
 
-      // Sell threshold with commission = (50000.12345678 * 1.03) / 0.999 = 51551.67839...
+      // Sell threshold = 50000.12345678 * 1.03 = 51500.127... (no fee adjustment)
       const candle: Candle = {
-        close: 51551.68, // At/above threshold with commission
+        close: 51500.13, // At/above threshold
         high: 51600,
         low: 51400,
         open: 51450,
@@ -710,10 +710,10 @@ describe("SellTriggerDetector", () => {
       };
 
       const candle: Candle = {
-        close: 50101, // With commission: (50000 * 1.001) / 0.999 = 50100.1, so need > 50100
+        close: 50050, // Threshold = 50000 * 1.001 = 50050 (no fee adjustment)
         high: 50150,
-        low: 50040,
-        open: 50050,
+        low: 50000,
+        open: 50010,
         volume: 100,
         timestamp: Date.now(),
       };
@@ -925,11 +925,11 @@ describe("SellTriggerDetector", () => {
         exchangeMinNotional: 10,
       };
 
-      // Sell threshold with 0.1% commission = (60000 * 1.04) / 0.999 = 62462.46
+      // Sell threshold = 60000 * 1.04 = 62400 (no fee adjustment)
       const testCases = [
-        { close: 62463, shouldSell: true }, // At/above threshold
+        { close: 62400, shouldSell: true }, // At threshold
         { close: 62500, shouldSell: true }, // Above threshold
-        { close: 62462, shouldSell: false }, // Just below threshold
+        { close: 62399, shouldSell: false }, // Just below threshold
         { close: 63000, shouldSell: true }, // Well above threshold
         { close: 61000, shouldSell: false }, // Well below threshold
       ];
@@ -1159,8 +1159,8 @@ describe("SellTriggerDetector", () => {
         risePercentage,
       );
 
-      // With default 0.1% commission: (50000 * 1.035) / (1 - 0.001) = 51801.8
-      expect(threshold).toBeCloseTo(51801.8, 1);
+      // Threshold = 50000 * 1.035 = 51750 (no fee adjustment)
+      expect(threshold).toBeCloseTo(51750, 1);
     });
 
     // Drift calculation test removed - drift no longer blocks trades
@@ -1290,15 +1290,15 @@ describe("SellTriggerDetector", () => {
         btcSpot: 0.01,
       };
 
-      // Test at different prices (with 0.1% commission: threshold = (50000 * 1.03) / 0.999 = 51551.55)
+      // Test at different prices (threshold = 50000 * 1.03 = 51500, no fee adjustment)
       expect(
-        await detector.wouldTriggerAtPrice(state, config, 51552, balances),
-      ).toBe(true); // At/above threshold
+        await detector.wouldTriggerAtPrice(state, config, 51500, balances),
+      ).toBe(true); // At threshold
       expect(
         await detector.wouldTriggerAtPrice(state, config, 52000, balances),
       ).toBe(true); // Above threshold
       expect(
-        await detector.wouldTriggerAtPrice(state, config, 51551, balances),
+        await detector.wouldTriggerAtPrice(state, config, 51499, balances),
       ).toBe(false); // Just below threshold
     });
 
@@ -1319,8 +1319,8 @@ describe("SellTriggerDetector", () => {
 
       const threshold = await detector.getNextSellThreshold(state, config);
 
-      // With 0.1% commission: (60000 * 1.04) / (1 - 0.001) = 62462.46
-      expect(threshold).toBeCloseTo(62462.46, 2);
+      // Threshold = 60000 * 1.04 = 62400 (no fee adjustment)
+      expect(threshold).toBeCloseTo(62400, 2);
     });
 
     it("should return null threshold when no reference price", async () => {

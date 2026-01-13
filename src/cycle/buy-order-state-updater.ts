@@ -246,37 +246,49 @@ export class BuyOrderStateUpdater extends EventEmitter {
               inline: false,
             },
             {
-              name: "⚖️ Sell Reference Price (SRP)",
+              name: "⚖️ Avg Buy Price",
               value: `$${updates.sell_reference_price.toFixed(2)} USDT/BTC`,
               inline: false,
             },
             {
-              name: "📊 SRP Calculation",
-              value: `(total USDT + fees) / tradeable BTC`,
-              inline: false,
-            },
-            {
-              name: "📈 ATH (20-candle lookback)",
+              name: `📈 ATH (${this.strategyConfig?.athWindow || 20}-candle lookback)`,
               value: currentState.ath_reference_price
                 ? `$${currentState.ath_reference_price.toFixed(2)}`
                 : "Not set",
               inline: false,
             },
             {
-              name: "📊 Buy Anchor (cycle base)",
-              value: updates.buy_anchor_price
-                ? `$${updates.buy_anchor_price.toFixed(2)}`
-                : "Not set",
+              name:
+                this.strategyConfig?.buyMode === "geom_modified"
+                  ? "📊 Last Buy Price (p_last_buy)"
+                  : "📊 Buy Anchor (grid base)",
+              value:
+                this.strategyConfig?.buyMode === "geom_modified"
+                  ? updates.p_last_buy
+                    ? `$${updates.p_last_buy.toFixed(2)}`
+                    : "Not set"
+                  : updates.buy_anchor_price
+                    ? `$${updates.buy_anchor_price.toFixed(2)}`
+                    : "Not set",
               inline: false,
             },
             {
               name: "🎯 Target Sell Price",
-              value: `$${targetSellPrice.toFixed(2)} (+${(actualRisePercentage * 100).toFixed(1)}% after est. fees)`,
+              value: `$${targetSellPrice.toFixed(2)} (+${(actualRisePercentage * 100).toFixed(1)}% from avg cost)`,
               inline: false,
             },
             {
-              name: "📘 Target Formula",
-              value: `SRP × (1 + rise%) / (1 - fee%)`,
+              name: "📉 Next Buy Target",
+              value: (() => {
+                const dropPct = this.strategyConfig?.dropPercentage || 0.03;
+                const anchorPrice =
+                  this.strategyConfig?.buyMode === "geom_modified"
+                    ? updates.p_last_buy
+                    : updates.buy_anchor_price;
+                if (!anchorPrice) return "Not set";
+                const nextBuyPrice = anchorPrice * (1 - dropPct);
+                return `$${nextBuyPrice.toFixed(2)} (-${(dropPct * 100).toFixed(1)}% from anchor)`;
+              })(),
               inline: false,
             },
             {
@@ -531,26 +543,25 @@ export class BuyOrderStateUpdater extends EventEmitter {
     };
   }
 
+  /**
+   * Calculate average buy price for the cycle
+   * Formula: cost_accum_usdt / btc_accum_net
+   * Note: Uses btc_accum_net directly (not tradeable-only) for simpler, accurate avg price
+   */
   private calculateReferencePrice(
     costAccumUsdt: number,
     btcAccumNet: number,
   ): number {
-    // Calculate tradeable BTC (exclude dust) using Binance's precision
-    const tradeableBTC = calculateTradeableBTC(
-      btcAccumNet,
-      this.stepSize,
-      this.baseAssetPrecision,
-    );
-
-    if (tradeableBTC === 0) {
-      logger.warn("[BUY] All BTC is dust, reference price = 0", {
+    if (btcAccumNet === 0) {
+      logger.warn("[BUY] Net BTC is zero, reference price = 0", {
         timeframe: this.strategyConfig?.timeframe || "unknown",
         btcNet: btcAccumNet,
       });
       return 0;
     }
 
-    const referencePrice = costAccumUsdt / tradeableBTC;
+    // avg_buy_price = cost_accum_usdt / btc_accum_net
+    const referencePrice = costAccumUsdt / btcAccumNet;
     return Math.round(referencePrice * 100) / 100;
   }
 

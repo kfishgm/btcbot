@@ -70,8 +70,12 @@ export class SellTriggerDetector {
   constructor(
     private strategyConfig: StrategyConfig,
     private tradingRules?: TradingRules,
-    private commissionManager?: CommissionManager,
-  ) {}
+    // CommissionManager kept for backward compatibility but no longer used for threshold calculation
+    commissionManager?: CommissionManager,
+  ) {
+    // No-op to satisfy TypeScript's unused parameter check
+    void commissionManager;
+  }
 
   /**
    * Set trading precision values
@@ -193,35 +197,20 @@ export class SellTriggerDetector {
   }
 
   /**
-   * Calculate the sell threshold price accounting for commission
+   * Calculate the sell threshold price (market movement target)
+   * Formula: avg_buy_price × (1 + rise%)
+   * Note: Fees do NOT affect the target - it represents market movement, not net profit
+   *
    * @param referencePrice Average cost (sell_reference_price = cost_accum_usdt / btc_accum_net)
    * @param risePercentage Rise percentage (e.g., 0.03 for 3%)
-   * @returns Sell threshold price adjusted for commission
+   * @returns Sell threshold price
    */
   public async calculateSellThreshold(
     referencePrice: number,
     risePercentage: number,
   ): Promise<number> {
-    // Get current taker commission rate (for market orders)
-    let commissionRate = 0.001; // Default 0.1%
-
-    if (this.commissionManager) {
-      try {
-        commissionRate = await this.commissionManager.getTakerCommission();
-      } catch (error) {
-        logger.warn("Failed to get commission rate, using default", {
-          timeframe: this.strategyConfig.timeframe,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    // Use shared utility for calculation
-    return calculateSellThreshold(
-      referencePrice,
-      risePercentage,
-      commissionRate,
-    );
+    // Use shared utility for calculation (commission rate no longer affects target)
+    return calculateSellThreshold(referencePrice, risePercentage, 0);
   }
 
   /**
@@ -264,7 +253,7 @@ export class SellTriggerDetector {
    * Log sell decision
    * @param shouldSell Whether sell was triggered
    * @param currentPrice Current market price
-   * @param threshold Sell threshold price (avg_cost * (1 + %Rise))
+   * @param threshold Sell threshold price (avg_buy × (1 + %Rise))
    * @param amount BTC amount to sell
    */
   private logSellDecision(
@@ -280,7 +269,7 @@ export class SellTriggerDetector {
         price: currentPrice,
         sellThreshold: threshold,
         amount: amount,
-        message: `Price ${this.formatPrice(currentPrice)} >= Sell Threshold ${this.formatPrice(threshold)} (avg_cost * rise%), Amount: ${this.formatBTC(amount)} BTC`,
+        message: `Price ${this.formatPrice(currentPrice)} >= Target ${this.formatPrice(threshold)} (avg_buy × (1+rise%)), Amount: ${this.formatBTC(amount)} BTC`,
       });
     }
     // Don't log when not triggered to avoid spam

@@ -376,6 +376,14 @@ export type Database = {
       }
     }
     Functions: {
+      batch_activate_strategy_configs: {
+        Args: { config_ids: string[] }
+        Returns: undefined
+      }
+      batch_deactivate_strategy_configs: {
+        Args: Record<string, never>
+        Returns: undefined
+      }
       batch_update_states: {
         Args: { p_updates: Json[] }
         Returns: Json
@@ -537,4 +545,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

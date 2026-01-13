@@ -61,26 +61,44 @@ configs:
     athWindow: 40 # 50 candles = ~2 days
     mode: "geom_modified" # Grid works well for slower timeframes
     capitalPct: 100
+  # - timeframe: "1h"
+  #   dropPct: 1.2
+  #   risePct: 2
+  #   maxPurchases: 15
+  #   minBuyUsdt: 40
+  #   athWindow: 40
+  #   mode: "geom_modified" # Grid works well for slower timeframes
+  #   capitalPct: 15
 
   # 4-hour: Position trading
   # - timeframe: "4h"
-  #   dropPct: 3 # 3% drop
-  #   risePct: 4 # 3% rise
+  #   dropPct: 3
+  #   risePct: 4
   #   maxPurchases: 15
-  #   minBuyUsdt: 10
-  #   athWindow: 25 # 20 candles = ~3.3 days
+  #   minBuyUsdt: 55.66
+  #   athWindow: 25
   #   mode: "geom_modified"
-  #   capitalPct: 30
+  #   capitalPct: 25
 
   # 1 Day: Position trading
   # - timeframe: "1d"
-  #   dropPct: 7 # 3% drop
-  #   risePct: 8 # 3% rise
+  #   dropPct: 7
+  #   risePct: 8
   #   maxPurchases: 15
-  #   minBuyUsdt: 13
-  #   athWindow: 20 # 20 candles = ~3.3 days
+  #   minBuyUsdt: 80
+  #   athWindow: 20
   #   mode: "geom_modified"
-  #   capitalPct: 40
+  #   capitalPct: 30
+
+  # 1 Week: Position trading
+  # - timeframe: "1w"
+  #   dropPct: 25
+  #   risePct: 30
+  #   maxPurchases: 6
+  #   minBuyUsdt: 200
+  #   athWindow: 20
+  #   mode: "geom_modified"
+  #   capitalPct: 30
 
 # Alternative: Fixed USDT allocation (uncomment to use instead of percentages)
 # configs:

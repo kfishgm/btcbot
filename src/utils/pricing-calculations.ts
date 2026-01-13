@@ -4,28 +4,27 @@
  */
 
 /**
- * Calculate the sell threshold price that accounts for commission fees
- * This ensures that after selling and paying commission, the net proceeds
- * achieve the target rise percentage above the reference price.
+ * Calculate the sell threshold price based on average buy price and rise percentage.
+ * Target represents market movement, NOT net profit after fees.
  *
- * Formula: (Reference Price × (1 + %Rise)) / (1 - fee_sell)
+ * Formula: Reference Price × (1 + %Rise)
  *
- * @param referencePrice - The reference price (average cost basis)
+ * @param referencePrice - The average buy price (cost_accum_usdt / btc_accum_net)
  * @param risePercentage - The target profit percentage (e.g., 0.005 for 0.5%)
- * @param commissionRate - The exchange commission rate (e.g., 0.001 for 0.1%)
- * @returns The adjusted sell price that accounts for commission
+ * @param _commissionRate - DEPRECATED: No longer used for target calculation (kept for backward compatibility)
+ * @returns The sell threshold price
  *
  * @example
- * // 0.5% profit target with 0.1% commission
- * calculateSellThreshold(100, 0.005, 0.001)
- * // Returns: ~100.601 (ensures 0.5% net profit after 0.1% commission)
+ * // 0.5% profit target
+ * calculateSellThreshold(100, 0.005, 0)
+ * // Returns: 100.5 (avg_buy × 1.005)
  */
 export function calculateSellThreshold(
   referencePrice: number,
   risePercentage: number,
-  commissionRate: number,
+  _commissionRate: number,
 ): number {
-  const targetGrossPrice = referencePrice * (1 + risePercentage);
-  const adjustedSellPrice = targetGrossPrice / (1 - commissionRate);
-  return adjustedSellPrice;
+  // Target = avg_buy_price × (1 + rise%)
+  // Fees do NOT alter the target - it represents market movement, not net profit
+  return referencePrice * (1 + risePercentage);
 }

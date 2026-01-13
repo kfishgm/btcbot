@@ -215,16 +215,17 @@ export class StartupValidator {
       const usdtBalance = await this.config.balanceManager.getBalance("USDT");
       const btcBalance = await this.config.balanceManager.getBalance("BTC");
 
-      // Check USDT >= initial_capital_usdt
+      // Warn if USDT < initial_capital_usdt (informational only, not a hard fail)
+      // Order execution will check usdt_free >= buy_amount before each buy
       const initialCapital = parseFloat(
         process.env.INITIAL_CAPITAL_USDT || "0",
       );
       if (usdtBalance.free.lt(initialCapital)) {
-        errors.push({
-          code: "INSUFFICIENT_USDT",
-          message: `Insufficient USDT balance. Required: ${initialCapital}, Available: ${usdtBalance.free.toFixed(2)}`,
+        warnings.push({
+          code: "LOW_USDT_BALANCE",
+          message: `USDT balance (${usdtBalance.free.toFixed(2)}) is below configured capital (${initialCapital}). Bot will wait for sufficient balance before buying.`,
           details: {
-            required: initialCapital,
+            configured: initialCapital,
             available: usdtBalance.free.toNumber(),
           },
         });

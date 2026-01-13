@@ -452,16 +452,17 @@ describe("StartupValidator", () => {
       expect(result.errors).toHaveLength(0);
     });
 
-    it("should fail when USDT balance is insufficient", async () => {
+    it("should warn when USDT balance is below configured capital", async () => {
       process.env.INITIAL_CAPITAL_USDT = "2000";
 
       const result = await validator.validateBalances();
 
-      expect(result.success).toBe(false);
-      expect(result.errors).toContainEqual(
+      // Low USDT is now a warning, not an error - bot will wait for sufficient balance
+      expect(result.success).toBe(true);
+      expect(result.warnings).toContainEqual(
         expect.objectContaining({
-          code: "INSUFFICIENT_USDT",
-          message: expect.stringContaining("Insufficient USDT balance"),
+          code: "LOW_USDT_BALANCE",
+          message: expect.stringContaining("below configured capital"),
         }),
       );
     });

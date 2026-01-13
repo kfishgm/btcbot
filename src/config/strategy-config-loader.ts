@@ -329,10 +329,10 @@ export class StrategyConfigLoader {
       );
     }
 
-    // Validate maxPurchases (must be at least 1, integer)
+    // Validate maxPurchases (must be between 1 and 30, integer)
     const maxPurchases = cfg.maxPurchases as number;
-    if (maxPurchases < 1) {
-      throw new StrategyConfigError("max_purchases must be at least 1");
+    if (maxPurchases < 1 || maxPurchases > 30) {
+      throw new StrategyConfigError("max_purchases must be between 1 and 30");
     }
     if (!Number.isInteger(maxPurchases)) {
       throw new StrategyConfigError("max_purchases must be an integer");
