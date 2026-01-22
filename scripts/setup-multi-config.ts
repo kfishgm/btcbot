@@ -869,7 +869,10 @@ async function main(): Promise<void> {
   for (const result of upsertResults) {
     const config = yamlContent.configs.find(
       (c) => c.timeframe === result.timeframe,
-    )!;
+    );
+    if (!config) {
+      continue; // Should never happen, but satisfies TypeScript
+    }
     let cycleReset = false;
 
     if (options.reset && result.id !== "pending") {

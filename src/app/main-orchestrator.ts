@@ -526,10 +526,19 @@ export class MainOrchestrator extends EventEmitter {
             },
           );
 
+          // Calculate reference price (average cost per BTC) for profit calculation
+          const btcAccum = new Decimal(workingState.btc_accumulated);
+          const costAccum = new Decimal(workingState.cost_accum_usdt || 0);
+          const referencePrice = btcAccum.gt(0)
+            ? costAccum.div(btcAccum)
+            : new Decimal(closePrice); // Fallback to current price if no cost basis
+
           const sellOrderResult = await this.config.sellOrderPlacer.placeOrder(
-            new Decimal(workingState.btc_accumulated),
+            btcAccum,
             new Decimal(closePrice),
-            new Decimal(this.strategyConfig?.slippageSellPct || 0.003),
+            referencePrice,
+            this.strategyConfig?.slippageSellPct || 0.003,
+            btcAccum, // totalBtcAccumulated for validation
           );
 
           if (sellOrderResult.executedQty.gt(0)) {

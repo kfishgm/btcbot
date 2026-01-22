@@ -60,14 +60,6 @@ export class ProfitPoolRepository {
   }
 
   /**
-   * Get current pool state
-   */
-  async getPoolState(): Promise<ProfitPool> {
-    const pool = await this.getOrCreatePool();
-    return pool;
-  }
-
-  /**
    * Add net profit to pool
    * Updates total_net_profits, allocated_to_reinvestment, and allocated_to_funding_wallet
    */

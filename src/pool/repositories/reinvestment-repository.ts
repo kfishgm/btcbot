@@ -19,8 +19,48 @@ export interface DistributionRecord {
   items: ReinvestmentDistributionItem[];
 }
 
+/** Row type returned from Supabase join query */
+interface DistributionRow {
+  id: string;
+  pool_id: string;
+  total_amount: string;
+  timestamp: string;
+  source_event: "SELL" | "CYCLE_CLOSED" | "NEW_CYCLE";
+  source_cycle_id: string | null;
+  created_at: string;
+  reinvestment_distribution_items: ReinvestmentDistributionItem[];
+}
+
+/** Fields to select in distribution queries */
+const DISTRIBUTION_SELECT = `
+  id,
+  pool_id,
+  total_amount,
+  timestamp,
+  source_event,
+  source_cycle_id,
+  created_at,
+  reinvestment_distribution_items (*)
+`;
+
 export class ReinvestmentRepository {
   constructor(private supabase: SupabaseClient) {}
+
+  /** Convert a database row to a DistributionRecord */
+  private toDistributionRecord(row: DistributionRow): DistributionRecord {
+    return {
+      distribution: {
+        id: row.id,
+        pool_id: row.pool_id,
+        total_amount: row.total_amount,
+        timestamp: row.timestamp,
+        source_event: row.source_event,
+        source_cycle_id: row.source_cycle_id,
+        created_at: row.created_at,
+      },
+      items: row.reinvestment_distribution_items,
+    };
+  }
 
   /**
    * Check if profit has already been added to pool (idempotency)
@@ -135,30 +175,9 @@ export class ReinvestmentRepository {
     distributions: DistributionRecord[];
     total: number;
   }> {
-    // Get count
-    const { count, error: countError } = await this.supabase
+    const { data, count, error } = await this.supabase
       .from("reinvestment_distributions")
-      .select("*", { count: "exact", head: true });
-
-    if (countError) {
-      throw countError;
-    }
-
-    // Get data
-    const { data, error } = await this.supabase
-      .from("reinvestment_distributions")
-      .select(
-        `
-        id,
-        pool_id,
-        total_amount,
-        timestamp,
-        source_event,
-        source_cycle_id,
-        created_at,
-        reinvestment_distribution_items (*)
-      `,
-      )
+      .select(DISTRIBUTION_SELECT, { count: "exact" })
       .order("timestamp", { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -166,36 +185,10 @@ export class ReinvestmentRepository {
       throw error;
     }
 
-    const distributions: DistributionRecord[] = (data ?? []).map(
-      (row: unknown) => {
-        const typedRow = row as {
-          id: string;
-          pool_id: string;
-          total_amount: string;
-          timestamp: string;
-          source_event: "SELL" | "CYCLE_CLOSED" | "NEW_CYCLE";
-          source_cycle_id: string | null;
-          created_at: string;
-          reinvestment_distribution_items: ReinvestmentDistributionItem[];
-        };
-
-        return {
-          distribution: {
-            id: typedRow.id,
-            pool_id: typedRow.pool_id,
-            total_amount: typedRow.total_amount,
-            timestamp: typedRow.timestamp,
-            source_event: typedRow.source_event,
-            source_cycle_id: typedRow.source_cycle_id,
-            created_at: typedRow.created_at,
-          },
-          items: typedRow.reinvestment_distribution_items,
-        };
-      },
-    );
-
     return {
-      distributions,
+      distributions: (data ?? []).map((row) =>
+        this.toDistributionRecord(row as DistributionRow),
+      ),
       total: count ?? 0,
     };
   }
@@ -208,18 +201,7 @@ export class ReinvestmentRepository {
   ): Promise<DistributionRecord | null> {
     const { data, error } = await this.supabase
       .from("reinvestment_distributions")
-      .select(
-        `
-        id,
-        pool_id,
-        total_amount,
-        timestamp,
-        source_event,
-        source_cycle_id,
-        created_at,
-        reinvestment_distribution_items (*)
-      `,
-      )
+      .select(DISTRIBUTION_SELECT)
       .eq("id", distributionId)
       .single();
 
@@ -230,29 +212,7 @@ export class ReinvestmentRepository {
       throw error;
     }
 
-    const typedData = data as {
-      id: string;
-      pool_id: string;
-      total_amount: string;
-      timestamp: string;
-      source_event: "SELL" | "CYCLE_CLOSED" | "NEW_CYCLE";
-      source_cycle_id: string | null;
-      created_at: string;
-      reinvestment_distribution_items: ReinvestmentDistributionItem[];
-    };
-
-    return {
-      distribution: {
-        id: typedData.id,
-        pool_id: typedData.pool_id,
-        total_amount: typedData.total_amount,
-        timestamp: typedData.timestamp,
-        source_event: typedData.source_event,
-        source_cycle_id: typedData.source_cycle_id,
-        created_at: typedData.created_at,
-      },
-      items: typedData.reinvestment_distribution_items,
-    };
+    return this.toDistributionRecord(data as DistributionRow);
   }
 
   /**

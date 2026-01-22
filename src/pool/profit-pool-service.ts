@@ -257,19 +257,19 @@ export class ProfitPoolService {
       minTransferAmount: this.config.minFundingTransferAmount,
     });
 
+    // Create transfer record before calling API (for audit trail)
+    const transfer = await this.fundingTransferRepo.createTransfer(
+      pool.id,
+      transferAmount,
+      "PENDING",
+    );
+
+    logger.info("Created pending transfer record", {
+      transferId: transfer.id,
+      amount: transferAmount.toString(),
+    });
+
     try {
-      // Create transfer record before calling API (for audit trail)
-      const transfer = await this.fundingTransferRepo.createTransfer(
-        pool.id,
-        transferAmount,
-        "PENDING",
-      );
-
-      logger.info("Created pending transfer record", {
-        transferId: transfer.id,
-        amount: transferAmount.toString(),
-      });
-
       // Call Binance API
       const result = await this.callUniversalTransfer(
         transferAmount.toNumber(),
@@ -293,14 +293,8 @@ export class ProfitPoolService {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
 
-      // Mark transfer as failed
-      const transfer = await this.fundingTransferRepo.createTransfer(
-        pool.id,
-        transferAmount,
-        "FAILED",
-      );
-
-      await this.fundingTransferRepo.markFailed(transfer.id, errorMsg);
+      // Mark the existing transfer as failed (not a new record)
+      await this.fundingTransferRepo.markFailed(transfer.id, errorMsg, false);
 
       // Keep full amount in pool for retry (including DUST)
       logger.error("Funding transfer failed, will retry later", {

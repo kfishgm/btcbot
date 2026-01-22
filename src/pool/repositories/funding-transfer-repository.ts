@@ -161,7 +161,6 @@ export class FundingTransferRepository {
     transfers: FundingWalletTransfer[];
     total: number;
   }> {
-    // Build query
     let query = this.supabase
       .from("funding_wallet_transfers")
       .select("*", { count: "exact" });
@@ -170,21 +169,7 @@ export class FundingTransferRepository {
       query = query.eq("status", status);
     }
 
-    // Get count
-    const { count, error: countError } = await query;
-
-    if (countError) {
-      throw countError;
-    }
-
-    // Get paginated data
-    let dataQuery = this.supabase.from("funding_wallet_transfers").select("*");
-
-    if (status) {
-      dataQuery = dataQuery.eq("status", status);
-    }
-
-    const { data, error } = await dataQuery
+    const { data, count, error } = await query
       .order("timestamp", { ascending: false })
       .range(offset, offset + limit - 1);
 
