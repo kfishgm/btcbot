@@ -220,20 +220,42 @@ export class ProfitPoolService {
    * Handles DUST (amounts below threshold) by keeping them in the pool for next batch.
    *
    * Process:
-   * 1. Check current pending amount (includes previous DUST)
-   * 2. If below threshold, keep for next batch (DUST accumulation)
-   * 3. If >= threshold, calculate transferable amount (whole units of minTransferAmount)
-   * 4. Call Binance API to transfer
-   * 5. Record transfer and update DUST
-   * 6. On failure, keep full amount for retry
+   * 1. Add incoming funding to pool's allocated_to_funding_wallet
+   * 2. Check current pending amount (includes previous DUST)
+   * 3. If below threshold, keep for next batch (DUST accumulation)
+   * 4. If >= threshold, calculate transferable amount (whole units of minTransferAmount)
+   * 5. Call Binance API to transfer
+   * 6. Record transfer and update DUST
+   * 7. On failure, keep full amount for retry
+   *
+   * @param incomingFunding Amount to add to funding wallet
    */
-  private async processFundingWallet(incomingFunding: Decimal): Promise<void> {
+  async processFundingWallet(incomingFunding: Decimal): Promise<void> {
+    if (!this.config.enabled) {
+      logger.debug("Pool disabled, skipping funding wallet processing");
+      return;
+    }
+
+    if (incomingFunding.lte(0)) {
+      logger.debug("Non-positive funding amount, skipping", {
+        amount: incomingFunding.toString(),
+      });
+      return;
+    }
+
+    // First, add incoming funding to the pool
+    await this.profitPoolRepo.updateAllocatedFundingWallet(
+      incomingFunding,
+      "add",
+    );
+
+    // Re-fetch pool to get updated total
     const pool = await this.profitPoolRepo.getOrCreatePool();
     const pending = new Decimal(pool.allocated_to_funding_wallet);
 
     logger.debug("Processing funding wallet", {
       incomingAmount: incomingFunding.toString(),
-      currentPending: pending.toString(),
+      totalPending: pending.toString(),
       minTransferAmount: this.config.minFundingTransferAmount,
     });
 

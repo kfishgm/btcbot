@@ -4,6 +4,7 @@ import { logger } from "../utils/logger.js";
 import type { TradingRules } from "../exchange/trading-rules.js";
 import Decimal from "decimal.js";
 import type { ProfitPoolService } from "../pool/profit-pool-service.js";
+import type { EarnFlexService } from "../earn/earn-flex-service.js";
 
 export interface CycleStateManagerConfig {
   initialCapitalUSDT: number;
@@ -31,6 +32,7 @@ export class CycleStateManager {
   private strategyConfigId: string;
   private timeframe: string;
   private profitPoolService: ProfitPoolService | null = null;
+  private earnFlexService: EarnFlexService | null = null;
 
   constructor(
     supabase: SupabaseClient<Database>,
@@ -39,6 +41,7 @@ export class CycleStateManager {
     strategyConfigId: string,
     timeframe: string,
     profitPoolService?: ProfitPoolService,
+    earnFlexService?: EarnFlexService,
   ) {
     this.supabase = supabase;
     this.config = config;
@@ -46,6 +49,7 @@ export class CycleStateManager {
     this.strategyConfigId = strategyConfigId;
     this.timeframe = timeframe;
     this.profitPoolService = profitPoolService ?? null;
+    this.earnFlexService = earnFlexService ?? null;
   }
 
   async initialize(): Promise<void> {
@@ -495,9 +499,28 @@ export class CycleStateManager {
         );
     }
 
-    // Calculate total available capital (carryover + reinvestment from pool)
-    const totalCapital =
-      completionData.carryOverCapital + reinvestmentAmount.toNumber();
+    // Get USDT capital from Earn Flex if integrated (principal + pending)
+    // Note: When Earn Flex is integrated, carryOverCapital has already been
+    // subscribed to Earn Flex (or added to pending), so we use getTotalCapital
+    // instead of adding carryOverCapital separately to avoid double-counting.
+    let earnFlexCapital = new Decimal(0);
+    const earnFlexIntegrated = this.earnFlexService?.isInitialized() ?? false;
+
+    if (earnFlexIntegrated && this.earnFlexService) {
+      // Get total from Earn Flex (principal in Earn + pending in SPOT)
+      earnFlexCapital = await this.earnFlexService.getTotalCapital(
+        this.strategyConfigId,
+        "USDT",
+      );
+    }
+
+    // Calculate total available capital
+    // - If Earn Flex integrated: use earnFlexCapital (already includes subscribed carryOver)
+    // - If not integrated: use carryOverCapital directly
+    // Plus reinvestment from shared pool (if using that model)
+    const totalCapital = earnFlexIntegrated
+      ? earnFlexCapital.toNumber() + reinvestmentAmount.toNumber()
+      : completionData.carryOverCapital + reinvestmentAmount.toNumber();
 
     // Calculate buy amount for new cycle with proper precision
     const buyAmount =
@@ -541,7 +564,9 @@ export class CycleStateManager {
     }
 
     logger.info(
-      `New cycle created [${this.strategyConfigId}]: profit ${completionData.finalProfit}, carryover ${completionData.carryOverCapital} + reinvestment ${reinvestmentAmount.toString()} = total ${totalCapital} USDT`,
+      earnFlexIntegrated
+        ? `New cycle created [${this.strategyConfigId}]: profit ${completionData.finalProfit}, earnFlexCapital ${earnFlexCapital.toString()} + reinvestment ${reinvestmentAmount.toString()} = total ${totalCapital} USDT`
+        : `New cycle created [${this.strategyConfigId}]: profit ${completionData.finalProfit}, carryover ${completionData.carryOverCapital} + reinvestment ${reinvestmentAmount.toString()} = total ${totalCapital} USDT`,
       { timeframe: this.timeframe },
     );
 

@@ -15,6 +15,12 @@ import type {
   BinanceListenKey,
   CreateOrderParams,
   BinanceExchangeInfo,
+  SimpleEarnFlexibleProduct,
+  SimpleEarnFlexibleProductListResponse,
+  SimpleEarnFlexiblePosition,
+  SimpleEarnFlexiblePositionResponse,
+  SimpleEarnSubscribeResult,
+  SimpleEarnRedeemResult,
 } from "./types";
 
 export class BinanceClient {
@@ -685,5 +691,154 @@ export class BinanceClient {
       return `${this.wsUrl}/stream?streams=${streams.join("/")}`;
     }
     return `${this.wsUrl}/ws/${streams}`;
+  }
+
+  // =============================================
+  // Simple Earn Flexible API Methods
+  // =============================================
+
+  /**
+   * Get Simple Earn Flexible products list
+   * Used to find product IDs for USDT, BTC
+   * GET /sapi/v1/simple-earn/flexible/list
+   */
+  async getSimpleEarnFlexibleProducts(
+    asset?: string,
+  ): Promise<SimpleEarnFlexibleProduct[]> {
+    const params: Record<string, unknown> = {
+      size: 100, // Max per page
+    };
+    if (asset) {
+      params.asset = asset;
+    }
+
+    const response =
+      await this.makeRequest<SimpleEarnFlexibleProductListResponse>(
+        "/sapi/v1/simple-earn/flexible/list",
+        "GET",
+        params,
+        true,
+      );
+
+    return response.rows || [];
+  }
+
+  /**
+   * Subscribe to Simple Earn Flexible product
+   * POST /sapi/v1/simple-earn/flexible/subscribe
+   */
+  async subscribeSimpleEarnFlexible(
+    productId: string,
+    amount: number,
+    autoSubscribe: boolean = false,
+  ): Promise<SimpleEarnSubscribeResult> {
+    if (!productId) {
+      throw new Error("Product ID is required");
+    }
+    if (amount <= 0) {
+      throw new Error("Amount must be greater than 0");
+    }
+
+    // Binance API expects boolean as string "true" or "false"
+    const params: Record<string, unknown> = {
+      productId,
+      amount,
+      autoSubscribe: autoSubscribe ? "true" : "false",
+    };
+
+    return this.makeRequest<SimpleEarnSubscribeResult>(
+      "/sapi/v1/simple-earn/flexible/subscribe",
+      "POST",
+      params,
+      true,
+    );
+  }
+
+  /**
+   * Get Simple Earn Flexible positions
+   * Used to get current positions and interest earned
+   * GET /sapi/v1/simple-earn/flexible/position
+   */
+  async getSimpleEarnFlexiblePositions(
+    asset?: string,
+  ): Promise<SimpleEarnFlexiblePosition[]> {
+    const params: Record<string, unknown> = {
+      size: 100, // Max per page
+    };
+    if (asset) {
+      params.asset = asset;
+    }
+
+    const response = await this.makeRequest<SimpleEarnFlexiblePositionResponse>(
+      "/sapi/v1/simple-earn/flexible/position",
+      "GET",
+      params,
+      true,
+    );
+
+    return response.rows || [];
+  }
+
+  /**
+   * Redeem from Simple Earn Flexible
+   * POST /sapi/v1/simple-earn/flexible/redeem
+   */
+  async redeemSimpleEarnFlexible(
+    productId: string,
+    amount?: number,
+    redeemAll: boolean = false,
+  ): Promise<SimpleEarnRedeemResult> {
+    if (!productId) {
+      throw new Error("Product ID is required");
+    }
+    if (!redeemAll && (amount === undefined || amount <= 0)) {
+      throw new Error("Amount must be greater than 0 when not redeeming all");
+    }
+
+    const params: Record<string, unknown> = {
+      productId,
+      destAccount: "SPOT", // Always redeem to spot for trading
+    };
+
+    // Binance API expects boolean as string "true" or "false"
+    if (redeemAll) {
+      params.redeemAll = "true";
+    } else if (amount !== undefined) {
+      params.amount = amount;
+    }
+
+    return this.makeRequest<SimpleEarnRedeemResult>(
+      "/sapi/v1/simple-earn/flexible/redeem",
+      "POST",
+      params,
+      true,
+    );
+  }
+
+  /**
+   * Set auto-subscribe status for a Simple Earn Flexible product
+   * CRITICAL: Must disable for our controlled flow
+   * POST /sapi/v1/simple-earn/flexible/setAutoSubscribe
+   */
+  async setSimpleEarnAutoSubscribe(
+    productId: string,
+    autoSubscribe: boolean,
+  ): Promise<{ success: boolean }> {
+    if (!productId) {
+      throw new Error("Product ID is required");
+    }
+
+    // Binance API expects boolean as string "true" or "false"
+    const params: Record<string, unknown> = {
+      productId,
+      autoSubscribe: autoSubscribe ? "true" : "false",
+    };
+
+    return this.makeRequest<{ success: boolean }>(
+      "/sapi/v1/simple-earn/flexible/setAutoSubscribe",
+      "POST",
+      params,
+      true,
+    );
   }
 }

@@ -292,3 +292,67 @@ export interface OrderUpdateMessage extends WebSocketMessage {
   Y: string;
   Q: string;
 }
+
+// Simple Earn Flexible API Types
+export interface SimpleEarnFlexibleProduct {
+  productId: string;
+  asset: string;
+  latestAnnualPercentageRate: string;
+  minPurchaseAmount: string;
+  status: string;
+  canPurchase: boolean;
+  canRedeem: boolean;
+  tierAnnualPercentageRate?: Record<string, string>;
+}
+
+export interface SimpleEarnFlexibleProductListResponse {
+  rows: SimpleEarnFlexibleProduct[];
+  total: number;
+}
+
+export interface SimpleEarnFlexiblePosition {
+  productId: string;
+  asset: string;
+  totalAmount: string; // principal + interest
+  freeAmount: string; // available to redeem
+  freezeAmount: string; // locked (e.g., in redemption process)
+  redeemingAmount: string;
+  cumulativeBonusRewards: string;
+  cumulativeRealTimeRewards: string;
+  cumulativeTotalRewards: string;
+  collateralAmount?: string;
+  autoSubscribe?: boolean;
+}
+
+export interface SimpleEarnFlexiblePositionResponse {
+  rows: SimpleEarnFlexiblePosition[];
+  total: number;
+}
+
+export interface SimpleEarnSubscribeParams {
+  productId: string;
+  amount: number;
+  autoSubscribe?: boolean;
+}
+
+export interface SimpleEarnSubscribeResult {
+  purchaseId: number;
+  success: boolean;
+}
+
+export interface SimpleEarnRedeemParams {
+  productId: string;
+  amount?: number; // If not provided, redeems all
+  redeemAll?: boolean;
+  destAccount?: "SPOT" | "FUND";
+}
+
+export interface SimpleEarnRedeemResult {
+  redeemId: number;
+  success: boolean;
+}
+
+export interface SimpleEarnAutoSubscribeParams {
+  productId: string;
+  autoSubscribe: boolean;
+}

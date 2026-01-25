@@ -43,6 +43,7 @@ import {
   type StrategyConfig,
 } from "./src/config/strategy-config-loader.js";
 import { ProfitPoolService } from "./src/pool/profit-pool-service.js";
+import { EarnFlexService } from "./src/earn/earn-flex-service.js";
 
 import type { Database } from "./types/supabase.js";
 import { ConfigurationError } from "./src/config/index.js";
@@ -308,6 +309,10 @@ async function createOrchestratorForConfig(
     );
   }
 
+  // Create Earn Flex service for USDT/BTC earning
+  // This is independent of the pool - it manages Binance Simple Earn Flexible
+  const earnFlexService = new EarnFlexService(supabase, tradingClient);
+
   // Create config-specific cycle state manager
   const cycleStateManager = new CycleStateManager(
     supabase,
@@ -439,6 +444,9 @@ async function createOrchestratorForConfig(
     referencePriceCalculator: shared.referencePriceCalculator,
     buyAmountCalculator: shared.buyAmountCalculator,
     strategyConfig, // Pass config directly
+    earnFlexService, // Earn Flex for USDT/BTC earning
+    profitPoolService, // Profit pool for funding wallet transfers
+    poolConfig: strategyConfig.pool, // Pool configuration
     enableHealthMonitoring: true,
     healthCheckInterval: 60000,
     memoryThresholdMB: 500,

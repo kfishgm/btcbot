@@ -30,6 +30,9 @@ import type { StartupValidatorConfig } from "./startup-validator";
 import type { BinanceClient } from "../exchange/binance-client";
 import type { ValidationError } from "../types/validation";
 import { Logger } from "../utils/logger";
+import type { EarnFlexService } from "../earn/earn-flex-service";
+import type { ProfitPoolService } from "../pool/profit-pool-service";
+import type { PoolConfig } from "../types/pool.types";
 
 const logger = new Logger();
 
@@ -55,6 +58,9 @@ export interface OrchestratorConfig {
   referencePriceCalculator: ReferencePriceCalculator;
   buyAmountCalculator: BuyAmountCalculator;
   strategyConfig: StrategyConfig; // Now required - passed from pool
+  earnFlexService?: EarnFlexService; // Optional - for Earn Flex integration
+  profitPoolService?: ProfitPoolService; // Optional - for funding wallet transfers
+  poolConfig?: PoolConfig; // Optional - pool configuration for profit splitting
   enableHealthMonitoring?: boolean;
   healthCheckInterval?: number;
   memoryThresholdMB?: number;
@@ -94,6 +100,7 @@ export class MainOrchestrator extends EventEmitter {
   private health: OrchestratorHealth;
   private performanceMetrics: OrchestratorPerformanceMetrics;
   private healthCheckTimer?: NodeJS.Timeout;
+  private autoSubscribeCheckTimer?: NodeJS.Timeout;
   private startTime: number = Date.now();
   private strategyConfig: StrategyConfig; // Now always defined from config
   private startupValidator?: StartupValidator;
@@ -203,6 +210,70 @@ export class MainOrchestrator extends EventEmitter {
         this.emit("strategyPaused");
       }
 
+      // Initialize Earn Flex service if configured
+      if (this.config.earnFlexService) {
+        logger.info("Initializing Earn Flex service...");
+        await this.config.earnFlexService.initialize();
+
+        // Run reconciliation on startup
+        const reconciliation =
+          await this.config.earnFlexService.reconcileOnStartup(
+            this.strategyConfig.id,
+          );
+
+        if (reconciliation.warnings.length > 0) {
+          logger.warn("Earn Flex reconciliation warnings", {
+            warnings: reconciliation.warnings,
+          });
+        }
+
+        // Seed from cycle state if positions are empty but cycle has capital
+        const earnFlexTotal = reconciliation.accounting.usdt.total.add(
+          reconciliation.accounting.btc.total,
+        );
+        if (earnFlexTotal.eq(0) && cycleState) {
+          const capitalAvailable = cycleState.capital_available || 0;
+          const btcAccumulated = cycleState.btc_accumulated || 0;
+
+          if (capitalAvailable > 0 || btcAccumulated > 0) {
+            const seedResult =
+              await this.config.earnFlexService.seedFromCycleState(
+                this.strategyConfig.id,
+                new Decimal(capitalAvailable),
+                new Decimal(btcAccumulated),
+              );
+
+            if (seedResult.errors.length > 0) {
+              logger.warn("Earn Flex seeding errors", {
+                errors: seedResult.errors,
+              });
+            }
+
+            // Note: We DON'T zero out capital_available or btc_accumulated
+            // cycle_state tracks LOGICAL ownership (for trigger calculations)
+            // Earn Flex tracks PHYSICAL location (for operations)
+            // Both stay in sync: BUY/SELL decrement both by the same amount
+          }
+        }
+
+        // Set up daily auto-subscribe check (every 24 hours)
+        const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+        const earnFlexServiceRef = this.config.earnFlexService;
+        this.autoSubscribeCheckTimer = setInterval(async () => {
+          try {
+            const result =
+              await earnFlexServiceRef.ensureAutoSubscribeDisabled();
+            if (result.disabled > 0) {
+              logger.info("Auto-subscribe disabled", {
+                disabled: result.disabled,
+              });
+            }
+          } catch (error) {
+            logger.error("Failed auto-subscribe check", { error });
+          }
+        }, TWENTY_FOUR_HOURS_MS);
+      }
+
       // Initialize health monitoring if enabled
       if (this.config.enableHealthMonitoring) {
         this.initializeHealthMonitoring();
@@ -290,6 +361,12 @@ export class MainOrchestrator extends EventEmitter {
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = undefined;
+    }
+
+    // Stop auto-subscribe check timer
+    if (this.autoSubscribeCheckTimer) {
+      clearInterval(this.autoSubscribeCheckTimer);
+      this.autoSubscribeCheckTimer = undefined;
     }
 
     // Wait for current processing to complete
@@ -526,6 +603,31 @@ export class MainOrchestrator extends EventEmitter {
             },
           );
 
+          // ===============================================================
+          // PRE-SELL: Redeem BTC from Earn Flex (if integrated)
+          // ===============================================================
+          if (this.config.earnFlexService?.isInitialized()) {
+            const btcInEarn =
+              await this.config.earnFlexService.getAvailablePrincipal(
+                this.strategyConfig.id,
+                "BTC",
+              );
+            if (btcInEarn.gt(0)) {
+              const redeemResult = await this.config.earnFlexService.redeem(
+                this.strategyConfig.id,
+                "BTC",
+                btcInEarn,
+              );
+              if (redeemResult.success) {
+                logger.info("Redeemed BTC from Earn Flex for SELL", {
+                  configId: this.strategyConfig.id,
+                  redeemed: redeemResult.amountRedeemed.toString(),
+                  totalToSell: (workingState.btc_accumulated || 0).toString(),
+                });
+              }
+            }
+          }
+
           // Calculate reference price (average cost per BTC) for profit calculation
           const btcAccum = new Decimal(workingState.btc_accumulated);
           const costAccum = new Decimal(workingState.cost_accum_usdt || 0);
@@ -618,6 +720,93 @@ export class MainOrchestrator extends EventEmitter {
                     : 0) || 0,
               },
             });
+
+            // ===============================================================
+            // POST-SELL: Split profit and process reinvestment + funding
+            // ===============================================================
+            if (
+              "type" in updateResult &&
+              updateResult.type === "CREATE_NEW_CYCLE"
+            ) {
+              const totalCapital = new Decimal(
+                updateResult.completionData.carryOverCapital,
+              );
+
+              // Calculate profit split based on pool config (if available)
+              let toReinvestment = totalCapital;
+              let toFunding = new Decimal(0);
+
+              if (this.config.poolConfig?.enabled) {
+                const reinvestmentPct = new Decimal(
+                  this.config.poolConfig.reinvestmentPercentage,
+                ).div(100);
+                const fundingPct = new Decimal(
+                  this.config.poolConfig.fundingWalletPercentage,
+                ).div(100);
+
+                toReinvestment = totalCapital.mul(reinvestmentPct);
+                toFunding = totalCapital.mul(fundingPct);
+
+                logger.info("Splitting cycle completion capital", {
+                  configId: this.strategyConfig.id,
+                  cycleId: workingState.id,
+                  totalCapital: totalCapital.toString(),
+                  toReinvestment: toReinvestment.toString(),
+                  toFunding: toFunding.toString(),
+                  reinvestmentPct:
+                    this.config.poolConfig.reinvestmentPercentage,
+                  fundingPct: this.config.poolConfig.fundingWalletPercentage,
+                });
+              }
+
+              // Subscribe reinvestment portion to Earn Flex (if integrated)
+              if (
+                this.config.earnFlexService?.isInitialized() &&
+                toReinvestment.gt(0)
+              ) {
+                const subscribeResult =
+                  await this.config.earnFlexService.subscribe(
+                    this.strategyConfig.id,
+                    "USDT",
+                    toReinvestment,
+                    workingState.id, // Previous cycle ID for tracking
+                  );
+                if (subscribeResult.success) {
+                  logger.info("Subscribed USDT to Earn Flex (reinvestment)", {
+                    configId: this.strategyConfig.id,
+                    cycleId: workingState.id,
+                    reinvestment: toReinvestment.toString(),
+                    subscribed: subscribeResult.amountSubscribed.toString(),
+                    pending: subscribeResult.amountPending.toString(),
+                  });
+                }
+              }
+
+              // Process funding wallet portion (if pool is enabled)
+              if (
+                this.config.profitPoolService &&
+                this.config.poolConfig?.enabled &&
+                toFunding.gt(0)
+              ) {
+                try {
+                  await this.config.profitPoolService.processFundingWallet(
+                    toFunding,
+                  );
+                  logger.info("Processed funding wallet portion", {
+                    configId: this.strategyConfig.id,
+                    cycleId: workingState.id,
+                    funding: toFunding.toString(),
+                  });
+                } catch (fundingError) {
+                  // Log error but don't fail the cycle completion
+                  logger.error("Failed to process funding wallet", {
+                    error: fundingError,
+                    configId: this.strategyConfig.id,
+                    funding: toFunding.toString(),
+                  });
+                }
+              }
+            }
           }
         }
       }
@@ -678,6 +867,34 @@ export class MainOrchestrator extends EventEmitter {
             },
           );
 
+          // ===============================================================
+          // PRE-BUY: Redeem USDT from Earn Flex (if integrated)
+          // ===============================================================
+          if (this.config.earnFlexService?.isInitialized()) {
+            const buyAmount = new Decimal(buyUsdtAmount);
+            const usdtAvailable =
+              await this.config.earnFlexService.getAvailablePrincipal(
+                this.strategyConfig.id,
+                "USDT",
+              );
+            if (usdtAvailable.gt(0)) {
+              // Redeem exactly what we need (or all if less available)
+              const toRedeem = Decimal.min(buyAmount, usdtAvailable);
+              const redeemResult = await this.config.earnFlexService.redeem(
+                this.strategyConfig.id,
+                "USDT",
+                toRedeem,
+              );
+              if (redeemResult.success) {
+                logger.info("Redeemed USDT from Earn Flex for BUY", {
+                  configId: this.strategyConfig.id,
+                  redeemed: redeemResult.amountRedeemed.toString(),
+                  buyAmount: buyAmount.toString(),
+                });
+              }
+            }
+          }
+
           const buyOrderResult = await this.config.buyOrderPlacer.placeOrder(
             new Decimal(buyUsdtAmount),
             new Decimal(closePrice),
@@ -730,6 +947,34 @@ export class MainOrchestrator extends EventEmitter {
                 remaining: updatedState.purchases_remaining || 0,
               },
             });
+
+            // ===============================================================
+            // POST-BUY: Subscribe BTC to Earn Flex (if integrated)
+            // ===============================================================
+            if (this.config.earnFlexService?.isInitialized()) {
+              // Calculate net BTC after fees
+              const netBtc = buyOrderResult.executedQty.sub(
+                buyOrderResult.feeBTC || new Decimal(0),
+              );
+              if (netBtc.gt(0)) {
+                const subscribeResult =
+                  await this.config.earnFlexService.subscribe(
+                    this.strategyConfig.id,
+                    "BTC",
+                    netBtc,
+                    workingState.id,
+                  );
+                if (subscribeResult.success) {
+                  logger.info("Subscribed BTC to Earn Flex after BUY", {
+                    configId: this.strategyConfig.id,
+                    cycleId: workingState.id,
+                    amount: netBtc.toString(),
+                    subscribed: subscribeResult.amountSubscribed.toString(),
+                    pending: subscribeResult.amountPending.toString(),
+                  });
+                }
+              }
+            }
           }
         }
       }
